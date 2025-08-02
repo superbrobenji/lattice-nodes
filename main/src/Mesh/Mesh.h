@@ -8,6 +8,10 @@
 #include <esp_wifi.h>
 #include "src/Adapter/Adapter.h"
 
+namespace planetopia {
+namespace mesh {
+using planetopia::adapter::adapter_types;
+
 struct mesh_message {
   uint8_t originMacAddress[6];
   adapter_types dataType;
@@ -43,5 +47,7 @@ public:
 
   void linkDataRecvCallback(const std::function<void(mesh_message)> recvCallback);
 };
+}
+}
 
 #endif // MESH_H

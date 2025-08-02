@@ -1,6 +1,11 @@
 #include "Adapter.h"
 #include "src/utils/Logger.h"
 
+namespace planetopia {
+namespace adapter {
+
+using namespace planetopia::utils;
+
 Adapter::Adapter(int pin)
   : _pin(pin), _adapterType(UNKNOWN_ADAPTER), mesh_transmit_fn(nullptr) {
   Logger::logln("Adapter", "Base adapter initialized with UNKNOWN_ADAPTER");
@@ -27,4 +32,7 @@ void Adapter::setTransmitFn(TransmitPtr fn) {
 void Adapter::recvDataFromAdapter(uint8_t data[12]) {
   // Optional override – default does nothing
   Logger::logln("Adapter", "recvDataFromAdapter called (default, no-op)");
+}
+
+}
 }

@@ -1,5 +1,8 @@
-#define DEBUG 
+#define DEBUG
 #include "Logger.h"
+
+namespace planetopia {
+namespace utils {
 
 void Logger::log(const String& tag, const String& message) {
 #ifdef DEBUG
@@ -15,4 +18,7 @@ void Logger::logln(const String& tag, const String& message) {
 #ifdef DEBUG
   Serial.println();
 #endif
+}
+
+}
 }

@@ -2,12 +2,21 @@
 #include "src/Mesh/Mesh.h"
 #include "src/Adapter/AdapterFactory.h"
 #include "src/utils/Logger.h"
+#include "src/hardware/Led.h"
+
+using namespace planetopia::utils;
+using namespace planetopia::mesh;
+using namespace planetopia::adapter;
+using namespace planetopia::hardware;
 
 // Pins
-constexpr int redLed = 25;
-constexpr int greenLed = 26;
-constexpr int pirSensor = 27;
-constexpr int button = 33;
+constexpr int redLedPin = 25;
+constexpr int greenLedPin = 26;
+constexpr int pirSensorPin = 27;
+constexpr int buttonPin = 33;
+
+Led greenLed(greenLedPin);
+Led redLed(redLedPin);
 
 Mesh mesh;
 mesh_message transmissionMessage;
@@ -16,25 +25,20 @@ Adapter* adapter = nullptr;
 
 void dataRecvCallback(mesh_message message) {
   Logger::logln("MESH", "Data received callback triggered");
-  digitalWrite(greenLed, HIGH);
-  delay(500);
-  digitalWrite(greenLed, LOW);
+  greenLed.toggle();
 }
 
 void setup() {
   Serial.begin(115200);
   Logger::logln("MAIN", "Logger initialized");
 
-  pinMode(redLed, OUTPUT);
-  digitalWrite(redLed, LOW);
+  greenLed.init();
+  redLed.init();
 
-  pinMode(greenLed, OUTPUT);
-  digitalWrite(greenLed, LOW);
-
-  adapter = AdapterFactory::createAdapter(PIR_ADAPTER, pirSensor);
+  adapter = AdapterFactory::createAdapter(PIR_ADAPTER, pirSensorPin);
   if (!adapter) {
     Logger::logln("MAIN", "Failed to create adapter");
-    digitalWrite(redLed, HIGH); // Indicate error
+    redLed.on(); // Indicate error
     while (true) {
       delay(1000);
     }

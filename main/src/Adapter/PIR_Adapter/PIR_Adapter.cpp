@@ -1,6 +1,11 @@
 #include "PIR_Adapter.h"
 #include "src/utils/Logger.h"
 
+namespace planetopia {
+namespace adapter {
+
+using namespace planetopia::utils;
+
 PIR_Adapter* PIR_Adapter::instance = nullptr;
 
 PIR_Adapter::PIR_Adapter(int pin)
@@ -86,4 +91,7 @@ void PIR_Adapter::loop() {
     attachInterrupt(digitalPinToInterrupt(_pin), PIR_Adapter::detectMotionTrampoline, RISING);
     _interruptEnabled = true;
   }
+}
+
+}
 }

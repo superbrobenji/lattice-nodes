@@ -3,10 +3,15 @@
 
 #include <Arduino.h>
 
+namespace planetopia {
+namespace utils {
+
 class Logger {
 public:
   static void log(const String& tag, const String& message);
   static void logln(const String& tag, const String& message);
 };
 
+}
+}
 #endif

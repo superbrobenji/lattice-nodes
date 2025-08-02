@@ -3,6 +3,11 @@
 #include "src/utils/Logger.h"
 #include <esp_wifi.h>  // For esp_wifi_get_mac and esp_err_to_name
 
+namespace planetopia {
+namespace mesh {
+
+using namespace planetopia::utils;
+
 Mesh *Mesh::instance = nullptr;
 uint8_t Mesh::broadcastAddress[] = { 0xEC, 0x64, 0xC9, 0x5D, 0x22, 0x20 };
 
@@ -70,7 +75,7 @@ void Mesh::readMacAddress() {
 }
 
 void Mesh::printMac(const uint8_t mac[6]) {
- #ifdef DEBUG
+#ifdef DEBUG
   String macStr;
   for (int i = 0; i < 6; i++) {
     if (mac[i] < 0x10) macStr += "0";
@@ -136,4 +141,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t data[12]) {
 
 void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) {
   externalRecvCallback = recvCallback;
+}
+
+}
 }

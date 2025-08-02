@@ -3,6 +3,9 @@
 
 #include <Arduino.h>
 
+namespace planetopia {
+namespace adapter {
+
 // Enum for identifying adapter types
 enum adapter_types {
   UNKNOWN_ADAPTER = -1,
@@ -33,4 +36,6 @@ public:
   virtual void recvDataFromAdapter(uint8_t data[12]);  // Optional override
 };
 
+}
+}
 #endif

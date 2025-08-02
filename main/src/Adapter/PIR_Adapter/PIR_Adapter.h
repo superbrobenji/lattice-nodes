@@ -4,6 +4,9 @@
 #include <Arduino.h>
 #include "src/Adapter/Adapter.h"
 
+namespace planetopia {
+namespace adapter {
+
 class PIR_Adapter : public Adapter {
 private:
   int _pin;                    // GPIO pin for PIR sensor
@@ -18,7 +21,7 @@ private:
 
   static PIR_Adapter* instance;  // Singleton pointer for ISR redirection
 
-  static void detectMotionTrampoline();              // Static trampoline for ISR
+  static void detectMotionTrampoline();                                         // Static trampoline for ISR
   static void sendDataTrampoline(adapter_types adapterType, uint8_t data[12]);  // Static trampoline for Mesh messages
 
   void IRAM_ATTR detectMotion();  // Actual ISR logic (minimal)
@@ -28,5 +31,8 @@ public:
   void init() override;           // Sets up the PIR adapter
   void loop() override;           // Called repeatedly in Arduino loop
 };
+
+}
+}
 
 #endif
