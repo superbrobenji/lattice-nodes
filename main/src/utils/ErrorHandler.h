@@ -1,7 +1,7 @@
 #ifndef ERRORHANDLER_H
 #define ERRORHANDLER_H
 
-#include "src/hardware/Led.h"
+#include "src/hardware/output/Led.h"
 
 namespace planetopia {
 namespace utils {
@@ -21,7 +21,7 @@ class ErrorHandler {
 public:
   static ErrorHandler& getInstance();
 
-  void init(hardware::Led* errorLed);
+  void init(planetopia::hardware::Led* errorLed);
 
   void signalError(ErrorType errorType, const char* message = nullptr);
 
@@ -31,7 +31,7 @@ public:
 
 private:
   ErrorHandler();
-  hardware::Led* _errorLed;
+  planetopia::hardware::Led* _errorLed;
   bool _initialized;
 
   void blinkPattern(ErrorType errorType);

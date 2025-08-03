@@ -1,0 +1,26 @@
+#ifndef GPIO_IN
+#define GPIO_IN
+
+#include <Arduino.h>
+
+namespace planetopia {
+namespace hardware {
+
+class GpioInput {
+public:
+  explicit GpioInput(uint8_t pin);
+  virtual ~GpioInput() = default;
+
+  virtual bool init();
+  bool isValidInputPin(uint8_t pin) const;
+  bool isInitialized() const;
+
+protected:
+  uint8_t _pin;
+  bool _initialized;
+};
+
+}  // namespace hardware
+}  // namespace planetopia
+
+#endif

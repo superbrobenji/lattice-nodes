@@ -10,7 +10,7 @@ namespace mesh {
 using namespace planetopia::utils;
 
 Mesh *Mesh::instance = nullptr;
-uint8_t Mesh::broadcastAddress[] = { 0xEC, 0x64, 0xC9, 0x5D, 0x22, 0x20 };
+uint8_t Mesh::broadcastAddress[] = { 0xEC, 0x64, 0xC9, 0x5D, 0xAC, 0x18 };
 
 Mesh::Mesh() {}
 
@@ -22,23 +22,23 @@ void Mesh::printMeshMessage(const mesh_message &msg) {
     macStr += String(msg.originMacAddress[i], HEX);
     if (i < 5) macStr += ":";
   }
-  Logger::logln("MESH", "MAC: " + macStr);
+  Logger::logln("MESH", "MAC: " + macStr, LogLevel::LOG_DEBUG);
 
-  Logger::logln("MESH", "Data Type: " + String(msg.dataType));
+  Logger::logln("MESH", "Data Type: " + String(msg.dataType), LogLevel::LOG_DEBUG);
 
   String dataStr;
   for (int i = 0; i < 12; i++) {
     if (msg.data[i] < 0x10) dataStr += "0";
     dataStr += String(msg.data[i], HEX) + " ";
   }
-  Logger::logln("MESH", "Data: " + dataStr);
+  Logger::logln("MESH", "Data: " + dataStr, LogLevel::LOG_DEBUG);
 #endif
 }
 
 void Mesh::onDataSentCallback(const wifi_tx_info_t *mac_addr, esp_now_send_status_t status) {
 #ifdef DEBUG
   String statusStr = (status == ESP_NOW_SEND_SUCCESS) ? "Delivery Success" : "Delivery Fail";
-  Logger::logln("MESH", "Last Packet Send Status: " + statusStr);
+  Logger::logln("MESH", "Last Packet Send Status: " + statusStr, LogLevel::LOG_DEBUG);
 #endif
 }
 
@@ -53,7 +53,7 @@ void Mesh::onDataRecvCallback(const esp_now_recv_info *mac, const uint8_t *incom
   mesh_message dataToReceive;
   memcpy(&dataToReceive, incomingData, sizeof(dataToReceive));
 
-  Logger::logln("MESH", "Bytes received:");
+  Logger::logln("MESH", "Bytes received:", LogLevel::LOG_DEBUG);
   printMeshMessage(dataToReceive);
 
   if (externalRecvCallback) {
@@ -74,7 +74,7 @@ void Mesh::readMacAddress() {
       ErrorType::HARDWARE_FAILURE,
       ("MESH: Failed to read MAC address: " + String(esp_err_to_name(ret))).c_str());
   } else {
-    Logger::log("MESH", "Device MAC: ");
+    Logger::log("MESH", "Device MAC: ", LogLevel::LOG_DEBUG);
     printMac(deviceMacAddress);
   }
 }
@@ -87,7 +87,7 @@ void Mesh::printMac(const uint8_t mac[6]) {
     macStr += String(mac[i], HEX);
     if (i < 5) macStr += ":";
   }
-  Logger::logln("MESH", macStr);
+  Logger::logln("MESH", macStr, LogLevel::LOG_DEBUG);
 #endif
 }
 
@@ -104,7 +104,7 @@ bool Mesh::init() {
       ("MESH: Error initializing ESP-NOW: " + String(esp_err_to_name(espNowInit))).c_str());
     return false;
   }
-  Logger::logln("MESH", "ESP-NOW initialized successfully");
+  Logger::logln("MESH", "ESP-NOW initialized successfully", LogLevel::LOG_INFO);
 
   esp_now_register_send_cb(onDataSentCallback);
 
@@ -121,7 +121,7 @@ bool Mesh::init() {
         ("MESH: Peer add failed: " + String(esp_err_to_name(status))).c_str());
       return false;
     } else {
-      Logger::logln("MESH", "Peer added successfully");
+      Logger::logln("MESH", "Peer added successfully", LogLevel::LOG_INFO);
     }
   }
 
@@ -144,7 +144,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t data[12]) {
 
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&msg, sizeof(msg));
   if (result == ESP_OK) {
-    Logger::logln("MESH", "Sent with success");
+    Logger::logln("MESH", "Sent with success", LogLevel::LOG_DEBUG);
   } else {
     ErrorHandler::getInstance().signalError(
       ErrorType::COMMUNICATION_FAIL,

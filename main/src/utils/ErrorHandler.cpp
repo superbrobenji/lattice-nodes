@@ -25,6 +25,7 @@ void ErrorHandler::init(hardware::Led* errorLed) {
       planetopia::utils::ErrorType::HARDWARE_FAILURE,
       ("System recovered from unexpected reset, reason: " + String(reason)).c_str());
   }
+  Logger::logln("ErrorHandler", "Initialized with error LED", LogLevel::LOG_INFO);
 }
 
 void ErrorHandler::signalError(ErrorType errorType, const char* message) {
@@ -32,12 +33,12 @@ void ErrorHandler::signalError(ErrorType errorType, const char* message) {
     blinkPattern(errorType);
   }
   if (message) {
-    Logger::error("ERROR: %s", message);
+    Logger::logln("ErrorHandler", String("ERROR: ") + message, LogLevel::LOG_ERROR);
   }
 
   // If it's a severe error, attempt to restart
   if (shouldRestart(errorType)) {
-    Logger::error("System will attempt to restart due to severe error.");
+    Logger::logln("ErrorHandler", "System will attempt to restart due to severe error.", LogLevel::LOG_ERROR);
     restartDevice();
   }
 }
@@ -60,6 +61,7 @@ void ErrorHandler::blinkPattern(ErrorType errorType) {
   }
   if (_errorLed && _errorLed->isInitialized()) {
     _errorLed->blink(blinks, onTime, offTime);
+    Logger::logln("ErrorHandler", String("Error LED blinked with pattern: ") + String(blinks), LogLevel::LOG_DEBUG);
   }
 }
 
@@ -76,6 +78,7 @@ bool ErrorHandler::shouldRestart(ErrorType errorType) const {
 
 void ErrorHandler::restartDevice() {
   delay(500);  // Short delay for LED blink to be seen
+  Logger::logln("ErrorHandler", "Restarting device...", LogLevel::LOG_WARN);
   ESP.restart();
 }
 
