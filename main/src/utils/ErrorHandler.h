@@ -6,14 +6,15 @@
 namespace planetopia {
 namespace utils {
 
-enum class ErrorType {
-  GENERIC,
-  SENSOR_FAIL,
-  COMMUNICATION_FAIL,
-  MEMORY_ERROR,
-  CONFIG_ERROR,
-  HARDWARE_FAILURE,
-  // ...add as needed
+enum class ErrorType : uint8_t {
+  GENERIC = 0,
+  SENSOR_FAIL = 1,
+  COMMUNICATION_FAIL = 2,
+  MEMORY_ERROR = 3,
+  CONFIG_ERROR = 4,
+  HARDWARE_FAILURE = 5,
+  USER_ERROR = 6,
+  TIMEOUT_ERROR = 7
 };
 
 class ErrorHandler {

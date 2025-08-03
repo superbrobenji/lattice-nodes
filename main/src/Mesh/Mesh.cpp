@@ -91,7 +91,7 @@ void Mesh::printMac(const uint8_t mac[6]) {
 #endif
 }
 
-void Mesh::init() {
+bool Mesh::init() {
   instance = this;
   WiFi.mode(WIFI_STA);
 
@@ -102,7 +102,7 @@ void Mesh::init() {
     ErrorHandler::getInstance().signalError(
       ErrorType::COMMUNICATION_FAIL,
       ("MESH: Error initializing ESP-NOW: " + String(esp_err_to_name(espNowInit))).c_str());
-    return;
+    return false;
   }
   Logger::logln("MESH", "ESP-NOW initialized successfully");
 
@@ -119,12 +119,14 @@ void Mesh::init() {
       ErrorHandler::getInstance().signalError(
         ErrorType::COMMUNICATION_FAIL,
         ("MESH: Peer add failed: " + String(esp_err_to_name(status))).c_str());
+      return false;
     } else {
       Logger::logln("MESH", "Peer added successfully");
     }
   }
 
   esp_now_register_recv_cb(Mesh::dataRecvTrampoline);
+  return true;
 }
 
 void Mesh::transmit(const adapter_types type, const uint8_t data[12]) {

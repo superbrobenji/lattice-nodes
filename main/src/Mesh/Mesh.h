@@ -42,7 +42,7 @@ private:
 
 public:
   Mesh();
-  void init();
+  bool init();
   static void transmit(const adapter_types type, const uint8_t data[12]);
 
   void linkDataRecvCallback(const std::function<void(mesh_message)> recvCallback);

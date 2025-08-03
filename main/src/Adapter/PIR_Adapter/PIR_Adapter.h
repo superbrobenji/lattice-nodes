@@ -28,7 +28,7 @@ private:
 
 public:
   explicit PIR_Adapter(int pin);  // Constructor with pin assignment
-  void init() override;           // Sets up the PIR adapter
+  bool init() override;           // Sets up the PIR adapter
   void loop() override;           // Called repeatedly in Arduino loop
 };
 

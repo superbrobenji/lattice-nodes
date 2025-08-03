@@ -22,41 +22,38 @@ PIR_Adapter::PIR_Adapter(int pin)
   _adapterType = PIR_ADAPTER;
 }
 
-void PIR_Adapter::init() {
+bool PIR_Adapter::init() {
   if (_initialized) {
     Logger::logln("PIR_Adapter", "Warning: Already initialized.");
-    return;
+    return true;
   }
 
   if (_pin < 0 || _pin > 39) {
     ErrorHandler::getInstance().signalError(
       ErrorType::CONFIG_ERROR,
-      "PIR_Adapter: Invalid pin number."
-    );
-    return;
+      "PIR_Adapter: Invalid pin number.");
+    return false;
   }
 
   int irq = digitalPinToInterrupt(_pin);
   if (irq == NOT_AN_INTERRUPT) {
     ErrorHandler::getInstance().signalError(
       ErrorType::CONFIG_ERROR,
-      "PIR_Adapter: Selected pin does not support interrupts."
-    );
-    return;
+      "PIR_Adapter: Selected pin does not support interrupts.");
+    return false;
   }
 
   instance = this;
   pinMode(_pin, INPUT_PULLUP);
-
-  // Attaching the interrupt is hardware-related, so if it fails, call it HARDWARE_FAILURE.
-  // attachInterrupt does not return an error, but if you had logic to check for success, use HARDWARE_FAILURE here.
   attachInterrupt(irq, PIR_Adapter::detectMotionTrampoline, RISING);
 
   _interruptEnabled = true;
   _initialized = true;
 
   Logger::logln("PIR_Adapter", "Initialized successfully on pin " + String(_pin));
+  return true;
 }
+
 
 void PIR_Adapter::detectMotionTrampoline() {
   if (instance) instance->detectMotion();
@@ -103,8 +100,7 @@ void PIR_Adapter::loop() {
       // This is a hardware failure if a pin that previously worked now doesn't.
       ErrorHandler::getInstance().signalError(
         ErrorType::HARDWARE_FAILURE,
-        "PIR_Adapter: Could not re-attach interrupt (possible hardware error)"
-      );
+        "PIR_Adapter: Could not re-attach interrupt (possible hardware error)");
       return;
     }
     attachInterrupt(irq, PIR_Adapter::detectMotionTrampoline, RISING);

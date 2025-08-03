@@ -70,8 +70,7 @@ bool Led::blink(uint8_t times, unsigned int onTimeMs, unsigned int offTimeMs) {
     if (this != _systemErrorLed) {
       ErrorHandler::getInstance().signalError(
         ErrorType::HARDWARE_FAILURE,
-        "Led: blink() called before initialization"
-      );
+        "Led: blink() called before initialization");
     }
     return false;
   }

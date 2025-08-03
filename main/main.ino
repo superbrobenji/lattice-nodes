@@ -41,7 +41,7 @@ void setup() {
     // Try to use green LED if possible
     if (greenLed.init()) {
       while (true) {
-        greenLed.blink(6, 100, 100); // 6 quick blinks: fatal hardware error
+        greenLed.blink(6, 100, 100);  // 6 quick blinks: fatal hardware error
         delay(1000);
       }
     } else {
@@ -58,8 +58,7 @@ void setup() {
     if (!greenLed.init()) {
       ErrorHandler::getInstance().signalError(
         ErrorType::HARDWARE_FAILURE,
-        "MAIN: Failed to initialize green LED"
-      );
+        "MAIN: Failed to initialize green LED");
       while (true) {
         delay(1000);
       }
@@ -70,9 +69,7 @@ void setup() {
   if (!adapter) {
     ErrorHandler::getInstance().signalError(
       ErrorType::HARDWARE_FAILURE,
-      "MAIN: Failed to create PIR adapter"
-    );
-    // Signal persistent error via red LED using ErrorHandler
+      "MAIN: Failed to create PIR adapter");
     while (true) {
       redLed.blink(3, 150, 150);
       delay(800);
@@ -80,10 +77,26 @@ void setup() {
   }
   Logger::logln("MAIN", "Adapter created");
 
-  adapter->init();
+  if (!adapter->init()) {
+    ErrorHandler::getInstance().signalError(
+      ErrorType::HARDWARE_FAILURE,
+      "MAIN: Adapter failed to initialize");
+    while (true) {
+      redLed.blink(6, 100, 100);
+      delay(1000);
+    }
+  }
   Logger::logln("MAIN", "Adapter initialized");
 
-  mesh.init();
+  if (!mesh.init()) {
+    ErrorHandler::getInstance().signalError(
+      ErrorType::COMMUNICATION_FAIL,
+      "MAIN: Mesh failed to initialize");
+    while (true) {
+      redLed.blink(3, 150, 150);
+      delay(800);
+    }
+  }
   Logger::logln("MESH", "Mesh initialized");
   adapter->setTransmitFn(mesh.transmit);
 

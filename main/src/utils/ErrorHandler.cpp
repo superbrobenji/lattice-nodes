@@ -48,13 +48,15 @@ void ErrorHandler::blinkPattern(ErrorType errorType) {
   unsigned int offTime = 200;
 
   switch (errorType) {
-    case ErrorType::GENERIC:            blinks = 1; break;
-    case ErrorType::SENSOR_FAIL:        blinks = 2; break;
+    case ErrorType::GENERIC: blinks = 1; break;
+    case ErrorType::SENSOR_FAIL: blinks = 2; break;
     case ErrorType::COMMUNICATION_FAIL: blinks = 3; break;
-    case ErrorType::MEMORY_ERROR:       blinks = 4; break;
-    case ErrorType::CONFIG_ERROR:       blinks = 5; break;
-    case ErrorType::HARDWARE_FAILURE:   blinks = 6; break;
-    default:                            blinks = 1; break;
+    case ErrorType::MEMORY_ERROR: blinks = 4; break;
+    case ErrorType::CONFIG_ERROR: blinks = 5; break;
+    case ErrorType::HARDWARE_FAILURE: blinks = 6; break;
+    case ErrorType::USER_ERROR: blinks = 7; break;
+    case ErrorType::TIMEOUT_ERROR: blinks = 8; break;
+    default: blinks = 1; break;
   }
   if (_errorLed && _errorLed->isInitialized()) {
     _errorLed->blink(blinks, onTime, offTime);

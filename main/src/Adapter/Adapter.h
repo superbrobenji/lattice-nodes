@@ -31,7 +31,7 @@ public:
   void sendDataThroughMesh(const adapter_types type, const uint8_t data[12]);  // sends data through mesh
   void setTransmitFn(TransmitPtr fn);
 
-  virtual void init() = 0;                             // To be implemented by derived classes
+  virtual bool init() = 0;                             // To be implemented by derived classes
   virtual void loop() = 0;                             // Called repeatedly in the main loop
   virtual void recvDataFromAdapter(uint8_t data[12]);  // Optional override
 };

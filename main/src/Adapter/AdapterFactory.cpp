@@ -8,6 +8,10 @@ namespace adapter {
 using namespace planetopia::utils;
 
 Adapter* AdapterFactory::createAdapter(adapter_types type, int pin) {
+  if (!newAdapter) {
+    ErrorHandler::getInstance().signalError(ErrorType::MEMORY_ERROR, "AdapterFactory: Out of memory creating adapter");
+    return nullptr;
+  }
   switch (type) {
     case PIR_ADAPTER:
       Logger::logln("Factory", "Creating PIR_Adapter");

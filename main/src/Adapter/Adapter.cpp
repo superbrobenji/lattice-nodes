@@ -37,5 +37,10 @@ void Adapter::recvDataFromAdapter(uint8_t data[12]) {
   Logger::logln("Adapter", "recvDataFromAdapter called (default, no-op)");
 }
 
+bool Adapter::init() {
+  // Base class default (no-op)
+  return true;
+}
+
 }
 }
