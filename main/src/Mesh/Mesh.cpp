@@ -104,7 +104,10 @@ void Mesh::loadPeersFromEEPROM() {
 }
 
 void Mesh::savePeersToEEPROM() {
-  EEPROM.begin(EEPROM_SIZE);
+  if (!EEPROM.begin(EEPROM_SIZE)) {
+    ErrorHandler::getInstance().signalError(ErrorType::MEMORY_ERROR, "EEPROM.begin failed in savePeersToEEPROM");
+    return;
+  }
   // Wipe previous list
   for (int i = 0; i < MAX_PEERS * 6; ++i) {
     EEPROM.write(EEPROM_PEERLIST_ADDR + i, 0xFF);
@@ -119,19 +122,34 @@ void Mesh::savePeersToEEPROM() {
 }
 
 void Mesh::addPeerToEEPROM(const uint8_t mac[6]) {
-  // Only add if not present!
   if (findPeer(mac) || macEquals(mac, deviceMacAddress)) return;
+
+  if (peerMacs.size() >= MAX_PEERS) {
+    ErrorHandler::getInstance().signalError(
+      ErrorType::MEMORY_ERROR,
+      "Peer list full! Cannot add new peer. MAX_PEERS reached.");
+    return;
+  }
+
   PeerInfo peer;
   memcpy(peer.mac, mac, 6);
   peer.lastSeenMillis = millis();
   peerMacs.push_back(peer);
   savePeersToEEPROM();
+
   esp_now_peer_info_t info = {};
   memcpy(info.peer_addr, mac, 6);
   info.channel = 0;
   info.encrypt = true;
   memcpy(info.lmk, meshKey, MESH_KEY_SIZE);
-  esp_now_add_peer(&info);
+  esp_err_t result = esp_now_add_peer(&info);
+  if (result != ESP_OK) {
+    ErrorHandler::getInstance().signalError(
+      ErrorType::COMMUNICATION_FAIL,
+      ("Failed to add ESP-NOW peer in addPeerToEEPROM: " + String(esp_err_to_name(result))).c_str());
+  } else {
+    Logger::logln("MESH", "Peer added for encryption", LogLevel::LOG_DEBUG);
+  }
 }
 
 void Mesh::removePeerFromEEPROM(const uint8_t mac[6]) {
@@ -142,7 +160,12 @@ void Mesh::removePeerFromEEPROM(const uint8_t mac[6]) {
     }
   }
   savePeersToEEPROM();
-  esp_now_del_peer(mac);
+  esp_err_t result = esp_now_del_peer(mac);
+  if (result != ESP_OK) {
+    ErrorHandler::getInstance().signalError(ErrorType::COMMUNICATION_FAIL, ("Failed to add ESP-NOW peer: " + String(esp_err_to_name(result))).c_str());
+  } else {
+    Logger::logln("MESH", "Added ESP-NOW peer.", LogLevel::LOG_DEBUG);
+  }
 }
 
 PeerInfo* Mesh::findPeer(const uint8_t mac[6]) {
@@ -208,7 +231,12 @@ bool Mesh::init() {
     info.channel = 0;
     info.encrypt = true;
     memcpy(info.lmk, meshKey, MESH_KEY_SIZE);
-    esp_now_add_peer(&info);
+    esp_err_t result = esp_now_add_peer(&info);
+    if (result != ESP_OK) {
+      ErrorHandler::getInstance().signalError(ErrorType::COMMUNICATION_FAIL, ("Failed to add ESP-NOW peer: " + String(esp_err_to_name(result))).c_str());
+    } else {
+      Logger::logln("MESH", "Added ESP-NOW peer.", LogLevel::LOG_DEBUG);
+    }
   }
   Logger::logln("MESH", "ESP-NOW initialized successfully", LogLevel::LOG_INFO);
 
@@ -392,14 +420,20 @@ void Mesh::removePeer(const uint8_t mac[6]) {
 }
 
 void Mesh::loadMeshKeyFromEEPROM() {
-  EEPROM.begin(EEPROM_SIZE);
+  if (!EEPROM.begin(EEPROM_SIZE)) {
+    ErrorHandler::getInstance().signalError(ErrorType::MEMORY_ERROR, "EEPROM.begin failed in loadMeshKeyFromEEPROM");
+    return;
+  }
   bool unset = true;
   for (int i = 0; i < MESH_KEY_SIZE; ++i) {
     meshKey[i] = EEPROM.read(EEPROM_KEY_ADDR + i);
     if (meshKey[i] != 0xFF) unset = false;
   }
   EEPROM.end();
+
   if (unset) {
+    ErrorHandler::getInstance().signalError(ErrorType::CONFIG_ERROR, "Mesh encryption key was unset, using default. This is insecure for production!");
+
     // Key is unset, use default or halt mesh comms
     // Example default, CHANGE THIS FOR PRODUCTION
     const uint8_t defaultKey[MESH_KEY_SIZE] = { 0xBA, 0xAD, 0xF0, 0x0D, 0xBE, 0xEF, 0xC0, 0xDE, 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFA, 0xCE };
