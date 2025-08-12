@@ -3,29 +3,47 @@
 #include <Arduino.h>
 #include <esp_system.h>
 
+using planetopia::core::ErrorTypeDigit;
+using planetopia::core::ModuleDigit;
+using planetopia::core::makeErrorCode;
+
 namespace planetopia {
 namespace utils {
 
 ErrorHandler::ErrorHandler()
-  : _errorLed(nullptr), _initialized(false) {}
+  : _errorLed(nullptr), _display(nullptr), _initialized(false) {}
 
 ErrorHandler& ErrorHandler::getInstance() {
   static ErrorHandler instance;
   return instance;
 }
 
-void ErrorHandler::init(hardware::Led* errorLed) {
+void ErrorHandler::init(hardware::Led* errorLed, hardware::SevenSegDisplay* display) {
   _errorLed = errorLed;
+  _display  = display;
   _initialized = (_errorLed != nullptr);
 
   auto reason = esp_reset_reason();
   if (reason != ESP_RST_POWERON && reason != ESP_RST_SW && reason != ESP_RST_EXT) {
-    // Device did NOT boot from normal power-on or clean restart.
-    planetopia::utils::ErrorHandler::getInstance().signalError(
-      planetopia::utils::ErrorType::HARDWARE_FAILURE,
-      ("System recovered from unexpected reset, reason: " + String(reason)).c_str());
+    signalError(ErrorTypeDigit::HARDWARE, ModuleDigit::CORE, 1, "Unexpected reset");
   }
-  Logger::logln("ErrorHandler", "Initialized with error LED", LogLevel::LOG_INFO);
+  Logger::logln("ErrorHandler", "Initialized", LogLevel::LOG_INFO);
+}
+
+void ErrorHandler::signalError(ErrorTypeDigit t, ModuleDigit mod, uint8_t sub, const char* msg) {
+  uint16_t code = makeErrorCode(t, mod, sub);
+
+  if (_display) {
+    _display->show(static_cast<int>(code));
+  }
+  // fallback to LED pattern using first digit mapping
+  ErrorType legacyType = ErrorType::GENERIC;
+  if (t == ErrorTypeDigit::HARDWARE) legacyType = ErrorType::HARDWARE_FAILURE;
+  else if (t == ErrorTypeDigit::COMM) legacyType = ErrorType::COMMUNICATION_FAIL;
+  else if (t == ErrorTypeDigit::MEMORY) legacyType = ErrorType::MEMORY_ERROR;
+  else if (t == ErrorTypeDigit::CONFIG) legacyType = ErrorType::CONFIG_ERROR;
+
+  signalError(legacyType, msg); // reuse legacy implementation for LED / restart
 }
 
 void ErrorHandler::signalError(ErrorType errorType, const char* message) {
@@ -36,9 +54,8 @@ void ErrorHandler::signalError(ErrorType errorType, const char* message) {
     Logger::logln("ErrorHandler", String("ERROR: ") + message, LogLevel::LOG_ERROR);
   }
 
-  // If it's a severe error, attempt to restart
   if (shouldRestart(errorType)) {
-    Logger::logln("ErrorHandler", "System will attempt to restart due to severe error.", LogLevel::LOG_ERROR);
+    Logger::logln("ErrorHandler", "System restart due to severe error", LogLevel::LOG_ERROR);
     restartDevice();
   }
 }

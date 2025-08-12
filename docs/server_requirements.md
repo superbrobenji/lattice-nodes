@@ -243,4 +243,9 @@ for {
 ### Security
 - This protocol is not authenticated. For production, consider adding an application-level signature/MAC inside the 12-byte `data` or switching to an encrypted host link.
 
+### 2025-02 Encryption & Beacon notes
+
+* All ESP-NOW frames are **AES-encrypted**.  The LMK is the 16-byte `DEFAULT_MESH_KEY` in `project_config.h` and is identical on every node.  The server must either know this key or treat frames as opaque binary.
+* Every master beacon is now sent **twice**: once as raw broadcast (ESP-NOW addr=`FF:FF:FF:FF:FF:FF`) and once unicast to each peer.  Gateways should ignore the broadcast copy when proxying traffic to the cloud to avoid duplicates.
+
 

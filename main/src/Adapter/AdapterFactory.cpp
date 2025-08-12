@@ -1,7 +1,7 @@
 #include "AdapterFactory.h"
-#include "src/utils/Logger.h"
-#include "src/utils/ErrorHandler.h"
-#include <EEPROM.h>
+#include "src/core/Logger.h"
+#include "src/core/ErrorHandler.h"
+#include "src/persistence/EEPROM_Manager.h"
 // Include all adapter headers
 #include "src/Adapter/PIR_Adapter/PIR_Adapter.h"
 #include "src/Adapter/Serial_Adapter/Serial_Adapter.h"
@@ -10,6 +10,14 @@ namespace planetopia {
 namespace adapter {
 
 using namespace planetopia::utils;
+
+// Static dev mode flag
+static bool isDevMode = false;
+
+void AdapterFactory::setDevMode(bool isDev) {
+  isDevMode = isDev;
+  Logger::logln("Factory", String("Dev mode ") + (isDev ? "enabled" : "disabled"), LogLevel::LOG_INFO);
+}
 
 Adapter* AdapterFactory::createAdapter(adapter_types type, int pin) {
   switch (type) {
@@ -38,22 +46,23 @@ Adapter* AdapterFactory::createAdapter(adapter_types type, int pin) {
   }
 }
 
-static constexpr int EEPROM_SIZE_FACTORY = 128;
-static constexpr int ADAPTER_TYPE_ADDR_FACTORY = 8;
-
 adapter_types AdapterFactory::loadAdapterTypeFromEEPROM() {
-  EEPROM.begin(EEPROM_SIZE_FACTORY);
-  uint8_t v = EEPROM.read(ADAPTER_TYPE_ADDR_FACTORY);
-  EEPROM.end();
-  if (v == 0xFF) return PIR_ADAPTER;  // default
-  return static_cast<adapter_types>(static_cast<int8_t>(v));
+  if (isDevMode) {
+    Logger::logln("Factory", "Dev mode: returning default PIR adapter type", LogLevel::LOG_DEBUG);
+    return PIR_ADAPTER;  // Always return default in dev mode
+  }
+
+  uint8_t adapterType = EEPROM_Manager::getInstance().loadAdapterType();
+  return static_cast<adapter_types>(static_cast<int8_t>(adapterType));
 }
 
 void AdapterFactory::saveAdapterTypeToEEPROM(adapter_types type) {
-  EEPROM.begin(EEPROM_SIZE_FACTORY);
-  EEPROM.write(ADAPTER_TYPE_ADDR_FACTORY, static_cast<uint8_t>(static_cast<int8_t>(type)));
-  EEPROM.commit();
-  EEPROM.end();
+  if (isDevMode) {
+    Logger::logln("Factory", "Dev mode: skipping EEPROM save for adapter type", LogLevel::LOG_DEBUG);
+    return;  // Don't save to EEPROM in dev mode
+  }
+
+  EEPROM_Manager::getInstance().saveAdapterType(static_cast<uint8_t>(static_cast<int8_t>(type)));
 }
 
 Adapter* AdapterFactory::createFromEEPROM() {
@@ -63,14 +72,16 @@ Adapter* AdapterFactory::createFromEEPROM() {
 }
 
 void AdapterFactory::initializeDefaultsIfUnset() {
-  // If adapter type unset (0xFF), set default PIR
-  EEPROM.begin(EEPROM_SIZE_FACTORY);
-  uint8_t v = EEPROM.read(ADAPTER_TYPE_ADDR_FACTORY);
-  if (v == 0xFF) {
-    EEPROM.write(ADAPTER_TYPE_ADDR_FACTORY, static_cast<uint8_t>(static_cast<int8_t>(PIR_ADAPTER)));
-    EEPROM.commit();
+  if (isDevMode) {
+    Logger::logln("Factory", "Dev mode: skipping EEPROM initialization", LogLevel::LOG_DEBUG);
+    return;  // Don't initialize EEPROM in dev mode
   }
-  EEPROM.end();
+
+  // Check if adapter type is unset (0xFF) and set default if needed
+  uint8_t currentType = EEPROM_Manager::getInstance().loadAdapterType();
+  if (currentType == 0xFF) {
+    EEPROM_Manager::getInstance().saveAdapterType(static_cast<uint8_t>(static_cast<int8_t>(PIR_ADAPTER)));
+  }
 }
 
 int AdapterFactory::getDefaultPinForAdapter(adapter_types type) {

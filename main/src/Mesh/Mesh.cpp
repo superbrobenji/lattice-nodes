@@ -1,9 +1,11 @@
 #include "Mesh.h"
-#include "src/utils/Logger.h"
-#include "src/utils/ErrorHandler.h"
-#include <esp_wifi.h>
+#include "src/core/Logger.h"
+#include "src/core/ErrorHandler.h"
+#include "src/persistence/EEPROM_Manager.h"
+#include <esp_now.h>
+#include <WiFi.h>
 #include <cstring>
-#include <EEPROM.h>
+#include "../../project_config.h"
 
 namespace planetopia {
 namespace mesh {
@@ -15,6 +17,16 @@ Mesh* Mesh::instance = nullptr;
 // --- Helper: MAC equality ---
 static bool macEquals(const uint8_t* a, const uint8_t* b) {
   return std::memcmp(a, b, 6) == 0;
+}
+
+static void registerPeerWithEspNow(const uint8_t mac[6], const uint8_t* lmk) {
+  if (esp_now_is_peer_exist(mac)) return;
+  esp_now_peer_info_t info = {};
+  memcpy(info.peer_addr, mac, 6);
+  info.channel = 0;
+  info.encrypt = true;
+  memcpy(info.lmk, lmk, 16);
+  esp_now_add_peer(&info);
 }
 
 Mesh::Mesh()
@@ -84,41 +96,51 @@ void Mesh::printMeshMessage(const mesh_message& msg) {
 // --- EEPROM Peer Management ---
 void Mesh::loadPeersFromEEPROM() {
   peerMacs.clear();
-  EEPROM.begin(EEPROM_SIZE);
-  for (int i = 0; i < MAX_PEERS; ++i) {
-    uint8_t mac[6];
-    bool allFF = true, all00 = true;
-    for (int j = 0; j < 6; ++j) {
-      mac[j] = EEPROM.read(EEPROM_PEERLIST_ADDR + i * 6 + j);
-      if (mac[j] != 0xFF) allFF = false;
-      if (mac[j] != 0x00) all00 = false;
+
+  uint8_t peerList[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_MAC_SIZE];
+  bool eepromOk = EEPROM_Manager::getInstance().loadPeerList(peerList, EEPROM_SIZES::MAX_PEERS);
+
+  if (eepromOk) {
+    for (int i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
+      bool valid = true;
+      uint8_t mac[6];
+      for (int j = 0; j < 6; ++j) {
+        mac[j] = peerList[i * 6 + j];
+        if (mac[j] == 0xFF) valid = false; // treat 0xFF as empty
+      }
+      if (valid) {
+        PeerInfo peer;
+        memcpy(peer.mac, mac, 6);
+        peer.lastSeenMillis = 0;
+        peerMacs.push_back(peer);
+      }
     }
-    if (!allFF && !all00) {
+  }
+
+  // Fallback in dev mode or when list is empty
+  if (peerMacs.empty()) {
+    Logger::logln("MESH", "Peer list empty; loading defaults from config", LogLevel::LOG_INFO);
+    for (int i = 0; i < planetopia::config::NUM_DEFAULT_PEERS; ++i) {
       PeerInfo peer;
-      memcpy(peer.mac, mac, 6);
-      peer.lastSeenMillis = 0;  // will update at runtime
+      memcpy(peer.mac, planetopia::config::DEFAULT_PEERS[i], 6);
+      peer.lastSeenMillis = 0;
       peerMacs.push_back(peer);
     }
   }
-  EEPROM.end();
 }
 
 void Mesh::savePeersToEEPROM() {
-  if (!EEPROM.begin(EEPROM_SIZE)) {
-    ErrorHandler::getInstance().signalError(ErrorType::MEMORY_ERROR, "EEPROM.begin failed in savePeersToEEPROM");
-    return;
-  }
-  // Wipe previous list
-  for (int i = 0; i < MAX_PEERS * 6; ++i) {
-    EEPROM.write(EEPROM_PEERLIST_ADDR + i, 0xFF);
-  }
-  for (size_t i = 0; i < peerMacs.size() && i < MAX_PEERS; ++i) {
+  // Convert peer list to flat array for EEPROM_Manager
+  uint8_t peerList[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_MAC_SIZE];
+  memset(peerList, 0xFF, sizeof(peerList));  // Initialize with 0xFF
+
+  for (size_t i = 0; i < peerMacs.size() && i < EEPROM_SIZES::MAX_PEERS; ++i) {
     for (int j = 0; j < 6; ++j) {
-      EEPROM.write(EEPROM_PEERLIST_ADDR + i * 6 + j, peerMacs[i].mac[j]);
+      peerList[i * 6 + j] = peerMacs[i].mac[j];
     }
   }
-  EEPROM.commit();
-  EEPROM.end();
+
+  EEPROM_Manager::getInstance().savePeerList(peerList, peerMacs.size());
 }
 
 void Mesh::addPeerToEEPROM(const uint8_t mac[6]) {
@@ -136,6 +158,7 @@ void Mesh::addPeerToEEPROM(const uint8_t mac[6]) {
   peer.lastSeenMillis = millis();
   peerMacs.push_back(peer);
   savePeersToEEPROM();
+  registerPeerWithEspNow(peer.mac, meshKey);
 
   esp_now_peer_info_t info = {};
   memcpy(info.peer_addr, mac, 6);
@@ -210,6 +233,7 @@ mesh_message Mesh::buildMessage(adapter_types type, const uint8_t data[12], Mesh
 bool Mesh::init() {
   instance = this;
   WiFi.mode(WIFI_STA);
+  esp_wifi_set_channel(planetopia::config::WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
 
   readMacAddress();
 
@@ -225,18 +249,11 @@ bool Mesh::init() {
     return false;
   }
 
-  for (const auto& peer : peerMacs) {
-    esp_now_peer_info_t info = {};
-    memcpy(info.peer_addr, peer.mac, 6);
-    info.channel = 0;
-    info.encrypt = true;
-    memcpy(info.lmk, meshKey, MESH_KEY_SIZE);
-    esp_err_t result = esp_now_add_peer(&info);
-    if (result != ESP_OK) {
-      ErrorHandler::getInstance().signalError(ErrorType::COMMUNICATION_FAIL, ("Failed to add ESP-NOW peer: " + String(esp_err_to_name(result))).c_str());
-    } else {
-      Logger::logln("MESH", "Added ESP-NOW peer.", LogLevel::LOG_DEBUG);
-    }
+  // Set primary master key for encryption
+  esp_now_set_pmk(meshKey);
+
+  for (auto& p : peerMacs) {
+    registerPeerWithEspNow(p.mac, meshKey);
   }
   Logger::logln("MESH", "ESP-NOW initialized successfully", LogLevel::LOG_INFO);
 
@@ -402,10 +419,15 @@ void Mesh::broadcastMasterBeacon() {
   lastBeaconMillis = now;
 
   mesh_message beacon = buildMessage(planetopia::adapter::UNKNOWN_ADAPTER, nullptr, MESH_TYPE_MASTER_BEACON);
-  beacon.data[0] = 1;  // protocolVersion, optional
+  beacon.data[0] = 1;  // protocolVersion
   beacon.hopCount = 0;
 
+  // Always send a broadcast frame so new nodes can discover the master even
+  // when they are not yet in the peer list.
+  esp_err_t br = esp_now_send(nullptr, (uint8_t*)&beacon, sizeof(beacon));
+  Logger::logln("MESH", String("Beacon broadcast ") + (br==ESP_OK?"OK":"FAIL"), LogLevel::LOG_DEBUG);
 
+  // Then unicast to known peers for reliability
   broadcastToAllPeers(beacon);
 }
 
@@ -417,6 +439,7 @@ void Mesh::addPeer(const uint8_t mac[6]) {
     p.lastSeenMillis = 0;
     peerMacs.push_back(p);
     savePeersToEEPROM();
+    registerPeerWithEspNow(p.mac, meshKey);
   }
 }
 void Mesh::removePeer(const uint8_t mac[6]) {
@@ -424,35 +447,43 @@ void Mesh::removePeer(const uint8_t mac[6]) {
 }
 
 void Mesh::loadMeshKeyFromEEPROM() {
-  if (!EEPROM.begin(EEPROM_SIZE)) {
-    ErrorHandler::getInstance().signalError(ErrorType::MEMORY_ERROR, "EEPROM.begin failed in loadMeshKeyFromEEPROM");
-    return;
+  // Attempt to load mesh key from EEPROM
+  if (!EEPROM_Manager::getInstance().loadMeshKey(meshKey, MESH_KEY_SIZE)) {
+    Logger::logln("MESH", "EEPROM read failed, using default mesh key", LogLevel::LOG_WARN);
   }
+
+  // If in DEV_MODE always override with compile-time key
+  if (planetopia::config::DEV_MODE) {
+    memcpy(meshKey, planetopia::config::DEFAULT_MESH_KEY, MESH_KEY_SIZE);
+    Logger::logln("MESH", "DEV_MODE: Overriding mesh key with compile-time default", LogLevel::LOG_INFO);
+  }
+
+  // Check if key is unset (all 0xFF or all 0x00)
   bool unset = true;
   for (int i = 0; i < MESH_KEY_SIZE; ++i) {
-    meshKey[i] = EEPROM.read(EEPROM_KEY_ADDR + i);
-    if (meshKey[i] != 0xFF) unset = false;
+    if (meshKey[i] != 0xFF && meshKey[i] != 0x00) {
+      unset = false;
+      break;
+    }
   }
-  EEPROM.end();
 
   if (unset) {
-    ErrorHandler::getInstance().signalError(ErrorType::CONFIG_ERROR, "Mesh encryption key was unset, using default. This is insecure for production!");
-
-    // Key is unset, use default or halt mesh comms
-    // Example default, CHANGE THIS FOR PRODUCTION
-    const uint8_t defaultKey[MESH_KEY_SIZE] = { 0xBA, 0xAD, 0xF0, 0x0D, 0xBE, 0xEF, 0xC0, 0xDE, 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFA, 0xCE };
-    memcpy(meshKey, defaultKey, MESH_KEY_SIZE);
-    saveMeshKeyToEEPROM(meshKey);
-    Logger::logln("MESH", "Mesh key unset, using default and saving to EEPROM!", LogLevel::LOG_WARN);
+    Logger::logln("MESH", "Mesh key unset, loading default from config", LogLevel::LOG_INFO);
+    memcpy(meshKey, planetopia::config::DEFAULT_MESH_KEY, MESH_KEY_SIZE);
+    saveMeshKeyToEEPROM(meshKey); // Will be skipped automatically in dev mode
   }
 }
 
 void Mesh::saveMeshKeyToEEPROM(const uint8_t* key) {
-  EEPROM.begin(EEPROM_SIZE);
-  for (int i = 0; i < MESH_KEY_SIZE; ++i)
-    EEPROM.write(EEPROM_KEY_ADDR + i, key[i]);
-  EEPROM.commit();
-  EEPROM.end();
+  EEPROM_Manager::getInstance().saveMeshKey(key, MESH_KEY_SIZE);
+}
+
+// Generate a new random 16-byte mesh key
+void Mesh::generateRandomMeshKey() {
+  for (int i = 0; i < MESH_KEY_SIZE; ++i) {
+    meshKey[i] = static_cast<uint8_t>(esp_random() & 0xFF);
+  }
+  Logger::logln("MESH", "Generated new random mesh key", LogLevel::LOG_DEBUG);
 }
 
 bool Mesh::meshKeyIsSet() const {
@@ -471,6 +502,17 @@ void Mesh::broadcastAdapterData(adapter_types type, const uint8_t data[12]) {
 
 void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t data[12]) {
   if (instance) instance->broadcastAdapterData(type, data);
+}
+
+void Mesh::debugDumpRadio() {
+  uint8_t ch;
+  esp_wifi_get_channel(&ch, nullptr);
+  String out = String("DBG Channel=") + String(ch) + " Key=";
+  for (int i = 0; i < MESH_KEY_SIZE; ++i) {
+    if (meshKey[i] < 0x10) out += "0";
+    out += String(meshKey[i], HEX) + " ";
+  }
+  Logger::logln("MESH", out, LogLevel::LOG_INFO);
 }
 
 }

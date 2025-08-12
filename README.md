@@ -12,6 +12,8 @@ A robust ESP-NOW mesh networking system for ESP32 devices with dynamic adapter c
 - **Serial Communication**: Server integration via serial interface with Protobuf message encoding
 - **Remote Configuration**: Change adapter types and settings across the mesh without physical access
 - **Automatic Pin Management**: Pin assignments automatically inferred based on adapter type
+- **Modular Architecture**: Clean separation of concerns with utility classes for common functionality
+- **Enhanced Maintainability**: Refactored codebase following SOLID principles for better code organization
 
 ## 🏗️ Architecture
 
@@ -21,6 +23,12 @@ A robust ESP-NOW mesh networking system for ESP32 devices with dynamic adapter c
 - **Adapter System**: Abstract interface for different hardware types with factory pattern
 - **Serial Interface**: Server communication with structured message handling
 - **Configuration Management**: EEPROM-based persistence and remote configuration
+- **EEPROM Manager**: Centralized EEPROM operations following SOLID principles
+- **Message Router**: Intelligent message routing and path calculation
+- **Peer Manager**: Centralized peer discovery, monitoring, and management
+- **Protobuf Codec**: Reusable protobuf encoding/decoding for all adapters
+- **Configuration Manager**: Centralized configuration validation and management
+- **Network Manager**: WiFi and MAC address management utilities
 
 ### Adapter Types
 
@@ -30,12 +38,81 @@ A robust ESP-NOW mesh networking system for ESP32 devices with dynamic adapter c
 - **WIFI_Adapter**: WiFi connectivity management
 - **Temp_Adapter**: Temperature sensor interface (example implementation)
 
+### Design Principles
+
+The project follows **SOLID principles** and **DRY (Don't Repeat Yourself)**:
+
+- **Single Responsibility**: Each class has one clear purpose
+- **Open/Closed**: Easy to extend with new adapters without modifying existing code
+- **Liskov Substitution**: All adapters can be used interchangeably
+- **Interface Segregation**: Clean interfaces for different concerns
+- **Dependency Inversion**: High-level modules don't depend on low-level modules
+- **DRY**: Common functionality centralized in utility classes
+
+### Refactored Architecture
+
+The codebase has been extensively refactored to improve maintainability and extensibility:
+
+- **MessageRouter**: Separates routing logic from mesh communication
+- **PeerManager**: Centralizes all peer-related operations
+- **ProtobufCodec**: Makes protobuf handling reusable across adapters
+- **ConfigurationManager**: Provides consistent configuration validation
+- **NetworkManager**: Handles network operations and MAC address management
+
+This refactoring follows the **Single Responsibility Principle** by ensuring each class handles only one concern, making the code easier to test, maintain, and extend.
+
 ## 📋 Requirements
 
 - **Hardware**: ESP32 development board
 - **Arduino IDE**: Version 1.8.x or later
 - **ESP32 Board Package**: ESP32 Arduino core
 - **Dependencies**: ESP-IDF components (WiFi, ESP-NOW, EEPROM)
+
+## ⚙️ Project Configuration (project_config.h)
+
+Key compile-time constants you may want to tweak:
+
+| Constant | Purpose | Typical value |
+|----------|---------|---------------|
+| `DEV_MODE` | Skip EEPROM writes during development | `true` while testing |
+| `DEFAULT_ADAPTER` | Adapter the firmware instantiates when EEPROM is blank or in DEV mode | `PIR_ADAPTER`, change to any enum in `Adapter::adapter_types` |
+| `ENABLE_SEVSEG_DISPLAY` | Compile the TM1637 7-segment driver | `true` for production hardware, `false` if you do not have the display |
+| `WIFI_CHANNEL` | Wi-Fi / ESP-NOW channel (1-13) – **must match on every node** | `1` |
+| `DEFAULT_MESH_KEY` | 16-byte AES key – network-wide credential **always used** | edit for your install |
+| `DEFAULT_PEERS` | Bootstrap MAC list written to EEPROM on first boot (or used directly in DEV mode) | include at least the master MAC |
+| `MASTER_BEACON_INTERVAL_MS` | How often the master broadcasts its beacon | `2000` |
+
+All nodes must be compiled with identical `WIFI_CHANNEL` and `DEFAULT_MESH_KEY`.
+
+## 📁 Project Structure
+
+```
+main/
+├── main.ino                 # Main application entry point
+├── src/
+│   ├── Mesh/               # Mesh networking implementation
+│   │   ├── Mesh.h         # Mesh protocol and communication
+│   │   └── Mesh.cpp       # Mesh implementation
+│   ├── Adapter/           # Hardware adapter system
+│   │   ├── Adapter.h      # Abstract adapter base class
+│   │   ├── AdapterFactory.h/cpp  # Adapter creation and management
+│   │   ├── PIR_Adapter/   # Motion sensor adapter
+│   │   ├── Serial_Adapter/ # Serial communication adapter
+│   │   ├── LED_Adapter/   # LED control adapter
+│   │   └── Temp_Adapter/  # Temperature sensor adapter
+│   ├── hardware/          # Hardware abstraction layer
+│   │   ├── input/         # Input device abstractions
+│   │   └── output/        # Output device abstractions
+│   └── utils/             # Utility classes and helpers
+│       ├── EEPROM_Manager.h/cpp    # EEPROM operations
+│       ├── MessageRouter.h/cpp     # Message routing logic
+│       ├── PeerManager.h/cpp       # Peer management
+│       ├── ProtobufCodec.h/cpp     # Protobuf encoding/decoding
+│       ├── ConfigurationManager.h  # Configuration management
+│       ├── NetworkManager.h        # Network operations
+│       ├── Logger.h/cpp            # Logging system
+│       └── ErrorHandler.h/cpp      # Error handling
+```
 
 ## 🔧 Setup
 
@@ -49,6 +126,10 @@ constexpr int PIR_ADAPTER_PIN = 27;
 constexpr int LED_ADAPTER_PIN = 26;
 constexpr int SERIAL_ADAPTER_PIN = -1;  // No pin needed
 constexpr int TEMP_ADAPTER_PIN = 25;
+
+// Button pins
+constexpr int CONFIG_BUTTON_PIN = 32;   // Toggle master/node role
+constexpr int RESET_BUTTON_PIN = 35;    // Clear EEPROM (5-second hold)
 ```
 
 ### 2. Software Setup
@@ -72,6 +153,10 @@ constexpr int TEMP_ADAPTER_PIN = 25;
    - Configure one device as master by setting `isMaster` flag
    - Or use the config button (hold for 5 seconds)
 
+5. **Configure development mode**:
+   - Set `DEV_MODE = true` for development (no EEPROM storage)
+   - Set `DEV_MODE = false` for production (EEPROM persistence)
+
 ### 3. Compilation
 
 ```bash
@@ -86,6 +171,29 @@ arduino-cli compile --fqbn esp32:esp32:esp32dev main
 2. **Master beaconing**: Master node broadcasts presence every 2 seconds
 3. **Peer discovery**: Nodes automatically discover and maintain peer list
 4. **Adapter operation**: Each node operates according to its configured adapter
+
+### Buttons and Development Mode
+
+#### Config Button (Pin 32)
+- **5-second hold**: Toggle between master and node roles
+- **Production mode**: Saves role to EEPROM and restarts
+- **Development mode**: Shows warning (no EEPROM storage)
+
+#### Reset Button (Pin 35)
+- **5-second hold**: Clears all EEPROM memory
+- **Visual feedback**: Both LEDs blink rapidly
+- **Automatic restart**: Device restarts after 3 seconds
+
+#### Development Mode
+- **Compile-time flag**: Set `DEV_MODE = true` in `main.ino`
+- **No EEPROM storage**: Adapter types and configurations not persisted
+- **Default behavior**: Always creates PIR adapter with default pin
+- **Testing friendly**: Perfect for development and testing scenarios
+
+#### Production Mode
+- **EEPROM persistence**: All configurations saved to non-volatile memory
+- **Runtime configuration**: Adapter types can be changed remotely
+- **State recovery**: Device remembers settings after power cycles
 
 ### Serial Communication (Server Integration)
 
@@ -169,6 +277,47 @@ void setup() {
 // Clear EEPROM and restart device
 ```
 
+## 🔧 EEPROM Management
+
+### EEPROM_Manager Utility Class
+
+The project uses a centralized `EEPROM_Manager` utility class that follows **SOLID principles** and eliminates code duplication:
+
+#### **Benefits:**
+- **Single Responsibility**: All EEPROM operations in one place
+- **DRY Principle**: No repeated EEPROM.begin/end/commit calls
+- **Dev Mode Support**: Automatic bypass of EEPROM operations in development
+- **Error Handling**: Centralized error management for memory operations
+- **Address Management**: All EEPROM addresses defined in one location
+- **Type Safety**: Strong typing for different data types
+
+#### **Usage Example:**
+```cpp
+// Initialize the manager
+EEPROM_Manager::getInstance().init();
+
+// Set dev mode (bypasses EEPROM operations)
+EEPROM_Manager::getInstance().setDevMode(true);
+
+// Save/load data
+EEPROM_Manager::getInstance().saveMasterFlag(true);
+bool isMaster = EEPROM_Manager::getInstance().loadMasterFlag();
+
+// Clear operations
+EEPROM_Manager::getInstance().clearAll();
+```
+
+#### **Centralized Constants:**
+```cpp
+namespace EEPROM_ADDRESSES {
+  constexpr int MASTER_FLAG = 0;      // Master flag
+  constexpr int DEV_FLAG = 1;         // Dev mode flag
+  constexpr int MESH_KEY = 16;        // Mesh encryption key
+  constexpr int PEER_LIST = 32;       // Peer MAC addresses
+  constexpr int ADAPTER_TYPE = 8;     // Adapter type
+}
+```
+
 ## 📊 Monitoring and Debugging
 
 ### Health Reports
@@ -221,7 +370,8 @@ planetopia/
 │       │   └── output/         # Output devices (LEDs, displays)
 │       └── utils/               # Utility classes
 │           ├── Logger.h         # Logging system
-│           └── ErrorHandler.h   # Error management
+│           ├── ErrorHandler.h   # Error management
+│           └── EEPROM_Manager.h # Centralized EEPROM operations
 ├── server_requirements.md       # Server implementation guide
 ├── adapter_development_guide.md # Adapter development guide
 └── README.md                    # This file
@@ -256,3 +406,38 @@ For issues and questions:
 ---
 
 **Note**: This project is designed for ESP32 devices and requires the ESP32 Arduino core. Make sure your development environment is properly configured before attempting to compile or upload the code.
+
+## ⚙️ Configuration file
+
+All user-tunable settings now live in `project_config.h` at repo root.  
+Key fields:
+* `DEV_MODE` – true = development build (no EEPROM writes)  
+* `DEFAULT_DEV_MASTER` – startup role when in DEV_MODE  
+* Pin mapping constants (`RED_LED_PIN`, `SEVSEG_DATA_PIN`, …)  
+* `DEFAULT_LOG_LEVEL` – global verbosity  
+Edit the header and rebuild – no source changes required.
+
+## 🔢  Seven-segment error codes
+The four-digit display shows numeric error codes generated by `ErrorHandler`.
+
+Code layout: `T M SS`
+* **T** – error type (1=HW,2=Comm,3=Mem,4=Config,5=Logic)
+* **M** – major module (0=Core,1=Adapter,2=Mesh,3=Persistence,4=Network)
+* **SS** – subsystem specific id (00-99)
+
+Example table:
+| Code | Meaning |
+|------|---------|
+| 1205 | HW error in Adapter layer, PIR init (05) |
+| 3201 | Memory error in Mesh layer, peer overflow (01) |
+| 4100 | Config error in Network layer, missing creds (00) |
+
+See `docs/error_codes.md` for the full registry.
+
+## 📚 Documentation
+
+* [Adapter Development Guide](docs/adapter_development_guide.md)
+* [Server Requirements](docs/server_requirements.md)
+* [Seven-segment Error Codes](docs/error_codes.md)
+
+---

@@ -1,45 +1,52 @@
 #include "src/Mesh/Mesh.h"
 #include "src/Adapter/AdapterFactory.h"
-#include "src/utils/Logger.h"
+#include "src/core/Logger.h"
 #include "src/hardware/output/Led.h"
 #include "src/hardware/input/Button.h"
-#include "src/utils/ErrorHandler.h"
-#include <EEPROM.h>
-#include <esp_wifi.h>
+#include "src/core/ErrorHandler.h"
+#include "src/persistence/EEPROM_Manager.h"
+#include "project_config.h"
 #include <esp_wifi.h>
 
-constexpr int EEPROM_SIZE = 128;
-constexpr int MASTER_FLAG_ADDR = 0;                        // Use address 0 for the master flag
-constexpr unsigned long MASTER_BEACON_INTERVAL_MS = 2000;  // 2 seconds
+constexpr unsigned long MASTER_BEACON_INTERVAL_MS = planetopia::config::MASTER_BEACON_INTERVAL_MS;
 
 using namespace planetopia::utils;
 // Avoid 'mesh' ambiguity by not importing the namespace
 using namespace planetopia::adapter;
 using namespace planetopia::hardware;
 
-// Pins
-constexpr int RED_LED_PIN = 33;
-constexpr int GREEN_LED_PIN = 26;
-constexpr int CONFIG_BUTTON_PIN = 32;
+// Pins from config
+constexpr int RED_LED_PIN = planetopia::config::RED_LED_PIN;
+constexpr int GREEN_LED_PIN = planetopia::config::GREEN_LED_PIN;
+constexpr int CONFIG_BUTTON_PIN = planetopia::config::CONFIG_BUTTON_PIN;
+constexpr int RESET_BUTTON_PIN = planetopia::config::RESET_BUTTON_PIN;
 
 constexpr unsigned long BUTTON_HOLD_TIME_MS = 5000;  // 5 seconds
+
+// Compile-time dev flag
+constexpr bool DEV_MODE = planetopia::config::DEV_MODE;
 
 Led greenLed(GREEN_LED_PIN);
 Led redLed(RED_LED_PIN);
 Button configButton(CONFIG_BUTTON_PIN);
+Button resetButton(RESET_BUTTON_PIN);  // New reset button object
+
+#include "src/hardware/output/SevenSegDisplay.h"
+using planetopia::hardware::SevenSegDisplay;
+
+SevenSegDisplay sevenSeg(planetopia::config::SEVSEG_DATA_PIN,
+                         planetopia::config::SEVSEG_CLK_PIN);
 
 planetopia::mesh::Mesh mesh;
 planetopia::mesh::mesh_message transmissionMessage;
 
 Adapter* adapter = nullptr;
+bool isDevMode = false;  // Global variable to track dev mode state
+bool devMasterFlag = planetopia::config::DEFAULT_DEV_MASTER; // runtime master flag used in dev mode
 
 //define all known MAC addresses for your mesh (update with your real MACs!)
-const uint8_t defaultPeerList[][6] = {
-  { 0xEC, 0x64, 0xC9, 0x5D, 0xAC, 0x18 },
-  { 0xEC, 0x64, 0xC9, 0x5D, 0x22, 0x20 },
-  // Add all known node MACs, including THIS node's MAC!
-};
-constexpr int NUM_DEFAULT_PEERS = sizeof(defaultPeerList) / 6 / sizeof(uint8_t);
+const uint8_t (*defaultPeerList)[6] = planetopia::config::DEFAULT_PEERS;
+constexpr int NUM_DEFAULT_PEERS = planetopia::config::NUM_DEFAULT_PEERS;
 
 // --- Serial control opcodes for SERIAL_ADAPTER (data[0]) ---
 static constexpr uint8_t OP_CONFIG_SET = 0xA0;     // [A0][6B targetMac][1B adapterType][1B optPin]
@@ -66,55 +73,6 @@ static inline void sendHealthReport() {
 }
 
 // Keep main thin; adapter handles health/config
-
-bool eepromHasPeers() {
-  EEPROM.begin(EEPROM_SIZE);
-  bool hasPeers = false;
-  for (int i = 0; i < NUM_DEFAULT_PEERS; ++i) {
-    bool found = false;
-    for (int j = 0; j < 6; ++j) {
-      if (EEPROM.read(16 + i * 6 + j) != 0xFF) {
-        found = true;
-        break;
-      }
-    }
-    if (found) {
-      hasPeers = true;
-      break;
-    }
-  }
-  EEPROM.end();
-  return hasPeers;
-}
-
-void writeDefaultPeersToEEPROM() {
-  EEPROM.begin(EEPROM_SIZE);
-  // Wipe first
-  for (int i = 0; i < planetopia::mesh::MAX_PEERS * 6; ++i) {
-    EEPROM.write(16 + i, 0xFF);
-  }
-  for (int i = 0; i < NUM_DEFAULT_PEERS; ++i) {
-    for (int j = 0; j < 6; ++j) {
-      EEPROM.write(16 + i * 6 + j, defaultPeerList[i][j]);
-    }
-  }
-  EEPROM.commit();
-  EEPROM.end();
-}
-
-bool loadMasterFlagFromEEPROM() {
-  EEPROM.begin(EEPROM_SIZE);
-  uint8_t flag = EEPROM.read(MASTER_FLAG_ADDR);
-  EEPROM.end();
-  return (flag == 1);  // 1 = master, 0 = not master
-}
-
-void saveMasterFlagToEEPROM(bool isMaster) {
-  EEPROM.begin(EEPROM_SIZE);
-  EEPROM.write(MASTER_FLAG_ADDR, isMaster ? 1 : 0);
-  EEPROM.commit();
-  EEPROM.end();
-}
 
 void dataRecvCallback(planetopia::mesh::mesh_message message) {
   Logger::logln("MESH", "Data received callback triggered", LogLevel::LOG_DEBUG);
@@ -167,7 +125,7 @@ void dataRecvCallback(planetopia::mesh::mesh_message message) {
 void setup() {
   Serial.begin(115200);
   Serial.println("Planetopia Starting...");
-  Logger::setLogLevel(LogLevel::LOG_DEBUG);  // Set global log level at boot
+  Logger::setLogLevel(planetopia::config::DEFAULT_LOG_LEVEL);
 
   Logger::logln("MAIN", "Logger initialized", LogLevel::LOG_INFO);
 
@@ -188,7 +146,13 @@ void setup() {
     }
   }
 
-  ErrorHandler::getInstance().init(&redLed);
+// Seven segment conditional init
+if (planetopia::config::ENABLE_SEVSEG_DISPLAY) {
+  sevenSeg.init();
+  ErrorHandler::getInstance().init(&redLed, &sevenSeg);
+} else {
+  ErrorHandler::getInstance().init(&redLed, nullptr);
+}
 
   if (!greenLed.isInitialized()) {
     if (!greenLed.init()) {
@@ -207,17 +171,61 @@ void setup() {
     ErrorHandler::getInstance().signalError(ErrorType::HARDWARE_FAILURE, "Config button init failed!");
   }
 
-  // Declare peers to EEPROM (only if empty)
-  if (!eepromHasPeers()) {
-    writeDefaultPeersToEEPROM();
+  if (!resetButton.init()) {
+    Logger::error("Reset button initialization failed!");
+    ErrorHandler::getInstance().signalError(ErrorType::HARDWARE_FAILURE, "Reset button init failed!");
+  }
+
+  // Initialize EEPROM Manager
+  if (!EEPROM_Manager::getInstance().init()) {
+    Logger::logln("MAIN", "Failed to initialize EEPROM Manager", LogLevel::LOG_ERROR);
+    ErrorHandler::getInstance().signalError(ErrorType::MEMORY_ERROR, "EEPROM Manager init failed!");
+    while (true) {
+      redLed.blink(4, 100, 100);
+      delay(1000);
+    }
+  }
+
+  // Check if we're in dev mode (compile-time constant takes precedence)
+  isDevMode = DEV_MODE;
+  if (!isDevMode) {
+    // If not compile-time dev mode, check EEPROM
+    isDevMode = EEPROM_Manager::getInstance().loadDevFlag();
+  }
+
+  Logger::logln("MAIN", String("Running in ") + (isDevMode ? "DEV" : "PRODUCTION") + " mode", LogLevel::LOG_INFO);
+
+  // Set dev mode in AdapterFactory and EEPROM Manager
+  planetopia::adapter::AdapterFactory::setDevMode(isDevMode);
+  EEPROM_Manager::getInstance().setDevMode(isDevMode);
+
+  // Declare peers to EEPROM (only if not in dev mode and EEPROM is empty)
+  if (!isDevMode && !EEPROM_Manager::getInstance().hasPeers()) {
+    // Write default peers to EEPROM
+    EEPROM_Manager::getInstance().savePeerList(
+      reinterpret_cast<const uint8_t*>(defaultPeerList),
+      NUM_DEFAULT_PEERS);
     Logger::logln("MAIN", "Wrote default peer MACs to EEPROM.", LogLevel::LOG_INFO);
   }
 
-  // Initialize EEPROM defaults if not set
-  planetopia::adapter::AdapterFactory::initializeDefaultsIfUnset();
+  // Initialize EEPROM defaults if not set (only if not in dev mode)
+  if (!isDevMode) {
+    planetopia::adapter::AdapterFactory::initializeDefaultsIfUnset();
+  }
 
-  // Create adapter from EEPROM (will automatically use correct pin for adapter type)
-  adapter = planetopia::adapter::AdapterFactory::createFromEEPROM();
+  // Create adapter (from EEPROM if production mode, or default if dev mode)
+  if (isDevMode) {
+    // In dev mode, create default adapter from config
+    adapter = planetopia::adapter::AdapterFactory::createAdapter(
+        planetopia::config::DEFAULT_ADAPTER,
+        planetopia::adapter::AdapterFactory::getDefaultPinForAdapter(planetopia::config::DEFAULT_ADAPTER));
+    Logger::logln("MAIN", "Created default adapter (DEV mode)", LogLevel::LOG_INFO);
+  } else {
+    // In production mode, create from EEPROM
+    adapter = planetopia::adapter::AdapterFactory::createFromEEPROM();
+    Logger::logln("MAIN", "Created adapter from EEPROM (PRODUCTION mode)", LogLevel::LOG_INFO);
+  }
+
   if (!adapter) {
     Logger::logln("MAIN", "Failed to create adapter", LogLevel::LOG_ERROR);
     ErrorHandler::getInstance().signalError(
@@ -243,16 +251,17 @@ void setup() {
   Logger::logln("MAIN", "Adapter initialized", LogLevel::LOG_INFO);
 
   if (!mesh.init()) {
-    Logger::logln("MESH", "Mesh failed to initialize", LogLevel::LOG_ERROR);
-    ErrorHandler::getInstance().signalError(
-      ErrorType::COMMUNICATION_FAIL,
-      "MAIN: Mesh failed to initialize");
-    while (true) {
-      redLed.blink(3, 150, 150);
-      delay(800);
-    }
+    Logger::logln("MAIN", "Mesh init failed", LogLevel::LOG_ERROR);
   }
-  bool isMaster = loadMasterFlagFromEEPROM();
+  mesh.debugDumpRadio();
+  bool isMaster;
+  if (isDevMode) {
+    isMaster = devMasterFlag;
+    Logger::logln("MAIN", String("DEV mode: starting as ") + (isMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
+  } else {
+    // In production mode, load from EEPROM
+    isMaster = EEPROM_Manager::getInstance().loadMasterFlag();
+  }
   mesh.setIsMaster(isMaster);
   Logger::logln("MESH", "Mesh initialized", LogLevel::LOG_INFO);
   Logger::logln("MAIN", String("Booted as: ") + (isMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
@@ -276,6 +285,10 @@ void loop() {
   static bool buttonWasPressed = false;
   static unsigned long holdStart = 0;
 
+  // Reset button logic
+  static bool resetButtonWasPressed = false;
+  static unsigned long resetHoldStart = 0;
+
   if (configButton.isPressed()) {
     if (!buttonWasPressed) {
       // Just started pressing
@@ -285,22 +298,61 @@ void loop() {
       // Already holding, check duration
       if (millis() - holdStart >= BUTTON_HOLD_TIME_MS) {
         // Toggle master flag!
-        bool wasMaster = loadMasterFlagFromEEPROM();
-        bool newMaster = !wasMaster;
-        saveMasterFlagToEEPROM(newMaster);
-        Logger::logln("MAIN", String("Button held 5s: CONFIG TOGGLED. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
-        Logger::logln("MAIN", "Restarting in 2 seconds for new role...", LogLevel::LOG_INFO);
-        if (newMaster) {
-          greenLed.blink(3, 200, 200);
+        if (isDevMode) {
+          // Toggle runtime master flag without EEPROM persistence
+          bool newMaster = !mesh.getIsMaster();
+          mesh.setIsMaster(newMaster);
+          devMasterFlag = newMaster;
+          Logger::logln("MAIN", String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
+          if (newMaster) {
+            greenLed.blink(3, 150, 150);
+          } else {
+            greenLed.blink(2, 150, 150);
+          }
         } else {
-          greenLed.blink(2, 200, 200);
+          bool wasMaster = EEPROM_Manager::getInstance().loadMasterFlag();
+          bool newMaster = !wasMaster;
+          EEPROM_Manager::getInstance().saveMasterFlag(newMaster);
+          Logger::logln("MAIN", String("Button held 5s: CONFIG TOGGLED. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
+          Logger::logln("MAIN", "Restarting in 2 seconds for new role...", LogLevel::LOG_INFO);
+          if (newMaster) {
+            greenLed.blink(3, 200, 200);
+          } else {
+            greenLed.blink(2, 200, 200);
+          }
+          delay(2000);
+          ESP.restart();
         }
-        delay(2000);
-        ESP.restart();
       }
     }
   } else {
     buttonWasPressed = false;  // Reset state if released
+  }
+
+  // Reset button handling
+  if (resetButton.isPressed()) {
+    if (!resetButtonWasPressed) {
+      // Just started pressing reset button
+      resetButtonWasPressed = true;
+      resetHoldStart = millis();
+    } else {
+      // Already holding reset button, check duration
+      if (millis() - resetHoldStart >= BUTTON_HOLD_TIME_MS) {
+        // Clear all EEPROM!
+        Logger::logln("MAIN", "Reset button held 5s: CLEARING ALL EEPROM!", LogLevel::LOG_WARN);
+        EEPROM_Manager::getInstance().clearAll();
+
+        // Visual feedback
+        redLed.blink(5, 100, 100);
+        greenLed.blink(5, 100, 100);
+
+        Logger::logln("MAIN", "EEPROM cleared. Restarting in 3 seconds...", LogLevel::LOG_INFO);
+        delay(3000);
+        ESP.restart();
+      }
+    }
+  } else {
+    resetButtonWasPressed = false;  // Reset state if released
   }
   // Periodic health report
   static unsigned long lastHealth = 0;

@@ -2,6 +2,8 @@
 #define ERRORHANDLER_H
 
 #include "src/hardware/output/Led.h"
+#include "src/hardware/output/SevenSegDisplay.h"
+#include "ErrorCodes.h"
 
 namespace planetopia {
 namespace utils {
@@ -21,7 +23,13 @@ class ErrorHandler {
 public:
   static ErrorHandler& getInstance();
 
-  void init(planetopia::hardware::Led* errorLed);
+  void init(planetopia::hardware::Led* errorLed, planetopia::hardware::SevenSegDisplay* display = nullptr);
+
+  // New verbose error signalling
+  void signalError(core::ErrorTypeDigit type,
+                   core::ModuleDigit module,
+                   uint8_t subCode,
+                   const char* message = nullptr);
 
   void signalError(ErrorType errorType, const char* message = nullptr);
 
@@ -32,6 +40,7 @@ public:
 private:
   ErrorHandler();
   planetopia::hardware::Led* _errorLed;
+  planetopia::hardware::SevenSegDisplay* _display;
   bool _initialized;
 
   void blinkPattern(ErrorType errorType);

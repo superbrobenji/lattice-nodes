@@ -12,7 +12,7 @@ public:
   virtual ~GpioInput() = default;
 
   virtual bool init();
-  bool isValidInputPin(uint8_t pin) const;
+  static bool isValidInputPin(uint8_t pin);
   bool isInitialized() const;
 
 protected:

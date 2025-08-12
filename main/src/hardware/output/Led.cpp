@@ -1,6 +1,6 @@
 #include "Led.h"
-#include "src/utils/Logger.h"
-#include "src/utils/ErrorHandler.h"
+#include "src/core/Logger.h"
+#include "src/core/ErrorHandler.h"
 
 namespace planetopia {
 namespace hardware {

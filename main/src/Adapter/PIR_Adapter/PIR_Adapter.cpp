@@ -1,6 +1,6 @@
 #include "PIR_Adapter.h"
-#include "src/utils/Logger.h"
-#include "src/utils/ErrorHandler.h"
+#include "src/core/Logger.h"
+#include "src/core/ErrorHandler.h"
 #include "src/Mesh/Mesh.h"
 
 namespace planetopia {

@@ -32,6 +32,9 @@ public:
 
   // Get the default pin for a specific adapter type
   static int getDefaultPinForAdapter(adapter_types type);
+
+  // Set dev mode flag (bypasses EEPROM operations)
+  static void setDevMode(bool isDev);
 };
 
 }

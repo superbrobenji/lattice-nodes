@@ -1,10 +1,10 @@
 #include "Serial_Adapter.h"
 #include "src/Adapter/AdapterFactory.h"
-#include "src/utils/Logger.h"
-#include "src/utils/ErrorHandler.h"
+#include "src/core/Logger.h"
+#include "src/core/ErrorHandler.h"
+#include <esp_wifi.h>
 #include "src/Mesh/Mesh.h"
 #include <cstring>
-#include <EEPROM.h>
 
 namespace planetopia {
 namespace adapter {
@@ -19,27 +19,23 @@ static void readOwnMac(uint8_t out[6]) {
 
 void Serial_Adapter::sendHealthReport() {
   Logger::logln("Serial_Adapter", "Sending health report", LogLevel::LOG_INFO);
-  
+
   uint8_t data[12] = { 0 };
   data[0] = OP_HEALTH_REPORT;
   data[1] = static_cast<uint8_t>(SERIAL_ADAPTER);
-  
+
   uint8_t mac[6];
   readOwnMac(mac);
   memcpy(&data[2], mac, 6);
-  
+
   uint32_t uptimeSec = millis() / 1000;
   data[8] = static_cast<uint8_t>(uptimeSec & 0xFF);
   data[9] = static_cast<uint8_t>((uptimeSec >> 8) & 0xFF);
   data[10] = static_cast<uint8_t>((uptimeSec >> 16) & 0xFF);
   data[11] = static_cast<uint8_t>((uptimeSec >> 24) & 0xFF);
-  
-  Logger::logln("Serial_Adapter", String("Health report - MAC: ") + 
-                String(mac[0], HEX) + ":" + String(mac[1], HEX) + ":" + 
-                String(mac[2], HEX) + ":" + String(mac[3], HEX) + ":" + 
-                String(mac[4], HEX) + ":" + String(mac[5], HEX) + 
-                " Uptime: " + String(uptimeSec) + "s", LogLevel::LOG_DEBUG);
-  
+
+  Logger::logln("Serial_Adapter", String("Health report - MAC: ") + String(mac[0], HEX) + ":" + String(mac[1], HEX) + ":" + String(mac[2], HEX) + ":" + String(mac[3], HEX) + ":" + String(mac[4], HEX) + ":" + String(mac[5], HEX) + " Uptime: " + String(uptimeSec) + "s", LogLevel::LOG_DEBUG);
+
   if (planetopia::mesh::Mesh::transmit) {
     planetopia::mesh::Mesh::transmit(SERIAL_ADAPTER, data);
     Logger::logln("Serial_Adapter", "Health report sent via mesh", LogLevel::LOG_DEBUG);
@@ -53,7 +49,7 @@ Serial_Adapter::Serial_Adapter(int pin)
   : Adapter(pin), frameState(FrameState::AwaitingLen1), frameLength(0), frameIndex(0) {
   _adapterType = SERIAL_ADAPTER;
   memset(payloadBuffer, 0, sizeof(payloadBuffer));
-  
+
   Logger::logln("Serial_Adapter", "Serial_Adapter constructed with pin " + String(pin), LogLevel::LOG_INFO);
 }
 
@@ -70,21 +66,21 @@ void Serial_Adapter::loop() {
     Logger::logln("Serial_Adapter", "Sending periodic health report", LogLevel::LOG_DEBUG);
     sendHealthReport();
   }
-  
+
   while (Serial.available() > 0) {
     uint8_t byteIn = static_cast<uint8_t>(Serial.read());
-    
+
     switch (frameState) {
       case FrameState::AwaitingLen1:
         frameLength = byteIn;
         Logger::logln("Serial_Adapter", "Received length byte 1: " + String(frameLength), LogLevel::LOG_DEBUG);
         frameState = FrameState::AwaitingLen2;
         break;
-        
+
       case FrameState::AwaitingLen2:
         frameLength |= static_cast<uint16_t>(byteIn) << 8;
         Logger::logln("Serial_Adapter", "Received length byte 2, total length: " + String(frameLength), LogLevel::LOG_DEBUG);
-        
+
         if (frameLength == 0 || frameLength > MAX_PAYLOAD) {
           Logger::logln("Serial_Adapter", "Invalid frame length: " + String(frameLength) + ", resetting frame state", LogLevel::LOG_WARN);
           ErrorHandler::getInstance().signalError(ErrorType::COMMUNICATION_FAIL, "Serial_Adapter: Invalid frame length");
@@ -98,7 +94,7 @@ void Serial_Adapter::loop() {
           Logger::logln("Serial_Adapter", "Frame length valid, awaiting " + String(frameLength) + " payload bytes", LogLevel::LOG_DEBUG);
         }
         break;
-        
+
       case FrameState::AwaitingPayload:
         if (frameIndex >= MAX_PAYLOAD) {
           Logger::logln("Serial_Adapter", "Frame buffer overflow, resetting frame state", LogLevel::LOG_ERROR);
@@ -108,10 +104,10 @@ void Serial_Adapter::loop() {
           frameIndex = 0;
           break;
         }
-        
+
         payloadBuffer[frameIndex++] = byteIn;
         Logger::logln("Serial_Adapter", "Received payload byte " + String(frameIndex) + "/" + String(frameLength) + ": 0x" + String(byteIn, HEX), LogLevel::LOG_DEBUG);
-        
+
         if (frameIndex >= frameLength) {
           Logger::logln("Serial_Adapter", "Frame complete, processing " + String(frameLength) + " bytes", LogLevel::LOG_DEBUG);
           handleCompleteFrame(payloadBuffer, frameLength);
@@ -125,25 +121,24 @@ void Serial_Adapter::loop() {
 }
 
 void Serial_Adapter::onMeshDataImpl(const planetopia::mesh::mesh_message& message) {
-  Logger::logln("Serial_Adapter", "Processing incoming mesh message - Type: " + String(message.messageType) + 
-                " DataType: " + String(message.dataType) + " HopCount: " + String(message.hopCount), LogLevel::LOG_DEBUG);
-  
+  Logger::logln("Serial_Adapter", "Processing incoming mesh message - Type: " + String(message.messageType) + " DataType: " + String(message.dataType) + " HopCount: " + String(message.hopCount), LogLevel::LOG_DEBUG);
+
   uint8_t encoded[MAX_PAYLOAD];
   size_t n = encodeMeshMessage(message, encoded, sizeof(encoded));
-  
+
   if (n == 0) {
     Logger::logln("Serial_Adapter", "Failed to encode mesh message for serial output", LogLevel::LOG_ERROR);
     ErrorHandler::getInstance().signalError(ErrorType::COMMUNICATION_FAIL, "Serial_Adapter: Message encoding failed");
     return;
   }
-  
+
   Logger::logln("Serial_Adapter", "Encoded mesh message to " + String(n) + " bytes, sending to serial", LogLevel::LOG_DEBUG);
-  
+
   // 2-byte little-endian length prefix
   uint8_t lenLE[2] = { static_cast<uint8_t>(n & 0xFF), static_cast<uint8_t>((n >> 8) & 0xFF) };
   Serial.write(lenLE, 2);
   Serial.write(encoded, n);
-  
+
   Logger::logln("Serial_Adapter", "Mesh message sent to serial successfully", LogLevel::LOG_DEBUG);
 }
 
@@ -244,9 +239,8 @@ bool Serial_Adapter::readLengthDelimited(const uint8_t*& ptr, const uint8_t* end
 }
 
 size_t Serial_Adapter::encodeMeshMessage(const planetopia::mesh::mesh_message& msg, uint8_t* out, size_t outCap) {
-  Logger::logln("Serial_Adapter", "Encoding mesh message - Type: " + String(msg.messageType) + 
-                " DataType: " + String(msg.dataType) + " HopCount: " + String(msg.hopCount), LogLevel::LOG_DEBUG);
-  
+  Logger::logln("Serial_Adapter", "Encoding mesh message - Type: " + String(msg.messageType) + " DataType: " + String(msg.dataType) + " HopCount: " + String(msg.hopCount), LogLevel::LOG_DEBUG);
+
   size_t idx = 0;
   auto ensure = [&](size_t need) {
     return idx + need <= outCap;
@@ -281,7 +275,7 @@ size_t Serial_Adapter::encodeMeshMessage(const planetopia::mesh::mesh_message& m
   }
   memcpy(out + idx, tmp, n);
   idx += n;
-  
+
   n = writeBytesField(tmp, 4, msg.targetMacAddress, 6);
   if (!ensure(n)) {
     Logger::logln("Serial_Adapter", "Buffer overflow while encoding targetMacAddress", LogLevel::LOG_ERROR);
@@ -289,7 +283,7 @@ size_t Serial_Adapter::encodeMeshMessage(const planetopia::mesh::mesh_message& m
   }
   memcpy(out + idx, tmp, n);
   idx += n;
-  
+
   n = writeBytesField(tmp, 5, msg.lastHopMacAddress, 6);
   if (!ensure(n)) {
     Logger::logln("Serial_Adapter", "Buffer overflow while encoding lastHopMacAddress", LogLevel::LOG_ERROR);
@@ -322,7 +316,7 @@ size_t Serial_Adapter::encodeMeshMessage(const planetopia::mesh::mesh_message& m
 
 bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len, planetopia::mesh::mesh_message& outMsg) {
   Logger::logln("Serial_Adapter", "Decoding protobuf message of " + String(len) + " bytes", LogLevel::LOG_DEBUG);
-  
+
   memset(&outMsg, 0, sizeof(outMsg));
   const uint8_t* ptr = data;
   const uint8_t* end = data + len;
@@ -330,13 +324,9 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len, planetop
   // Auto-generate routing fields that the server doesn't need to send
   // This simplifies the server implementation - it only needs to send essential fields
   readOwnMac(outMsg.originMacAddress);  // Set origin to this node's MAC
-  outMsg.hopCount = 0;  // Start at 0 hops for serial-originated messages
-  
-  Logger::logln("Serial_Adapter", "Auto-generated routing fields - Origin MAC: " + 
-                String(outMsg.originMacAddress[0], HEX) + ":" + String(outMsg.originMacAddress[1], HEX) + ":" + 
-                String(outMsg.originMacAddress[2], HEX) + ":" + String(outMsg.originMacAddress[3], HEX) + ":" + 
-                String(outMsg.originMacAddress[4], HEX) + ":" + String(outMsg.originMacAddress[5], HEX) + 
-                " HopCount: " + String(outMsg.hopCount), LogLevel::LOG_DEBUG);
+  outMsg.hopCount = 0;                  // Start at 0 hops for serial-originated messages
+
+  Logger::logln("Serial_Adapter", "Auto-generated routing fields - Origin MAC: " + String(outMsg.originMacAddress[0], HEX) + ":" + String(outMsg.originMacAddress[1], HEX) + ":" + String(outMsg.originMacAddress[2], HEX) + ":" + String(outMsg.originMacAddress[3], HEX) + ":" + String(outMsg.originMacAddress[4], HEX) + ":" + String(outMsg.originMacAddress[5], HEX) + " HopCount: " + String(outMsg.hopCount), LogLevel::LOG_DEBUG);
 
   while (ptr < end) {
     uint32_t field = 0;
@@ -356,8 +346,8 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len, planetop
       case 1:
         {  // messageType: varint
           if (wt != 0) {
-                    Logger::logln("Serial_Adapter", "messageType has wrong wire type: " + String(wt) + " (expected 0)", LogLevel::LOG_ERROR);
-        return false;
+            Logger::logln("Serial_Adapter", "messageType has wrong wire type: " + String(wt) + " (expected 0)", LogLevel::LOG_ERROR);
+            return false;
           }
           uint32_t v = 0;
           if (!readVarint(ptr, end, v)) {
@@ -371,8 +361,8 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len, planetop
       case 2:
         {  // dataType: sint32
           if (wt != 0) {
-                    Logger::logln("Serial_Adapter", "dataType has wrong wire type: " + String(wt) + " (expected 0)", LogLevel::LOG_ERROR);
-        return false;
+            Logger::logln("Serial_Adapter", "dataType has wrong wire type: " + String(wt) + " (expected 0)", LogLevel::LOG_ERROR);
+            return false;
           }
           int32_t v = 0;
           if (!readZigZag32(ptr, end, v)) {
@@ -386,8 +376,8 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len, planetop
       case 4:  // targetMacAddress (only field the server needs to send)
         {
           if (wt != 2) {
-                    Logger::logln("Serial_Adapter", "targetMacAddress has wrong wire type: " + String(wt) + " (expected 2)", LogLevel::LOG_ERROR);
-        return false;
+            Logger::logln("Serial_Adapter", "targetMacAddress has wrong wire type: " + String(wt) + " (expected 2)", LogLevel::LOG_ERROR);
+            return false;
           }
           const uint8_t* p = nullptr;
           size_t l = 0;
@@ -397,17 +387,14 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len, planetop
           }
           memset(outMsg.targetMacAddress, 0, 6);
           if (l > 0) memcpy(outMsg.targetMacAddress, p, l > 6 ? 6 : l);
-          Logger::logln("Serial_Adapter", "Decoded targetMacAddress: " + 
-                       String(outMsg.targetMacAddress[0], HEX) + ":" + String(outMsg.targetMacAddress[1], HEX) + ":" + 
-                       String(outMsg.targetMacAddress[2], HEX) + ":" + String(outMsg.targetMacAddress[3], HEX) + ":" + 
-                       String(outMsg.targetMacAddress[4], HEX) + ":" + String(outMsg.targetMacAddress[5], HEX), LogLevel::LOG_DEBUG);
+          Logger::logln("Serial_Adapter", "Decoded targetMacAddress: " + String(outMsg.targetMacAddress[0], HEX) + ":" + String(outMsg.targetMacAddress[1], HEX) + ":" + String(outMsg.targetMacAddress[2], HEX) + ":" + String(outMsg.targetMacAddress[3], HEX) + ":" + String(outMsg.targetMacAddress[4], HEX) + ":" + String(outMsg.targetMacAddress[5], HEX), LogLevel::LOG_DEBUG);
           break;
         }
       case 6:
         {  // data
           if (wt != 2) {
-                    Logger::logln("Serial_Adapter", "data has wrong wire type: " + String(wt) + " (expected 2)", LogLevel::LOG_ERROR);
-        return false;
+            Logger::logln("Serial_Adapter", "data has wrong wire type: " + String(wt) + " (expected 2)", LogLevel::LOG_ERROR);
+            return false;
           }
           const uint8_t* p = nullptr;
           size_t l = 0;
@@ -445,21 +432,18 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len, planetop
         }
     }
   }
-  
+
   // Set lastHopMacAddress to this node's MAC (since we're the origin)
   readOwnMac(outMsg.lastHopMacAddress);
-  Logger::logln("Serial_Adapter", "Set lastHopMacAddress to own MAC: " + 
-                String(outMsg.lastHopMacAddress[0], HEX) + ":" + String(outMsg.lastHopMacAddress[1], HEX) + ":" + 
-                String(outMsg.lastHopMacAddress[2], HEX) + ":" + String(outMsg.lastHopMacAddress[3], HEX) + ":" + 
-                String(outMsg.lastHopMacAddress[4], HEX) + ":" + String(outMsg.lastHopMacAddress[5], HEX), LogLevel::LOG_DEBUG);
-  
+  Logger::logln("Serial_Adapter", "Set lastHopMacAddress to own MAC: " + String(outMsg.lastHopMacAddress[0], HEX) + ":" + String(outMsg.lastHopMacAddress[1], HEX) + ":" + String(outMsg.lastHopMacAddress[2], HEX) + ":" + String(outMsg.lastHopMacAddress[3], HEX) + ":" + String(outMsg.lastHopMacAddress[4], HEX) + ":" + String(outMsg.lastHopMacAddress[5], HEX), LogLevel::LOG_DEBUG);
+
   Logger::logln("Serial_Adapter", "Successfully decoded protobuf message", LogLevel::LOG_DEBUG);
   return true;
 }
 
 void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
   Logger::logln("Serial_Adapter", "Handling complete frame of " + String(len) + " bytes", LogLevel::LOG_INFO);
-  
+
   planetopia::mesh::mesh_message msg;
   if (!decodeMeshMessage(data, len, msg)) {
     Logger::logln("Serial_Adapter", "Failed to decode protobuf frame", LogLevel::LOG_ERROR);
@@ -467,41 +451,40 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
     return;
   }
 
-  Logger::logln("Serial_Adapter", "Decoded message - Type: " + String(msg.messageType) + 
-                " DataType: " + String(msg.dataType), LogLevel::LOG_INFO);
+  Logger::logln("Serial_Adapter", "Decoded message - Type: " + String(msg.messageType) + " DataType: " + String(msg.dataType), LogLevel::LOG_INFO);
 
   // Only forward adapter data via mesh transmit function; routing fields are managed by Mesh
   if (msg.messageType == planetopia::mesh::MESH_TYPE_ADAPTER_DATA) {
-      Logger::logln("Serial_Adapter", "Forwarding adapter data via mesh transmit", LogLevel::LOG_DEBUG);
-      
-      if (mesh_transmit_fn) {
-        // Targeted send via normal mesh transmit path (to master, route onward)
-        mesh_transmit_fn(msg.dataType, msg.data);
-        Logger::logln("Serial_Adapter", "Adapter data forwarded successfully", LogLevel::LOG_DEBUG);
-      } else {
-        Logger::logln("Serial_Adapter", "transmit function not set", LogLevel::LOG_ERROR);
-        ErrorHandler::getInstance().signalError(ErrorType::CONFIG_ERROR, "Serial_Adapter: transmit function not set");
-      }
-    } else if (msg.messageType == SERIAL_MSG_BROADCAST) {
-      Logger::logln("Serial_Adapter", "Broadcasting adapter data to all peers", LogLevel::LOG_DEBUG);
-      // Broadcast adapter data to all peers
-      planetopia::mesh::Mesh::broadcastAdapterDataStatic(msg.dataType, msg.data);
-      Logger::logln("Serial_Adapter", "Broadcast sent successfully", LogLevel::LOG_DEBUG);
+    Logger::logln("Serial_Adapter", "Forwarding adapter data via mesh transmit", LogLevel::LOG_DEBUG);
+
+    if (mesh_transmit_fn) {
+      // Targeted send via normal mesh transmit path (to master, route onward)
+      mesh_transmit_fn(msg.dataType, msg.data);
+      Logger::logln("Serial_Adapter", "Adapter data forwarded successfully", LogLevel::LOG_DEBUG);
     } else {
-      Logger::logln("Serial_Adapter", "Unknown message type: " + String(msg.messageType), LogLevel::LOG_WARN);
+      Logger::logln("Serial_Adapter", "transmit function not set", LogLevel::LOG_ERROR);
+      ErrorHandler::getInstance().signalError(ErrorType::CONFIG_ERROR, "Serial_Adapter: transmit function not set");
     }
+  } else if (msg.messageType == SERIAL_MSG_BROADCAST) {
+    Logger::logln("Serial_Adapter", "Broadcasting adapter data to all peers", LogLevel::LOG_DEBUG);
+    // Broadcast adapter data to all peers
+    planetopia::mesh::Mesh::broadcastAdapterDataStatic(msg.dataType, msg.data);
+    Logger::logln("Serial_Adapter", "Broadcast sent successfully", LogLevel::LOG_DEBUG);
+  } else {
+    Logger::logln("Serial_Adapter", "Unknown message type: " + String(msg.messageType), LogLevel::LOG_WARN);
+  }
 
   // Handle control opcodes: CONFIG_SET, HEALTH_REQ
   if (msg.dataType == SERIAL_ADAPTER) {
     uint8_t op = msg.data[0];
     Logger::logln("Serial_Adapter", "Processing SERIAL_ADAPTER control opcode: 0x" + String(op, HEX), LogLevel::LOG_DEBUG);
-    
+
     if (op == OP_HEALTH_REQ) {
       Logger::logln("Serial_Adapter", "Received health request, sending health report", LogLevel::LOG_INFO);
       sendHealthReport();
     } else if (op == OP_CONFIG_SET) {
       Logger::logln("Serial_Adapter", "Received configuration set request", LogLevel::LOG_INFO);
-      
+
       // Apply only if targeted to me (or broadcast FF:..:FF)
       uint8_t myMac[6];
       readOwnMac(myMac);
@@ -512,11 +495,11 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
           break;
         }
       bool isTarget = allFF || (memcmp(msg.targetMacAddress, myMac, 6) == 0);
-      
+
       if (isTarget) {
         adapter_types newType = static_cast<adapter_types>(static_cast<int8_t>(msg.data[7]));
         Logger::logln("Serial_Adapter", "Configuration applies to this node, setting adapter type to: " + String(newType), LogLevel::LOG_INFO);
-        
+
         planetopia::adapter::AdapterFactory::saveAdapterTypeToEEPROM(newType);
         Logger::logln("Serial_Adapter", "Adapter type saved to EEPROM successfully", LogLevel::LOG_INFO);
         // Pin is automatically inferred from adapter type - no need to store it
@@ -530,7 +513,7 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
       Logger::logln("Serial_Adapter", "Unknown SERIAL_ADAPTER opcode: 0x" + String(op, HEX), LogLevel::LOG_WARN);
     }
   }
-  
+
   Logger::logln("Serial_Adapter", "Frame processing completed successfully", LogLevel::LOG_DEBUG);
 }
 

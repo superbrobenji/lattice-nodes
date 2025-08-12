@@ -15,7 +15,7 @@ bool GpioOutput::init() {
   return true;
 }
 
-bool GpioOutput::isValidOutputPin(uint8_t pin) const {
+bool GpioOutput::isValidOutputPin(uint8_t pin) {
   switch (pin) {
     case 2:
     case 4:

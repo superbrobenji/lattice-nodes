@@ -15,7 +15,7 @@ bool GpioInput::init() {
   return true;
 }
 
-bool GpioInput::isValidInputPin(uint8_t pin) const {
+bool GpioInput::isValidInputPin(uint8_t pin) {
   // Accept most GPIOs except strapping/flash pins and invalid
   switch (pin) {
     case 0:

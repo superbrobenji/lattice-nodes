@@ -6,16 +6,16 @@
 #include <WiFi.h>
 #include <Arduino.h>
 #include <esp_wifi.h>
-#include <EEPROM.h>
 #include <vector>
 #include <array>
 #include "src/Adapter/Adapter.h"
+#include "src/persistence/EEPROM_Manager.h"
 
 namespace planetopia {
 namespace mesh {
 
 using planetopia::adapter::adapter_types;
-constexpr int MAX_PEERS = 10;  // Can be raised if needed
+using planetopia::utils::EEPROM_SIZES::MAX_PEERS;  // Use constant from EEPROM_Manager
 
 // --- Mesh protocol message type ---
 enum MeshMessageType : uint8_t {
@@ -50,10 +50,6 @@ struct MasterInfo {
 class Mesh {
 private:
   static constexpr unsigned long BEACON_INTERVAL_MS = 2000;
-  static constexpr int EEPROM_PEERLIST_ADDR = 32;
-  static constexpr int EEPROM_SIZE = EEPROM_PEERLIST_ADDR + (MAX_PEERS * 6);
-
-  static constexpr int EEPROM_KEY_ADDR = 16;
   static constexpr int MESH_KEY_SIZE = 16;
 
   uint8_t meshKey[MESH_KEY_SIZE];
@@ -101,6 +97,7 @@ private:
 
   void loadMeshKeyFromEEPROM();
   void saveMeshKeyToEEPROM(const uint8_t* key);
+  void generateRandomMeshKey();
   bool meshKeyIsSet() const;
 
 public:
@@ -135,6 +132,9 @@ public:
 
   // Serial adapter helper (optional broadcast)
   static void broadcastAdapterDataStatic(adapter_types type, const uint8_t data[12]);
+
+  // Debug helper
+  void debugDumpRadio();
 };
 
 }

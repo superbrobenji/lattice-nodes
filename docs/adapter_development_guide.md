@@ -425,3 +425,9 @@ Here's a complete example of a temperature sensor adapter:
 4. Verify temperature data is broadcast back to the mesh
 
 This guide should give you everything you need to add new adapters and test different configurations in the Planetopia system!
+
+## 2025 Update – Build-time Defaults & GPIO Helpers
+
+* **DEFAULT_ADAPTER** – you no longer edit `main.ino` to pick a default adapter.  Instead change `planetopia::config::DEFAULT_ADAPTER` in `project_config.h`.
+* **GPIO helpers** – validation and `_initialized` bookkeeping are handled by `GpioOutput` / `GpioInput`.  New adapter drivers can simply call `GpioOutput::isValidOutputPin(pin)` instead of duplicating pin tables.
+* **Seven-segment optional** – if your dev board lacks the TM1637 display set `ENABLE_SEVSEG_DISPLAY = false` in `project_config.h`; the ErrorHandler will fall back to LED patterns.
