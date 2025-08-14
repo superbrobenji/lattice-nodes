@@ -22,8 +22,10 @@ void Adapter::sendDataThroughMesh(const adapter_types type, const uint8_t data[1
     mesh_transmit_fn(type, data);
     Logger::logln("Adapter", "Data sent through mesh", LogLevel::LOG_DEBUG);
   } else {
-    planetopia::err::fail(planetopia::utils::ErrorType::CONFIG_ERROR,
-                          "Adapter: Transmit function not set");
+    planetopia::err::fail(planetopia::core::ErrorTypeDigit::CONFIG,
+                         planetopia::core::ModuleDigit::ADAPTER,
+                         1,
+                         "Adapter: Transmit function not set");
   }
 }
 

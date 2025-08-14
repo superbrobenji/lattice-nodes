@@ -28,8 +28,10 @@ bool PeerManager::addPeer(const uint8_t mac[6], bool saveToEEPROM) {
 
   if (isPeerListFull()) {
     Logger::logln("PEER", "Peer list is full", LogLevel::LOG_ERROR);
-    planetopia::err::fail(planetopia::utils::ErrorType::MEMORY_ERROR,
-                          "Peer list full! Cannot add new peer.");
+    planetopia::err::fail(planetopia::core::ErrorTypeDigit::MEMORY,
+                         planetopia::core::ModuleDigit::MESH,
+                         1,
+                         "Peer list full! Cannot add new peer.");
     return false;
   }
 

@@ -9,7 +9,9 @@ namespace hardware {
 class Button : public GpioInput {
 public:
   explicit Button(uint8_t pin);
-  // Returns true if the button is currently pressed (active LOW)
+  // Initialize the button GPIO (uses internal PULL-DOWN)
+  bool init() override;
+  // Returns true if the button is currently pressed (active HIGH)
   bool isPressed();
   // Returns true if held for the given ms (blocking call)
   bool waitForHold(uint32_t ms);

@@ -14,7 +14,7 @@ namespace config {
 // Compile-time development switch. When true the firmware: skips EEPROM writes,
 // uses DEFAULT_ADAPTER, and ignores persistent role settings. Set false for
 // production flashes.
-constexpr bool DEV_MODE = true;
+constexpr bool DEV_MODE = false;
 // Node role to assume at boot when DEV_MODE is true
 constexpr bool DEFAULT_DEV_MASTER = false;
 

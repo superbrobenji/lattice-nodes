@@ -36,7 +36,10 @@ SevenSegDisplay::SevenSegDisplay(uint8_t dio, uint8_t clk)
 bool SevenSegDisplay::init() {
   if (!GpioOutput::isValidOutputPin(_dioPin) || !GpioOutput::isValidOutputPin(_clkPin)) {
     Logger::logln("7SEG", "Invalid GPIO pins", planetopia::utils::LogLevel::LOG_ERROR);
-    planetopia::err::fail(planetopia::utils::ErrorType::CONFIG_ERROR, "7Seg invalid pins");
+    planetopia::err::fail(planetopia::core::ErrorTypeDigit::CONFIG,
+                         planetopia::core::ModuleDigit::HW,
+                         1,
+                         "7Seg invalid pins");
     return false;
   }
   pinMode(_dioPin, OUTPUT);
@@ -115,7 +118,10 @@ bool SevenSegDisplay::writeByte(uint8_t b) {
   digitalWrite(_clkPin, LOW);
   if (!ack) {
     Logger::logln("7SEG", "ACK timeout", planetopia::utils::LogLevel::LOG_WARN);
-    planetopia::err::fail(planetopia::utils::ErrorType::HARDWARE_FAILURE, "7Seg ACK timeout");
+    planetopia::err::fail(planetopia::core::ErrorTypeDigit::HARDWARE,
+                         planetopia::core::ModuleDigit::HW,
+                         2,
+                         "7Seg ACK timeout");
   }
   return ack;
 }

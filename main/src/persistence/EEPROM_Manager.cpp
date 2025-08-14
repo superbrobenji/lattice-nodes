@@ -33,8 +33,10 @@ bool EEPROM_Manager::beginEEPROM() {
 
 void EEPROM_Manager::handleInitFailure() {
   Logger::logln("EEPROM", "Failed to initialize EEPROM", LogLevel::LOG_ERROR);
-  planetopia::err::fail(planetopia::utils::ErrorType::MEMORY_ERROR,
-                        "EEPROM_Manager: EEPROM.begin failed");
+  planetopia::err::fail(planetopia::core::ErrorTypeDigit::MEMORY,
+                       planetopia::core::ModuleDigit::EEPROM,
+                       1,
+                       "EEPROM_Manager: EEPROM.begin failed");
 }
 
 // --- refactored init ---

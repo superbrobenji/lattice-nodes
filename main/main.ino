@@ -158,7 +158,10 @@ void setup() {
   if (!greenLed.isInitialized()) {
     if (!greenLed.init()) {
       Logger::logln("MAIN", "FATAL: Failed to initialize green LED!", LogLevel::LOG_ERROR);
-      planetopia::err::fatal(planetopia::utils::ErrorType::HARDWARE_FAILURE, "MAIN: Failed to initialize green LED");
+      planetopia::err::fatal(planetopia::core::ErrorTypeDigit::HARDWARE,
+                            planetopia::core::ModuleDigit::CORE,
+                            1,
+                            "MAIN: Failed to initialize green LED");
       while (true) {
         delay(1000);
       }
@@ -178,7 +181,10 @@ void setup() {
   // Initialize EEPROM Manager
   if (!EEPROM_Manager::getInstance().init()) {
     Logger::logln("MAIN", "Failed to initialize EEPROM Manager", LogLevel::LOG_ERROR);
-    planetopia::err::fatal(planetopia::utils::ErrorType::MEMORY_ERROR, "EEPROM Manager init failed!");
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::MEMORY,
+                          planetopia::core::ModuleDigit::CORE,
+                          2,
+                          "EEPROM Manager init failed!");
     while (true) {
       redLed.blink(4, 100, 100);
       delay(1000);
@@ -227,7 +233,10 @@ void setup() {
 
   if (!adapter) {
     Logger::logln("MAIN", "Failed to create adapter", LogLevel::LOG_ERROR);
-    planetopia::err::fatal(planetopia::utils::ErrorType::HARDWARE_FAILURE, "MAIN: Failed to create PIR adapter");
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::HARDWARE,
+                          planetopia::core::ModuleDigit::CORE,
+                          3,
+                          "MAIN: Failed to create PIR adapter");
     while (true) {
       redLed.blink(3, 150, 150);
       delay(800);
@@ -237,7 +246,10 @@ void setup() {
 
   if (!adapter->init()) {
     Logger::logln("MAIN", "Adapter failed to initialize", LogLevel::LOG_ERROR);
-    planetopia::err::fatal(planetopia::utils::ErrorType::HARDWARE_FAILURE, "MAIN: Adapter failed to initialize");
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::HARDWARE,
+                          planetopia::core::ModuleDigit::CORE,
+                          4,
+                          "MAIN: Adapter failed to initialize");
     while (true) {
       redLed.blink(6, 100, 100);
       delay(1000);

@@ -30,8 +30,10 @@ bool PIR_Adapter::init() {
   }
 
   if (!_pir.init()) {
-    planetopia::err::fail(planetopia::utils::ErrorType::CONFIG_ERROR,
-                          "PIR_Adapter: PIR hardware failed to initialize.");
+    planetopia::err::fail(planetopia::core::ErrorTypeDigit::CONFIG,
+                         planetopia::core::ModuleDigit::ADAPTER,
+                         1,
+                         "PIR_Adapter: PIR hardware failed to initialize.");
     return false;
   }
 
@@ -85,8 +87,10 @@ void PIR_Adapter::loop() {
     _motionSent = false;
 
     if (!_pir.attachInterrupt(PIR_Adapter::detectMotionTrampoline, RISING)) {
-      planetopia::err::fail(planetopia::utils::ErrorType::HARDWARE_FAILURE,
-                            "PIR_Adapter: Could not re-attach interrupt (possible hardware error)");
+      planetopia::err::fail(planetopia::core::ErrorTypeDigit::HARDWARE,
+                           planetopia::core::ModuleDigit::ADAPTER,
+                           2,
+                           "PIR_Adapter: Could not re-attach interrupt (possible hardware error)");
       return;
     }
     _interruptEnabled = true;

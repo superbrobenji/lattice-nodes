@@ -30,8 +30,10 @@ Adapter* AdapterFactory::createAdapter(adapter_types type, int pin) {
       return new Serial_Adapter(pin);
 
     default:
-      planetopia::err::fail(planetopia::utils::ErrorType::CONFIG_ERROR,
-                            "AdapterFactory: Unknown adapter type");
+      planetopia::err::fail(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::ADAPTER,
+                           2,
+                           "AdapterFactory: Unknown adapter type");
       Logger::logln("Factory", "Error: Unknown adapter type", LogLevel::LOG_ERROR);
       return nullptr;
   }

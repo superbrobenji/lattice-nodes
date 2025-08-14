@@ -10,15 +10,38 @@
 namespace planetopia {
 namespace err {
 
-inline bool fail(utils::ErrorType type, const char* msg) {
+// Helper: map legacy ErrorType to ErrorTypeDigit
+inline ::planetopia::core::ErrorTypeDigit toDigit(utils::ErrorType t) {
+  using namespace planetopia::core;
+  switch (t) {
+    case utils::ErrorType::GENERIC: return ErrorTypeDigit::GENERIC;
+    case utils::ErrorType::SENSOR_FAIL: return ErrorTypeDigit::SENSOR;
+    case utils::ErrorType::COMMUNICATION_FAIL: return ErrorTypeDigit::COMM;
+    case utils::ErrorType::MEMORY_ERROR: return ErrorTypeDigit::MEMORY;
+    case utils::ErrorType::CONFIG_ERROR: return ErrorTypeDigit::CONFIG;
+    case utils::ErrorType::HARDWARE_FAILURE: return ErrorTypeDigit::HARDWARE;
+    default: return ErrorTypeDigit::GENERIC;
+  }
+}
+
+// Primary fail overload using digit components
+inline bool fail(::planetopia::core::ErrorTypeDigit t, ::planetopia::core::ModuleDigit m, uint8_t sub, const char* msg) {
   utils::Logger::logln("ERROR", msg, utils::LogLevel::LOG_ERROR);
-  utils::ErrorCore::getInstance().signalError(type, msg);
+  utils::ErrorCore::getInstance().signalError(t, m, sub, msg);
   return false;
 }
-[[noreturn]] inline void fatal(utils::ErrorType type, const char* msg) {
+
+// Legacy fail – keeps compatibility while showing a generic error code (sub-code 0)
+inline bool fail(utils::ErrorType type, const char* msg) {
+  return fail(toDigit(type), ::planetopia::core::ModuleDigit::CORE, 0, msg);
+}
+[[noreturn]] inline void fatal(::planetopia::core::ErrorTypeDigit t, ::planetopia::core::ModuleDigit m, uint8_t sub, const char* msg) {
   utils::Logger::logln("FATAL", msg, utils::LogLevel::LOG_ERROR);
-  utils::ErrorCore::getInstance().signalError(type, msg);
+  utils::ErrorCore::getInstance().signalError(t, m, sub, msg);
   while (true) {}
+}
+[[noreturn]] inline void fatal(utils::ErrorType type, const char* msg) {
+  fatal(toDigit(type), ::planetopia::core::ModuleDigit::CORE, 0, msg);
 }
 inline bool check(bool condition, utils::ErrorType type, const char* msg) {
   return condition ? true : fail(type, msg);

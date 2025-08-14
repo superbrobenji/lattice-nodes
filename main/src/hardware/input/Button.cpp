@@ -8,9 +8,24 @@ namespace hardware {
 Button::Button(uint8_t pin)
   : GpioInput(pin) {}
 
+bool Button::init() {
+  if (!isValidInputPin(_pin)) {
+    return false;
+  }
+  // Use the ESP32 internal pull-down resistor so the line is LOW unless actively driven HIGH.
+#if defined(ESP32)
+  pinMode(_pin, INPUT_PULLDOWN);
+#else
+  // Fallback – not all MCUs support internal pull-downs. External resistor required.
+  pinMode(_pin, INPUT);
+#endif
+  _initialized = true;
+  return true;
+}
+
 bool Button::isPressed() {
-  // Active LOW (assumes INPUT_PULLUP)
-  return digitalRead(_pin) == LOW;
+  // Active HIGH (assumes INPUT_PULLDOWN or external pull-down)
+  return digitalRead(_pin) == HIGH;
 }
 
 bool Button::waitForHold(uint32_t ms) {
