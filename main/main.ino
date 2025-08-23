@@ -58,6 +58,24 @@ static inline void getOwnMac(uint8_t out[6]) {
   esp_wifi_get_mac(WIFI_IF_STA, out);
 }
 
+// Validate configuration for server communication
+static inline void validateServerConfiguration() {
+  // Check if this is a master node intended for server communication
+  bool isMasterNode = isDevMode ? devMasterFlag : EEPROM_Manager::getInstance().loadMasterFlag();
+  bool hasSerialAdapter = (adapter && adapter->getAdapterType() == SERIAL_ADAPTER);
+  bool loggingDisabled = (planetopia::config::DEFAULT_LOG_LEVEL == planetopia::utils::LogLevel::LOG_NONE);
+  
+  if (isMasterNode && !hasSerialAdapter && planetopia::config::DEFAULT_LOG_LEVEL != planetopia::utils::LogLevel::LOG_NONE) {
+    // This is a potential misconfiguration - master node without serial adapter might cause issues
+    Logger::logln("CONFIG", "WARNING: Master node without SERIAL_ADAPTER may cause server communication issues", LogLevel::LOG_WARN);
+  }
+  
+  if (hasSerialAdapter && !loggingDisabled) {
+    Logger::logln("CONFIG", "WARNING: SERIAL_ADAPTER with logging enabled will interfere with server communication", LogLevel::LOG_WARN);
+    Logger::logln("CONFIG", "Set DEFAULT_LOG_LEVEL = LOG_NONE in project_config.h", LogLevel::LOG_WARN);
+  }
+}
+
 static inline void sendHealthReport() {
   uint8_t data[12] = { 0 };
   data[0] = OP_HEALTH_REPORT;
@@ -125,7 +143,13 @@ void dataRecvCallback(planetopia::mesh::mesh_message message) {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Planetopia Starting...");
+  
+  // Only print startup message if logging is enabled (not LOG_NONE)
+  // This prevents text output when using SERIAL_ADAPTER for server communication
+  if (planetopia::config::DEFAULT_LOG_LEVEL != planetopia::utils::LogLevel::LOG_NONE) {
+    Serial.println("Planetopia Starting...");
+  }
+  
   Logger::setLogLevel(planetopia::config::DEFAULT_LOG_LEVEL);
 
   Logger::logln("MAIN", "Logger initialized", LogLevel::LOG_INFO);
@@ -276,6 +300,10 @@ void setup() {
   adapter->setTransmitFn(&planetopia::mesh::Mesh::transmit);
 
   mesh.linkDataRecvCallback(dataRecvCallback);
+  
+  // Validate configuration for potential server communication issues
+  validateServerConfiguration();
+  
   greenLed.blink(2, 200, 200);
   redLed.blink(2, 200, 200);
 }

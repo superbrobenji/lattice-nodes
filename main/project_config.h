@@ -16,13 +16,15 @@ namespace config {
 // production flashes.
 constexpr bool DEV_MODE = false;
 // Node role to assume at boot when DEV_MODE is true
-constexpr bool DEFAULT_DEV_MASTER = false;
+// NOTE: For server communication, master node should be true
+constexpr bool DEFAULT_DEV_MASTER = true;
 
 // =====================
 // 2. Default Behaviour
 // =====================
 // Adapter instantiated on first boot or in DEV_MODE
-constexpr planetopia::adapter::adapter_types DEFAULT_ADAPTER = planetopia::adapter::PIR_ADAPTER;
+// IMPORTANT: For server communication via USB, MUST be SERIAL_ADAPTER
+constexpr planetopia::adapter::adapter_types DEFAULT_ADAPTER = planetopia::adapter::SERIAL_ADAPTER;
 // Primary mesh-beacon interval (milliseconds)
 constexpr unsigned long MASTER_BEACON_INTERVAL_MS = 2000;
 
@@ -63,7 +65,9 @@ constexpr int NUM_DEFAULT_PEERS = sizeof(DEFAULT_PEERS)/6/sizeof(uint8_t);
 // =====================
 // 6. Logging
 // =====================
-constexpr planetopia::utils::LogLevel DEFAULT_LOG_LEVEL = planetopia::utils::LogLevel::LOG_DEBUG;
+// CRITICAL: For server communication, MUST be LOG_NONE to prevent text output
+// Only enable logging (LOG_DEBUG, LOG_INFO, etc.) for development/debugging
+constexpr planetopia::utils::LogLevel DEFAULT_LOG_LEVEL = planetopia::utils::LogLevel::LOG_NONE;
 
 // =====================
 // 7. Global Limits (Tiger Style)
