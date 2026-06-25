@@ -9,6 +9,7 @@
 #include "src/persistence/EEPROM_Manager.h"
 #include "project_config.h"
 #include <esp_wifi.h>
+#include <esp_bt.h>
 #include <memory>
 #include <esp_task_wdt.h>
 
@@ -173,6 +174,9 @@ void setup() {
     }
   }
 
+  // Disable Bluetooth — unused, saves 20-30mA
+  btStop();
+
   // Check if we're in dev mode (compile-time constant takes precedence)
   isDevMode = DEV_MODE;
   if (!isDevMode) {
@@ -248,6 +252,10 @@ void setup() {
     // fatal() is [[noreturn]], so the while(true) below is never reached
     while (true) { delay(1000); }
   }
+
+  // Nodes must always receive — modem sleep drops ESP-NOW packets without AP sync
+  esp_wifi_set_ps(WIFI_PS_NONE);
+
   if (isDevMode) {
     mesh.debugDumpRadio();
   }
@@ -274,6 +282,13 @@ void setup() {
     // In production mode, load from EEPROM
     isMaster = EEPROM_Manager::getInstance().loadMasterFlag();
   }
+
+  // Master keeps 240MHz for serial USB reliability
+  // Sensor nodes: 80MHz sufficient for I/O-bound relay work, saves ~30% CPU power
+  if (!isMaster) {
+    setCpuFrequencyMhz(80);
+  }
+
   mesh.setIsMaster(isMaster);
   Logger::logln("MESH", "Mesh initialized", LogLevel::LOG_INFO);
   Logger::logln("MAIN", String("Booted as: ") + (isMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
@@ -399,4 +414,6 @@ void loop() {
   }
   // REMOVED: periodic health report was here.
   // Serial_Adapter::loop() handles this correctly when adapter type is SERIAL_ADAPTER.
+
+  delay(1);  // Yield to FreeRTOS idle task — allows CPU power gating between iterations
 }
