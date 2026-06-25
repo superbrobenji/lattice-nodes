@@ -1005,6 +1005,7 @@ void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
 
 void Mesh::loop() {
   drainRecvQueue();
+  EEPROM_Manager::getInstance().flushIfDirty();
 
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
   // Serial.write() must not be called from that callback — safe to do here in loop().

@@ -357,6 +357,7 @@ void loop() {
         Logger::logln("MAIN", "Restarting in 2 seconds for new role...", LogLevel::LOG_INFO);
         greenLed.blink(newMaster ? 3 : 2, 200, 200);
         delay(2000);
+        EEPROM_Manager::getInstance().forceFlush();
         ESP.restart();
       }
     }
@@ -385,6 +386,7 @@ void loop() {
         redLed.blink(5, 100, 100);
         greenLed.blink(5, 100, 100);
         delay(3000);
+        EEPROM_Manager::getInstance().forceFlush();
         ESP.restart();
       }
     }

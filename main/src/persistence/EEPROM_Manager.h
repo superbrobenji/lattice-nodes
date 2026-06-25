@@ -68,6 +68,9 @@ class EEPROM_Manager {
 private:
   bool isInitialized;
   bool isDevMode;
+  bool _dirty;
+  uint32_t _lastFlushMs;
+  static constexpr uint32_t EEPROM_FLUSH_INTERVAL_MS = 5000;
 
   // Private constructor for singleton pattern
   EEPROM_Manager();
@@ -77,6 +80,7 @@ private:
   void logOperation(const char* operation, const char* details = nullptr);
   bool beginEEPROM();
   void handleInitFailure();
+  void markDirty();
 
 public:
   // Singleton pattern
@@ -135,6 +139,10 @@ public:
   bool loadKnownMasterMac(uint8_t mac[6]);
   void saveKnownMasterMac(const uint8_t mac[6]);
   void clearKnownMasterMac();
+
+  // Deferred flush API
+  void flushIfDirty();
+  void forceFlush();
 
   // Utility operations
   void clearAll();

@@ -5,7 +5,7 @@ namespace planetopia {
 namespace utils {
 
 EEPROM_Manager::EEPROM_Manager()
-  : isInitialized(false), isDevMode(false) {
+  : isInitialized(false), isDevMode(false), _dirty(false), _lastFlushMs(0) {
 }
 
 EEPROM_Manager::~EEPROM_Manager() {
@@ -147,6 +147,25 @@ void EEPROM_Manager::logOperation(const char* operation, const char* details) {
   }
 }
 
+// Deferred flush implementation
+void EEPROM_Manager::markDirty() { _dirty = true; }
+
+void EEPROM_Manager::flushIfDirty() {
+  if (!_dirty) return;
+  if (millis() - _lastFlushMs < EEPROM_FLUSH_INTERVAL_MS) return;
+  EEPROM.commit();
+  _dirty = false;
+  _lastFlushMs = millis();
+  logOperation("EEPROM flushed (deferred)");
+}
+
+void EEPROM_Manager::forceFlush() {
+  if (!_dirty) return;
+  EEPROM.commit();
+  _dirty = false;
+  _lastFlushMs = millis();
+}
+
 // Master flag operations
 bool EEPROM_Manager::loadMasterFlag() {
   if (!ensureInitialized()) return false;
@@ -165,7 +184,7 @@ void EEPROM_Manager::saveMasterFlag(bool isMaster) {
   }
 
   EEPROM.write(EEPROM_ADDRESSES::MASTER_FLAG, isMaster ? 1 : 0);
-  EEPROM.commit();
+  markDirty();
   logOperation("Master flag saved", isMaster ? "Master" : "Node");
 }
 
@@ -187,7 +206,7 @@ void EEPROM_Manager::saveDevFlag(bool isDev) {
   }
 
   EEPROM.write(EEPROM_ADDRESSES::DEV_FLAG, isDev ? 1 : 0);
-  EEPROM.commit();
+  markDirty();
   logOperation("Dev flag saved", isDev ? "Development" : "Production");
 }
 
@@ -220,7 +239,7 @@ void EEPROM_Manager::saveMeshKey(const uint8_t* key, size_t keySize) {
   for (int i = 0; i < EEPROM_SIZES::MESH_KEY_SIZE; ++i) {
     EEPROM.write(EEPROM_ADDRESSES::MESH_KEY + i, key[i]);
   }
-  EEPROM.commit();
+  markDirty();
   logOperation("Mesh key saved");
 }
 
@@ -261,7 +280,7 @@ void EEPROM_Manager::savePeerList(const uint8_t* peerRecords, size_t numPeers) {
   for (int i = 0; i < static_cast<int>(numPeers * EEPROM_SIZES::PEER_RECORD_SIZE); ++i) {
     EEPROM.write(EEPROM_ADDRESSES::PEER_LIST + i, peerRecords[i]);
   }
-  EEPROM.commit();  // Single commit — atomic from power-loss perspective
+  markDirty();  // Deferred commit — periodic flush coalesces burst writes
   logOperation("Peer list saved", String(numPeers).c_str());
 }
 
@@ -282,7 +301,7 @@ void EEPROM_Manager::clearPeerList() {
   for (int i = 0; i < EEPROM_SIZES::PEER_LIST_SIZE; ++i) {
     EEPROM.write(EEPROM_ADDRESSES::PEER_LIST + i, 0xFF);
   }
-  EEPROM.commit();
+  markDirty();
   logOperation("Peer list cleared");
 }
 
@@ -306,7 +325,7 @@ void EEPROM_Manager::saveAdapterType(uint8_t adapterType) {
   }
 
   EEPROM.write(EEPROM_ADDRESSES::ADAPTER_TYPE, adapterType);
-  EEPROM.commit();
+  markDirty();
   logOperation("Adapter type saved", String(adapterType).c_str());
 }
 
@@ -318,12 +337,12 @@ uint8_t EEPROM_Manager::loadRebootCount() {
 void EEPROM_Manager::saveRebootCount(uint8_t count) {
   if (!ensureInitialized() || isDevMode) return;
   EEPROM.write(EEPROM_ADDRESSES::REBOOT_COUNT, count);
-  EEPROM.commit();
+  markDirty();
 }
 void EEPROM_Manager::saveRebootReason(uint8_t reason) {
   if (!ensureInitialized() || isDevMode) return;
   EEPROM.write(EEPROM_ADDRESSES::REBOOT_REASON, reason);
-  EEPROM.commit();
+  markDirty();
 }
 uint8_t EEPROM_Manager::loadRebootReason() {
   if (!ensureInitialized()) return 0xFF;
@@ -418,14 +437,14 @@ bool EEPROM_Manager::loadKnownMasterMac(uint8_t mac[6]) {
 void EEPROM_Manager::saveKnownMasterMac(const uint8_t mac[6]) {
   if (!ensureInitialized() || isDevMode) return;
   for (int i = 0; i < 6; ++i) EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC + i, mac[i]);
-  EEPROM.commit();
+  markDirty();
   logOperation("Known master MAC saved");
 }
 
 void EEPROM_Manager::clearKnownMasterMac() {
   if (!ensureInitialized() || isDevMode) return;
   for (int i = 0; i < 6; ++i) EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC + i, 0xFF);
-  EEPROM.commit();
+  markDirty();
   logOperation("Known master MAC cleared");
 }
 
