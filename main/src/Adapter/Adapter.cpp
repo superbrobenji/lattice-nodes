@@ -35,8 +35,11 @@ void Adapter::setTransmitFn(TransmitPtr fn) {
 }
 
 void Adapter::onMeshData(const planetopia::mesh::mesh_message& message) {
-  if (message.dataType != _adapterType) return;
-  onMeshDataImpl(message);
+  // Always dispatch SERIAL_ADAPTER control messages to every node type
+  // so that OP_CONFIG_SET can reconfigure any node regardless of its current adapter
+  if (message.dataType == SERIAL_ADAPTER || message.dataType == _adapterType) {
+    onMeshDataImpl(message);
+  }
 }
 
 void Adapter::onMeshDataImpl(const planetopia::mesh::mesh_message& /*message*/) {
