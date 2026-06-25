@@ -32,10 +32,10 @@ private:
 
   bool setState(bool state);
 
-  static Led* _systemErrorLed;  // Static pointer to the error handler's LED
+  static Led* _systemErrorLed; // Static pointer to the error handler's LED
 };
 
-}  // namespace hardware
-}  // namespace planetopia
+} // namespace hardware
+} // namespace planetopia
 
 #endif

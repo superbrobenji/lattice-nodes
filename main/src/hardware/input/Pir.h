@@ -26,6 +26,6 @@ private:
   volatile bool _motionDetected;
 };
 
-}  // namespace hardware
-}  // namespace planetopia
+} // namespace hardware
+} // namespace planetopia
 #endif

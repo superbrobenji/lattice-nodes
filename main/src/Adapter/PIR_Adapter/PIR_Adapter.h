@@ -40,7 +40,7 @@ private:
   void detectMotion();
 };
 
-}  // namespace adapter
-}  // namespace planetopia
+} // namespace adapter
+} // namespace planetopia
 
 #endif

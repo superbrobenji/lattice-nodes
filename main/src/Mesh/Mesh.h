@@ -10,7 +10,7 @@
 #include <cstdint>
 #include "src/Adapter/Adapter.h"
 #include "src/persistence/EEPROM_Manager.h"
-#include "../../project_config.h"  // Added for global limits/config
+#include "../../project_config.h" // Added for global limits/config
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -23,22 +23,23 @@ namespace planetopia {
 namespace mesh {
 
 using planetopia::adapter::adapter_types;
-using planetopia::utils::EEPROM_SIZES::MAX_PEERS;  // Use constant from EEPROM_Manager
+using planetopia::utils::EEPROM_SIZES::MAX_PEERS; // Use constant from EEPROM_Manager
 
 // --- Mesh protocol message type ---
 enum MeshMessageType : uint8_t {
-  MESH_TYPE_ADAPTER_DATA         = 0,
-  MESH_TYPE_MASTER_BEACON        = 1,
-  MESH_TYPE_ENROLLMENT           = 2,
-  MESH_TYPE_SERIAL_CMD_BROADCAST = 3,  // server→device only
-  MESH_TYPE_JOIN_ACK             = 4,  // server→device only; was 3, changed to avoid collision with SERIAL_CMD_BROADCAST
+  MESH_TYPE_ADAPTER_DATA = 0,
+  MESH_TYPE_MASTER_BEACON = 1,
+  MESH_TYPE_ENROLLMENT = 2,
+  MESH_TYPE_SERIAL_CMD_BROADCAST = 3, // server→device only
+  MESH_TYPE_JOIN_ACK =
+      4, // server→device only; was 3, changed to avoid collision with SERIAL_CMD_BROADCAST
 };
 
 static constexpr uint8_t PROTO_VERSION = 1;
 
 // --- Mesh message struct (packed: wire protocol, no padding) ---
 struct __attribute__((packed)) mesh_message {
-  uint8_t protoVersion;           // Always PROTO_VERSION (1)
+  uint8_t protoVersion; // Always PROTO_VERSION (1)
   MeshMessageType messageType;
   adapter_types dataType;
   uint8_t originMacAddress[6];
@@ -46,8 +47,8 @@ struct __attribute__((packed)) mesh_message {
   uint8_t lastHopMacAddress[6];
   uint8_t data[12];
   uint8_t hopCount;
-  uint32_t epochNum;              // Boot count of origin node (replay protection)
-  uint16_t seqNum;                // Per-boot message counter (replay protection)
+  uint32_t epochNum;               // Boot count of origin node (replay protection)
+  uint16_t seqNum;                 // Per-boot message counter (replay protection)
   uint8_t enrollmentPublicKey[32]; // Curve25519 key; zero for non-enrollment messages
 };
 // 1+1+4+6+6+6+12+1+4+2+32 = 75 bytes (adapter_types is int32_t = 4B, packed)
@@ -56,15 +57,15 @@ static_assert(sizeof(mesh_message) == 75, "mesh_message size changed — update 
 // Peer info struct for RAM and EEPROM storage
 struct PeerInfo {
   uint8_t mac[6];
-  uint8_t publicKey[32];   // Curve25519 public key (zero = not yet known)
+  uint8_t publicKey[32]; // Curve25519 public key (zero = not yet known)
   uint32_t lastSeenMillis;
 };
 
 // Master routing info
 struct MasterInfo {
   uint8_t mac[6];
-  uint8_t distance;    // Hops to master
-  uint8_t nextHop[6];  // Next hop MAC
+  uint8_t distance;   // Hops to master
+  uint8_t nextHop[6]; // Next hop MAC
 };
 
 class Mesh {
@@ -87,16 +88,18 @@ private:
 
   esp_now_peer_info_t peerInfo;
 
-  PeerInfo peerMacs[MAX_PEERS];    // Fixed-size peer list (no heap alloc)
-  size_t peerCount;                // Number of valid entries in peerMacs
+  PeerInfo peerMacs[MAX_PEERS]; // Fixed-size peer list (no heap alloc)
+  size_t peerCount;             // Number of valid entries in peerMacs
 
   void readMacAddress();
   void printMac(const uint8_t mac[6]);
   void printMeshMessage(const mesh_message& msg);
 
   static void onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status);
-  void IRAM_ATTR onDataRecvCallback(const esp_now_recv_info* mac, const uint8_t* incomingData, int len);
-  static void IRAM_ATTR dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data, int len);
+  void IRAM_ATTR onDataRecvCallback(const esp_now_recv_info* mac, const uint8_t* incomingData,
+                                    int len);
+  static void IRAM_ATTR dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data,
+                                           int len);
 
   mesh_message buildMessage(adapter_types type, const uint8_t data[12], MeshMessageType msgType);
 
@@ -106,7 +109,8 @@ private:
   bool isMaster;
   uint32_t lastBeaconMillis;
   uint32_t lastMasterBeaconReceivedMs;
-  static constexpr uint32_t STALE_MASTER_THRESHOLD_MS = planetopia::config::STALE_MASTER_THRESHOLD_MS;
+  static constexpr uint32_t STALE_MASTER_THRESHOLD_MS =
+      planetopia::config::STALE_MASTER_THRESHOLD_MS;
 
   // Peer EEPROM management
   void loadPeersFromEEPROM();
@@ -125,7 +129,9 @@ private:
   void sendMessage(const uint8_t target[6], mesh_message msg);
   void broadcastToAllPeers(mesh_message msg);
 
-  void transmitCore(const adapter_types type, const uint8_t data[12], MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA, const mesh_message* msgOverride = nullptr);
+  void transmitCore(const adapter_types type, const uint8_t data[12],
+                    MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA,
+                    const mesh_message* msgOverride = nullptr);
 
   void loadMeshKeyFromEEPROM();
   void saveMeshKeyToEEPROM(const uint8_t* key);
@@ -155,7 +161,11 @@ private:
   uint32_t bootEpoch;
   uint16_t txSeqNum;
 
-  struct ReplayEntry { uint8_t mac[6]; uint32_t epoch; uint16_t seq; };
+  struct ReplayEntry {
+    uint8_t mac[6];
+    uint32_t epoch;
+    uint16_t seq;
+  };
   static constexpr size_t REPLAY_CACHE_SIZE = 16;
   ReplayEntry replayCache[REPLAY_CACHE_SIZE];
   size_t replayCacheIdx;
@@ -173,12 +183,12 @@ private:
 
   // TOFU master MAC — learned on first enrollment beacon, persisted across reboots
   uint8_t knownMasterMac[6];
-  bool    hasMasterMac;
+  bool hasMasterMac;
 
   // Pending enrollment relay (filled in ESP-NOW callback, drained in loop())
   volatile bool _pendingEnrollmentRelay = false;
-  uint8_t       _pendingEnrollmentMac[6]{};
-  uint8_t       _pendingEnrollmentPubKey[32]{};
+  uint8_t _pendingEnrollmentMac[6]{};
+  uint8_t _pendingEnrollmentPubKey[32]{};
 
   // --- ESP-NOW receive ring buffer (lock-free SPSC) ---
   static constexpr size_t RECV_QUEUE_SIZE = 8;
@@ -189,8 +199,8 @@ private:
   };
 
   RecvQueueEntry recvQueue[RECV_QUEUE_SIZE];
-  volatile uint8_t recvQueueHead;  // written by WiFi task (callback)
-  uint8_t recvQueueTail;           // read by main task (loop)
+  volatile uint8_t recvQueueHead; // written by WiFi task (callback)
+  uint8_t recvQueueTail;          // read by main task (loop)
 
   void drainRecvQueue();
 
@@ -216,12 +226,8 @@ public:
   void loop();
 
   // Node role config
-  void setIsMaster(bool value) {
-    isMaster = value;
-  }
-  bool getIsMaster() const {
-    return isMaster;
-  }
+  void setIsMaster(bool value) { isMaster = value; }
+  bool getIsMaster() const { return isMaster; }
 
   // Peer management API (optional, can be used in your app/UI)
   void addPeer(const uint8_t mac[6]);
@@ -250,15 +256,14 @@ public:
   void enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]);
 
   // Get current hop count to master (0 if this node is master)
-  uint8_t getHopCount() const {
-    return isMaster ? 0 : currentMaster.distance;
-  }
+  uint8_t getHopCount() const { return isMaster ? 0 : currentMaster.distance; }
 
 #if SIMULATE_MODE
   // Inject a message directly into the receive queue (bypasses radio — for dev/test only)
   void injectReceivedMessage(const uint8_t* srcMac, const mesh_message& msg) {
     uint8_t nextHead = (recvQueueHead + 1) % RECV_QUEUE_SIZE;
-    if (nextHead == recvQueueTail) return;  // Queue full — drop
+    if (nextHead == recvQueueTail)
+      return; // Queue full — drop
     RecvQueueEntry& slot = recvQueue[recvQueueHead];
     memcpy(slot.srcMac, srcMac, 6);
     slot.msg = msg;
@@ -267,7 +272,7 @@ public:
 #endif
 };
 
-}  // namespace mesh
-}  // namespace planetopia
+} // namespace mesh
+} // namespace planetopia
 
-#endif  // MESH_H
+#endif // MESH_H

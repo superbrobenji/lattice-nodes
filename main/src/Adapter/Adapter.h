@@ -8,7 +8,7 @@ namespace planetopia {
 namespace mesh {
 struct mesh_message;
 }
-}
+} // namespace planetopia
 
 namespace planetopia {
 namespace adapter {
@@ -26,21 +26,22 @@ enum class adapter_types : int32_t {
 class Adapter {
 
 protected:
-  int _pin;                    // Hardware pin associated with the adapter
-  adapter_types _adapterType;  // Type identifier for the adapter
+  int _pin;                   // Hardware pin associated with the adapter
+  adapter_types _adapterType; // Type identifier for the adapter
   typedef void (*TransmitPtr)(adapter_types, const uint8_t[12]);
   TransmitPtr mesh_transmit_fn;
 
 public:
-  explicit Adapter(int pin);     // Constructor
-  virtual ~Adapter() = default;  // Ensure polymorphic destruction
+  explicit Adapter(int pin);    // Constructor
+  virtual ~Adapter() = default; // Ensure polymorphic destruction
 
-  adapter_types getAdapterType() const;                                        // Returns the adapter type
-  void sendDataThroughMesh(const adapter_types type, const uint8_t data[12]);  // sends data through mesh
+  adapter_types getAdapterType() const; // Returns the adapter type
+  void sendDataThroughMesh(const adapter_types type,
+                           const uint8_t data[12]); // sends data through mesh
   void setTransmitFn(TransmitPtr fn);
 
-  virtual bool init() = 0;  // To be implemented by derived classes
-  virtual void loop() = 0;  // Called repeatedly in the main loop
+  virtual bool init() = 0; // To be implemented by derived classes
+  virtual void loop() = 0; // Called repeatedly in the main loop
   // Called when mesh data is received.
   // Handles OP_CONFIG_SET (SERIAL_ADAPTER dataType) for ALL node types in the base class
   // so that any node can be reconfigured regardless of its current adapter type.
@@ -52,6 +53,6 @@ protected:
   virtual void onMeshDataImpl(const planetopia::mesh::mesh_message& message);
 };
 
-}
-}
+} // namespace adapter
+} // namespace planetopia
 #endif

@@ -13,56 +13,65 @@
 typedef PB_BYTES_ARRAY_T(12) mesh_MeshMessage_data_t;
 typedef PB_BYTES_ARRAY_T(32) mesh_MeshMessage_public_key_t;
 typedef struct _mesh_MeshMessage {
-    uint32_t messageType;
-    int32_t dataType;
-    pb_byte_t originMacAddress[6];
-    pb_byte_t targetMacAddress[6];
-    pb_byte_t lastHopMacAddress[6];
-    bool has_data;
-    mesh_MeshMessage_data_t data;
-    uint32_t hopCount;
-    uint32_t epochNum;
-    uint32_t seqNum;
-    uint32_t protoVersion;
-    bool has_public_key;
-    mesh_MeshMessage_public_key_t public_key;
+  uint32_t messageType;
+  int32_t dataType;
+  pb_byte_t originMacAddress[6];
+  pb_byte_t targetMacAddress[6];
+  pb_byte_t lastHopMacAddress[6];
+  bool has_data;
+  mesh_MeshMessage_data_t data;
+  uint32_t hopCount;
+  uint32_t epochNum;
+  uint32_t seqNum;
+  uint32_t protoVersion;
+  bool has_public_key;
+  mesh_MeshMessage_public_key_t public_key;
 } mesh_MeshMessage;
-
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* Initializer values for message structs */
-#define mesh_MeshMessage_init_default            {0, 0, {0}, {0}, {0}, false, {0, {0}}, 0, 0, 0, 0, false, {0, {0}}}
-#define mesh_MeshMessage_init_zero               {0, 0, {0}, {0}, {0}, false, {0, {0}}, 0, 0, 0, 0, false, {0, {0}}}
+#define mesh_MeshMessage_init_default                                                              \
+  {                                                                                                \
+    0, 0, {0}, {0}, {0}, false, {0, {0}}, 0, 0, 0, 0, false, {                                     \
+      0, {0}                                                                                       \
+    }                                                                                              \
+  }
+#define mesh_MeshMessage_init_zero                                                                 \
+  {                                                                                                \
+    0, 0, {0}, {0}, {0}, false, {0, {0}}, 0, 0, 0, 0, false, {                                     \
+      0, {0}                                                                                       \
+    }                                                                                              \
+  }
 
 /* Field tags (for use in manual encoding/decoding) */
-#define mesh_MeshMessage_messageType_tag         1
-#define mesh_MeshMessage_dataType_tag            2
-#define mesh_MeshMessage_originMacAddress_tag    3
-#define mesh_MeshMessage_targetMacAddress_tag    4
-#define mesh_MeshMessage_lastHopMacAddress_tag   5
-#define mesh_MeshMessage_data_tag                6
-#define mesh_MeshMessage_hopCount_tag            7
-#define mesh_MeshMessage_epochNum_tag            8
-#define mesh_MeshMessage_seqNum_tag              9
-#define mesh_MeshMessage_protoVersion_tag        10
-#define mesh_MeshMessage_public_key_tag          11
+#define mesh_MeshMessage_messageType_tag 1
+#define mesh_MeshMessage_dataType_tag 2
+#define mesh_MeshMessage_originMacAddress_tag 3
+#define mesh_MeshMessage_targetMacAddress_tag 4
+#define mesh_MeshMessage_lastHopMacAddress_tag 5
+#define mesh_MeshMessage_data_tag 6
+#define mesh_MeshMessage_hopCount_tag 7
+#define mesh_MeshMessage_epochNum_tag 8
+#define mesh_MeshMessage_seqNum_tag 9
+#define mesh_MeshMessage_protoVersion_tag 10
+#define mesh_MeshMessage_public_key_tag 11
 
 /* Struct field encoding specification for nanopb */
-#define mesh_MeshMessage_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UINT32,   messageType,       1) \
-X(a, STATIC,   SINGULAR, SINT32,   dataType,          2) \
-X(a, STATIC,   SINGULAR, FIXED_LENGTH_BYTES, originMacAddress,   3) \
-X(a, STATIC,   SINGULAR, FIXED_LENGTH_BYTES, targetMacAddress,   4) \
-X(a, STATIC,   SINGULAR, FIXED_LENGTH_BYTES, lastHopMacAddress,   5) \
-X(a, STATIC,   OPTIONAL, BYTES,    data,              6) \
-X(a, STATIC,   SINGULAR, UINT32,   hopCount,          7) \
-X(a, STATIC,   SINGULAR, UINT32,   epochNum,          8) \
-X(a, STATIC,   SINGULAR, UINT32,   seqNum,            9) \
-X(a, STATIC,   SINGULAR, UINT32,   protoVersion,     10) \
-X(a, STATIC,   OPTIONAL, BYTES,    public_key,       11)
+#define mesh_MeshMessage_FIELDLIST(X, a)                                                           \
+  X(a, STATIC, SINGULAR, UINT32, messageType, 1)                                                   \
+  X(a, STATIC, SINGULAR, SINT32, dataType, 2)                                                      \
+  X(a, STATIC, SINGULAR, FIXED_LENGTH_BYTES, originMacAddress, 3)                                  \
+  X(a, STATIC, SINGULAR, FIXED_LENGTH_BYTES, targetMacAddress, 4)                                  \
+  X(a, STATIC, SINGULAR, FIXED_LENGTH_BYTES, lastHopMacAddress, 5)                                 \
+  X(a, STATIC, OPTIONAL, BYTES, data, 6)                                                           \
+  X(a, STATIC, SINGULAR, UINT32, hopCount, 7)                                                      \
+  X(a, STATIC, SINGULAR, UINT32, epochNum, 8)                                                      \
+  X(a, STATIC, SINGULAR, UINT32, seqNum, 9)                                                        \
+  X(a, STATIC, SINGULAR, UINT32, protoVersion, 10)                                                 \
+  X(a, STATIC, OPTIONAL, BYTES, public_key, 11)
 #define mesh_MeshMessage_CALLBACK NULL
 #define mesh_MeshMessage_DEFAULT NULL
 
@@ -72,8 +81,8 @@ extern const pb_msgdesc_t mesh_MeshMessage_msg;
 #define mesh_MeshMessage_fields &mesh_MeshMessage_msg
 
 /* Maximum encoded size of messages (where known) */
-#define MESH_MESH_PB_H_MAX_SIZE                  mesh_MeshMessage_size
-#define mesh_MeshMessage_size                    108
+#define MESH_MESH_PB_H_MAX_SIZE mesh_MeshMessage_size
+#define mesh_MeshMessage_size 108
 
 #ifdef __cplusplus
 } /* extern "C" */

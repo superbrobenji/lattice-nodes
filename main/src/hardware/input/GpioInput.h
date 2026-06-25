@@ -20,7 +20,7 @@ protected:
   bool _initialized;
 };
 
-}  // namespace hardware
-}  // namespace planetopia
+} // namespace hardware
+} // namespace planetopia
 
 #endif

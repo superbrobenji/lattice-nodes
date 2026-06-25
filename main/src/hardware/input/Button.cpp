@@ -5,8 +5,7 @@
 namespace planetopia {
 namespace hardware {
 
-Button::Button(uint8_t pin)
-  : GpioInput(pin) {}
+Button::Button(uint8_t pin) : GpioInput(pin) {}
 
 bool Button::init() {
   if (!isValidInputPin(_pin)) {
@@ -26,21 +25,25 @@ bool Button::init() {
 bool Button::isPressed() {
   uint8_t highCount = 0;
   for (uint8_t i = 0; i < DEBOUNCE_READS; ++i) {
-    if (digitalRead(_pin) == HIGH) ++highCount;
-    if (i < DEBOUNCE_READS - 1) delay(DEBOUNCE_DELAY_MS);
+    if (digitalRead(_pin) == HIGH)
+      ++highCount;
+    if (i < DEBOUNCE_READS - 1)
+      delay(DEBOUNCE_DELAY_MS);
   }
-  return highCount >= 2;  // majority vote: 2 of 3 reads HIGH
+  return highCount >= 2; // majority vote: 2 of 3 reads HIGH
 }
 
 bool Button::waitForHold(uint32_t ms) {
   uint32_t start = millis();
-  if (!isPressed()) return false;
+  if (!isPressed())
+    return false;
   while (isPressed()) {
-    if (static_cast<uint32_t>(millis() - start) >= ms) return true;
-    delay(10);  // debounce, yield to RTOS
+    if (static_cast<uint32_t>(millis() - start) >= ms)
+      return true;
+    delay(10); // debounce, yield to RTOS
   }
   return false;
 }
 
-}  // namespace hardware
-}  // namespace planetopia
+} // namespace hardware
+} // namespace planetopia

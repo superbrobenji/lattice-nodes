@@ -21,7 +21,7 @@ private:
   static constexpr uint8_t DEBOUNCE_DELAY_MS = 5;
 };
 
-}  // namespace hardware
-}  // namespace planetopia
+} // namespace hardware
+} // namespace planetopia
 
 #endif

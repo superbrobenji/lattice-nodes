@@ -11,8 +11,7 @@ using namespace planetopia::utils;
 Led* Led::_systemErrorLed = nullptr;
 
 // CONSTRUCTOR — now forwards pin to base GpioOutput!
-Led::Led(uint8_t pin)
-  : GpioOutput(pin), _isOn(false) {}
+Led::Led(uint8_t pin) : GpioOutput(pin), _isOn(false) {}
 
 Led::~Led() {
   if (_initialized) {
@@ -28,9 +27,7 @@ bool Led::init() {
   if (!GpioOutput::init()) {
     if (this != _systemErrorLed) {
       planetopia::err::fail(planetopia::core::ErrorTypeDigit::CONFIG,
-                           planetopia::core::ModuleDigit::HW,
-                           1,
-                           "Led: Invalid pin number");
+                            planetopia::core::ModuleDigit::HW, 1, "Led: Invalid pin number");
     }
     Logger::logln("Led", "ERROR: Invalid pin number for LED: " + String(_pin), LogLevel::LOG_ERROR);
     return false;
@@ -45,9 +42,8 @@ bool Led::on() {
   if (!_initialized) {
     if (this != _systemErrorLed) {
       planetopia::err::fail(planetopia::core::ErrorTypeDigit::HARDWARE,
-                           planetopia::core::ModuleDigit::HW,
-                           2,
-                           "Led: on() called before initialization");
+                            planetopia::core::ModuleDigit::HW, 2,
+                            "Led: on() called before initialization");
     }
     Logger::logln("Led", "ERROR: on() called before initialization", LogLevel::LOG_ERROR);
     return false;
@@ -59,9 +55,8 @@ bool Led::off() {
   if (!_initialized) {
     if (this != _systemErrorLed) {
       planetopia::err::fail(planetopia::core::ErrorTypeDigit::HARDWARE,
-                           planetopia::core::ModuleDigit::HW,
-                           3,
-                           "Led: off() called before initialization");
+                            planetopia::core::ModuleDigit::HW, 3,
+                            "Led: off() called before initialization");
     }
     Logger::logln("Led", "ERROR: off() called before initialization", LogLevel::LOG_ERROR);
     return false;
@@ -73,9 +68,8 @@ bool Led::toggle() {
   if (!_initialized) {
     if (this != _systemErrorLed) {
       planetopia::err::fail(planetopia::core::ErrorTypeDigit::HARDWARE,
-                           planetopia::core::ModuleDigit::HW,
-                           4,
-                           "Led: toggle() called before initialization");
+                            planetopia::core::ModuleDigit::HW, 4,
+                            "Led: toggle() called before initialization");
     }
     Logger::logln("Led", "ERROR: toggle() called before initialization", LogLevel::LOG_ERROR);
     return false;
@@ -94,10 +88,12 @@ uint8_t Led::getPin() const {
 }
 
 bool Led::setState(bool state) {
-  if (_isOn == state) return true;
+  if (_isOn == state)
+    return true;
   digitalWrite(_pin, state ? HIGH : LOW);
   _isOn = state;
-  Logger::logln("Led", String("LED on pin ") + String(_pin) + (state ? " ON" : " OFF"), LogLevel::LOG_DEBUG);
+  Logger::logln("Led", String("LED on pin ") + String(_pin) + (state ? " ON" : " OFF"),
+                LogLevel::LOG_DEBUG);
   return true;
 }
 
@@ -109,9 +105,8 @@ bool Led::blink(uint8_t times, unsigned int onTimeMs, unsigned int offTimeMs) {
   if (!_initialized) {
     if (this != _systemErrorLed) {
       planetopia::err::fail(planetopia::core::ErrorTypeDigit::HARDWARE,
-                           planetopia::core::ModuleDigit::HW,
-                           5,
-                           "Led: blink() called before initialization");
+                            planetopia::core::ModuleDigit::HW, 5,
+                            "Led: blink() called before initialization");
     }
     Logger::logln("Led", "ERROR: blink() called before initialization", LogLevel::LOG_ERROR);
     return false;
@@ -120,11 +115,13 @@ bool Led::blink(uint8_t times, unsigned int onTimeMs, unsigned int offTimeMs) {
     setState(true);
     delay(onTimeMs);
     setState(false);
-    if (i < times - 1) delay(offTimeMs);
+    if (i < times - 1)
+      delay(offTimeMs);
   }
-  Logger::logln("Led", String("Blink pattern: ") + String(times) + "x on pin " + String(_pin), LogLevel::LOG_DEBUG);
+  Logger::logln("Led", String("Blink pattern: ") + String(times) + "x on pin " + String(_pin),
+                LogLevel::LOG_DEBUG);
   return true;
 }
 
-}
-}
+} // namespace hardware
+} // namespace planetopia

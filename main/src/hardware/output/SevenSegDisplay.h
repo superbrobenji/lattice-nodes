@@ -33,7 +33,7 @@ private:
   uint8_t encodeDigit(int d);
 };
 
-}  // namespace hardware
-}  // namespace planetopia
+} // namespace hardware
+} // namespace planetopia
 
 #endif

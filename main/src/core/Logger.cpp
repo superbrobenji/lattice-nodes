@@ -14,7 +14,8 @@ LogLevel Logger::getLogLevel() {
 }
 
 void Logger::debug(const char* fmt, ...) {
-  if (currentLevel > LogLevel::LOG_DEBUG) return;
+  if (currentLevel > LogLevel::LOG_DEBUG)
+    return;
   va_list args;
   va_start(args, fmt);
   Serial.print("[DEBUG] ");
@@ -24,7 +25,8 @@ void Logger::debug(const char* fmt, ...) {
 }
 
 void Logger::info(const char* fmt, ...) {
-  if (currentLevel > LogLevel::LOG_INFO) return;
+  if (currentLevel > LogLevel::LOG_INFO)
+    return;
   va_list args;
   va_start(args, fmt);
   Serial.print("[INFO] ");
@@ -34,7 +36,8 @@ void Logger::info(const char* fmt, ...) {
 }
 
 void Logger::warn(const char* fmt, ...) {
-  if (currentLevel > LogLevel::LOG_WARN) return;
+  if (currentLevel > LogLevel::LOG_WARN)
+    return;
   va_list args;
   va_start(args, fmt);
   Serial.print("[WARN] ");
@@ -44,7 +47,8 @@ void Logger::warn(const char* fmt, ...) {
 }
 
 void Logger::error(const char* fmt, ...) {
-  if (currentLevel > LogLevel::LOG_ERROR) return;
+  if (currentLevel > LogLevel::LOG_ERROR)
+    return;
   va_list args;
   va_start(args, fmt);
   Serial.print("[ERROR] ");
@@ -54,7 +58,8 @@ void Logger::error(const char* fmt, ...) {
 }
 
 void Logger::logln(const char* tag, const String& message, LogLevel level) {
-  if (currentLevel > level) return;
+  if (currentLevel > level)
+    return;
   Serial.print("[");
   Serial.print(tag);
   Serial.print("] ");
@@ -62,12 +67,13 @@ void Logger::logln(const char* tag, const String& message, LogLevel level) {
 }
 
 void Logger::log(const char* tag, const String& message, LogLevel level) {
-  if (currentLevel > level) return;
+  if (currentLevel > level)
+    return;
   Serial.print("[");
   Serial.print(tag);
   Serial.print("] ");
   Serial.print(message);
 }
 
-}
-}
+} // namespace utils
+} // namespace planetopia
