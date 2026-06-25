@@ -7,7 +7,6 @@
 #include "src/error/ErrorCore.h"
 #include "src/persistence/EEPROM_Manager.h"
 #include "project_config.h"
-#include <esp_wifi.h>
 
 constexpr unsigned long MASTER_BEACON_INTERVAL_MS = planetopia::config::MASTER_BEACON_INTERVAL_MS;
 
@@ -49,15 +48,6 @@ bool devMasterFlag = planetopia::config::DEFAULT_DEV_MASTER;  // runtime master 
 const uint8_t (*defaultPeerList)[6] = planetopia::config::DEFAULT_PEERS;
 constexpr int NUM_DEFAULT_PEERS = planetopia::config::NUM_DEFAULT_PEERS;
 
-// --- Serial control opcodes for SERIAL_ADAPTER (data[0]) ---
-static constexpr uint8_t OP_CONFIG_SET = 0xA0;     // [A0][6B targetMac][1B adapterType][1B optPin]
-static constexpr uint8_t OP_HEALTH_REQ = 0xB0;     // [B0]
-static constexpr uint8_t OP_HEALTH_REPORT = 0xB1;  // [B1][1B adapterType][6B mac][4B uptimeSec]
-
-static inline void getOwnMac(uint8_t out[6]) {
-  esp_wifi_get_mac(WIFI_IF_STA, out);
-}
-
 // Validate configuration for server communication
 static inline void validateServerConfiguration() {
   // Check if this is a master node intended for server communication
@@ -76,65 +66,10 @@ static inline void validateServerConfiguration() {
   }
 }
 
-static inline void sendHealthReport() {
-  uint8_t data[12] = { 0 };
-  data[0] = OP_HEALTH_REPORT;
-  data[1] = static_cast<uint8_t>(adapter ? adapter->getAdapterType() : UNKNOWN_ADAPTER);
-  uint8_t mac[6];
-  getOwnMac(mac);
-  memcpy(&data[2], mac, 6);
-  uint32_t uptimeSec = millis() / 1000;
-  data[8] = static_cast<uint8_t>(uptimeSec & 0xFF);
-  data[9] = static_cast<uint8_t>((uptimeSec >> 8) & 0xFF);
-  data[10] = static_cast<uint8_t>((uptimeSec >> 16) & 0xFF);
-  data[11] = static_cast<uint8_t>((uptimeSec >> 24) & 0xFF);
-  planetopia::mesh::Mesh::transmit(SERIAL_ADAPTER, data);
-}
-
 // Keep main thin; adapter handles health/config
 
 void dataRecvCallback(planetopia::mesh::mesh_message message) {
   Logger::logln("MESH", "Data received callback triggered", LogLevel::LOG_DEBUG);
-  // Ensure all nodes can handle SERIAL control messages even if they don't use Serial_Adapter
-  if (message.dataType == SERIAL_ADAPTER) {
-    uint8_t op = message.data[0];
-    if (op == OP_CONFIG_SET) {
-      uint8_t myMac[6];
-      getOwnMac(myMac);
-      bool targetIsBroadcast = true;
-      for (int i = 0; i < 6; ++i)
-        if (message.data[1 + i] != 0xFF) {
-          targetIsBroadcast = false;
-          break;
-        }
-      bool isTarget = targetIsBroadcast || (memcmp(&message.data[1], myMac, 6) == 0);
-      if (isTarget) {
-        // Apply configuration change
-        adapter_types newType = static_cast<adapter_types>(static_cast<int8_t>(message.data[7]));
-        planetopia::adapter::AdapterFactory::saveAdapterTypeToEEPROM(newType);
-        // Pin is automatically inferred from adapter type - no need to store it
-
-        // Create new adapter with correct pin for the new type
-        Adapter* newAdapter = planetopia::adapter::AdapterFactory::createFromEEPROM();
-        if (newAdapter) {
-          if (adapter) {
-            delete adapter;
-            adapter = nullptr;
-          }
-          adapter = newAdapter;
-          adapter->setTransmitFn(&planetopia::mesh::Mesh::transmit);
-          if (!adapter->init()) {
-            Logger::logln("MAIN", "New adapter failed to initialize", LogLevel::LOG_ERROR);
-          } else {
-            Logger::logln("MAIN", "Adapter switched via CONFIG_SET", LogLevel::LOG_INFO);
-          }
-          sendHealthReport();
-        }
-      }
-    } else if (op == OP_HEALTH_REQ) {
-      sendHealthReport();
-    }
-  }
   if (adapter) {
     adapter->onMeshData(message);
   }

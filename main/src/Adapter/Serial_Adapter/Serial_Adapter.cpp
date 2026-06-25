@@ -132,6 +132,34 @@ void Serial_Adapter::loop() {
 void Serial_Adapter::onMeshDataImpl(const planetopia::mesh::mesh_message& message) {
   Logger::logln("Serial_Adapter", "Processing incoming mesh message - Type: " + String(message.messageType) + " DataType: " + String(message.dataType) + " HopCount: " + String(message.hopCount), LogLevel::LOG_DEBUG);
 
+  // Handle control opcodes received via mesh
+  if (message.dataType == SERIAL_ADAPTER) {
+    uint8_t op = message.data[0];
+    if (op == OP_HEALTH_REQ) {
+      Logger::logln("Serial_Adapter", "Received health request via mesh, sending health report", LogLevel::LOG_INFO);
+      sendHealthReport();
+    } else if (op == OP_CONFIG_SET) {
+      Logger::logln("Serial_Adapter", "Received CONFIG_SET via mesh", LogLevel::LOG_INFO);
+      uint8_t myMac[6];
+      readOwnMac(myMac);
+      bool targetIsBroadcast = true;
+      for (int i = 0; i < 6; ++i) {
+        if (message.data[1 + i] != 0xFF) { targetIsBroadcast = false; break; }
+      }
+      bool isTarget = targetIsBroadcast || (memcmp(&message.data[1], myMac, 6) == 0);
+      if (isTarget) {
+        adapter_types newType = static_cast<adapter_types>(static_cast<int8_t>(message.data[7]));
+        planetopia::adapter::AdapterFactory::saveAdapterTypeToEEPROM(newType);
+        Logger::logln("Serial_Adapter", "CONFIG_SET received via mesh, restarting to apply", LogLevel::LOG_INFO);
+        delay(500);
+        ESP.restart();
+      } else {
+        Logger::logln("Serial_Adapter", "CONFIG_SET via mesh not targeted to this node, ignoring", LogLevel::LOG_DEBUG);
+      }
+    }
+  }
+
+  // Forward message to server via serial (existing encoding logic)
   uint8_t encoded[MAX_PAYLOAD];
   size_t n = encodeMeshMessage(message, encoded, sizeof(encoded));
 

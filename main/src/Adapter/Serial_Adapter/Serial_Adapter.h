@@ -14,6 +14,11 @@ public:
   void loop() override;
   void onMeshDataImpl(const planetopia::mesh::mesh_message& message) override;
 
+  // Serial control opcodes (shared between serial and mesh paths)
+  static constexpr uint8_t OP_CONFIG_SET    = 0xA0;  // [A0][6B targetMac][1B adapterType]
+  static constexpr uint8_t OP_HEALTH_REQ    = 0xB0;  // [B0]
+  static constexpr uint8_t OP_HEALTH_REPORT = 0xB1;  // [B1][1B adapterType][6B mac][4B uptime]
+
 private:
   // Protobuf-over-serial framing: 2-byte little-endian length prefix + protobuf payload
   enum class FrameState : uint8_t { AwaitingLen1,
@@ -45,11 +50,6 @@ private:
   // messageType == 0 (ADAPTER_DATA): targeted send via normal mesh transmit (to master)
   // messageType == 3 (SERIAL_MSG_BROADCAST): broadcast adapter data via mesh
   static constexpr uint32_t SERIAL_MSG_BROADCAST = 3;
-
-  // Serial control opcodes in data[0]
-  static constexpr uint8_t OP_CONFIG_SET = 0xA0;     // [A0][6B targetMac][1B adapterType]
-  static constexpr uint8_t OP_HEALTH_REQ = 0xB0;     // [B0]
-  static constexpr uint8_t OP_HEALTH_REPORT = 0xB1;  // [B1][1B adapterType][6B mac][4B uptime]
 
   // Health reporter
   static void sendHealthReport();
