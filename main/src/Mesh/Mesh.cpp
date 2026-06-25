@@ -464,6 +464,20 @@ bool Mesh::setupEspNow() {
     return false;
   }
   esp_now_set_pmk(meshKey);
+
+  // Register the broadcast MAC so esp_now_send(broadcastMac, ...) reaches all
+  // nodes — including unregistered ones. esp_now_send(nullptr, ...) only delivers
+  // to already-registered peers; using the explicit FF:FF:… MAC is required for a
+  // true 802.11 broadcast frame.
+  static const uint8_t broadcastMac[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+  if (!esp_now_is_peer_exist(broadcastMac)) {
+    esp_now_peer_info_t broadcast = {};
+    memset(broadcast.peer_addr, 0xFF, 6);
+    broadcast.channel = 0;
+    broadcast.encrypt = false;
+    esp_now_add_peer(&broadcast);
+  }
+
   for (size_t i = 0; i < peerCount; ++i) {
     registerPeerWithEspNow(peerMacs[i].mac, devicePrivateKey, peerMacs[i].publicKey);
   }
@@ -624,16 +638,18 @@ void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) 
 // --- Periodically called in main loop if this node is master ---
 void Mesh::broadcastMasterBeacon() {
   unsigned long now = millis();
-  if (now - lastBeaconMillis < BEACON_INTERVAL_MS) return;
+  if (now - lastBeaconMillis < planetopia::config::MASTER_BEACON_INTERVAL_MS) return;
   lastBeaconMillis = now;
 
   mesh_message beacon = buildMessage(adapter_types::UNKNOWN_ADAPTER, nullptr, MESH_TYPE_MASTER_BEACON);
   beacon.data[0] = 1;  // protocolVersion
   beacon.hopCount = 0;
 
-  // Broadcast-only: reaches all peers (registered and unregistered) with a single
-  // frame. Unicast loop removed — cuts radio traffic by N-1 frames per beacon period.
-  esp_err_t br = esp_now_send(nullptr, reinterpret_cast<const uint8_t*>(&beacon), sizeof(beacon));
+  // Broadcast-only: send to the registered FF:FF:… broadcast peer so the frame
+  // reaches all nodes — including those not yet individually registered.
+  // esp_now_send(nullptr, …) only delivers to already-registered unicast peers.
+  static const uint8_t broadcastMac[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+  esp_err_t br = esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&beacon), sizeof(beacon));
   Logger::logln("MESH", String("Beacon broadcast ") + (br == ESP_OK ? "OK" : "FAIL"), LogLevel::LOG_DEBUG);
 }
 
@@ -850,23 +866,25 @@ void Mesh::sendEnrollmentRequest() {
   memcpy(msg.lastHopMacAddress, deviceMacAddress, 6);
   msg.hopCount = 0;
 
+  static const uint8_t broadcastMac[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+
   // Chunk 0: data[0]=0x00 (chunk index), data[1..11] = pubkey[0..10]
   msg.data[0] = 0x00;
   memcpy(&msg.data[1], devicePublicKey, 11);
-  esp_now_send(nullptr, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
   delay(10);
 
   // Chunk 1: data[0]=0x01, data[1..11] = pubkey[11..21]
   msg.data[0] = 0x01;
   memcpy(&msg.data[1], devicePublicKey + 11, 11);
-  esp_now_send(nullptr, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
   delay(10);
 
   // Chunk 2: data[0]=0x02, data[1..10] = pubkey[22..31], data[11]=0x00 (padding)
   msg.data[0] = 0x02;
   memcpy(&msg.data[1], devicePublicKey + 22, 10);
   msg.data[11] = 0x00;
-  esp_now_send(nullptr, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
 
   Logger::logln("MESH", "Enrollment request sent (3 chunks)", LogLevel::LOG_INFO);
 }
@@ -977,8 +995,10 @@ void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
   ack.hopCount = 0;
   // Include first 4 bytes of approved node's pubkey as fingerprint
   memcpy(ack.data, publicKey32, 4);
-  // Broadcast so node receives it even before it's in the peer list
-  esp_now_send(nullptr, reinterpret_cast<const uint8_t*>(&ack), sizeof(ack));
+  // Broadcast via the registered FF:FF:… peer so the new node receives the ACK
+  // even before it is individually registered as a unicast peer.
+  static const uint8_t broadcastMac[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&ack), sizeof(ack));
   Logger::logln("MESH", "JOIN_ACK sent to newly enrolled node", LogLevel::LOG_INFO);
 }
 // --------------------------------------------------------

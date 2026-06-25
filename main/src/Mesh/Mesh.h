@@ -61,7 +61,6 @@ struct MasterInfo {
 
 class Mesh {
 private:
-  static constexpr uint32_t BEACON_INTERVAL_MS = planetopia::config::MASTER_BEACON_INTERVAL_MS;
   static constexpr int MESH_KEY_SIZE = 16;
 
   uint8_t meshKey[MESH_KEY_SIZE];
