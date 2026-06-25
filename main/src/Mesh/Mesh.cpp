@@ -554,7 +554,6 @@ void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
     Logger::logln("MESH", "Not sending to self. Skipped.", LogLevel::LOG_DEBUG);
     return;
   }
-  printMeshMessage(msg);
   esp_err_t result = esp_now_send(target, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
   if (result == ESP_OK) {
     Logger::logln("MESH", "Message sent to peer", LogLevel::LOG_DEBUG);

@@ -248,7 +248,9 @@ void setup() {
     // fatal() is [[noreturn]], so the while(true) below is never reached
     while (true) { delay(1000); }
   }
-  mesh.debugDumpRadio();
+  if (isDevMode) {
+    mesh.debugDumpRadio();
+  }
 
   // Print device public key for provisioning (admin copies this to server).
   // Only printed when not yet enrolled — enrolled nodes have already been provisioned.

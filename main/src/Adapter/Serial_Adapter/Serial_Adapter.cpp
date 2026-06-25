@@ -5,6 +5,7 @@
 #include <esp_wifi.h>
 #include "src/Mesh/Mesh.h"
 #include <cstring>
+#include <cstdio>
 
 namespace planetopia {
 namespace adapter {
@@ -76,16 +77,14 @@ void Serial_Adapter::loop() {
     switch (frameState) {
       case FrameState::AwaitingLen1:
         frameLength = byteIn;
-        Logger::logln("Serial_Adapter", "Received length byte 1: " + String(frameLength), LogLevel::LOG_DEBUG);
         frameState = FrameState::AwaitingLen2;
         break;
 
       case FrameState::AwaitingLen2:
         frameLength |= static_cast<uint16_t>(byteIn) << 8;
-        Logger::logln("Serial_Adapter", "Received length byte 2, total length: " + String(frameLength), LogLevel::LOG_DEBUG);
 
         if (frameLength == 0 || frameLength > MAX_PAYLOAD) {
-          Logger::logln("Serial_Adapter", "Invalid frame length: " + String(frameLength) + ", resetting frame state", LogLevel::LOG_WARN);
+          Logger::logln("SERIAL", "Frame parse error", LogLevel::LOG_WARN);
           planetopia::err::fail(planetopia::core::ErrorTypeDigit::COMM,
                                planetopia::core::ModuleDigit::ADAPTER,
                                2,
@@ -97,13 +96,12 @@ void Serial_Adapter::loop() {
         } else {
           frameIndex = 0;
           frameState = FrameState::AwaitingPayload;
-          Logger::logln("Serial_Adapter", "Frame length valid, awaiting " + String(frameLength) + " payload bytes", LogLevel::LOG_DEBUG);
         }
         break;
 
       case FrameState::AwaitingPayload:
         if (frameIndex >= MAX_PAYLOAD) {
-          Logger::logln("Serial_Adapter", "Frame buffer overflow, resetting frame state", LogLevel::LOG_ERROR);
+          Logger::logln("SERIAL", "Frame parse error", LogLevel::LOG_WARN);
           planetopia::err::fail(planetopia::core::ErrorTypeDigit::COMM,
                                planetopia::core::ModuleDigit::ADAPTER,
                                3,
@@ -115,10 +113,9 @@ void Serial_Adapter::loop() {
         }
 
         payloadBuffer[frameIndex++] = byteIn;
-        Logger::logln("Serial_Adapter", "Received payload byte " + String(frameIndex) + "/" + String(frameLength) + ": 0x" + String(byteIn, HEX), LogLevel::LOG_DEBUG);
 
         if (frameIndex >= frameLength) {
-          Logger::logln("Serial_Adapter", "Frame complete, processing " + String(frameLength) + " bytes", LogLevel::LOG_DEBUG);
+          LOG_D("SERIAL", "Frame complete %u bytes", frameLength);
           handleCompleteFrame(payloadBuffer, frameLength);
           frameState = FrameState::AwaitingLen1;
           frameLength = 0;

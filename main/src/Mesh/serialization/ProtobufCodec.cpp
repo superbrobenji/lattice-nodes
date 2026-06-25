@@ -1,5 +1,6 @@
 #include "ProtobufCodec.h"
 #include <cstring>
+#include "src/core/Logger.h"
 
 // Forward declaration of helper used before definition
 static bool skipField(const uint8_t*& ptr, const uint8_t* end, uint8_t wireType);
@@ -44,7 +45,7 @@ size_t ProtobufCodec::encodeMeshMessage(const planetopia::mesh::mesh_message& ms
   }
   idx += writeBytesField(out + idx, 4, msg.data, 12);
 
-  Logger::logln("PROTOBUF", "Encoded mesh message: " + String(idx) + " bytes", LogLevel::LOG_DEBUG);
+  LOG_D("CODEC", "Encode %u bytes", (unsigned)idx);
   return idx;
 }
 
@@ -61,7 +62,7 @@ bool ProtobufCodec::decodeMeshMessage(const uint8_t* data, size_t len,
   const uint8_t* ptr = data;
   const uint8_t* end = data + len;
 
-  Logger::logln("PROTOBUF", "Decoding mesh message: " + String(len) + " bytes", LogLevel::LOG_DEBUG);
+  LOG_D("CODEC", "Decode %u bytes", (unsigned)len);
 
   // Auto-generate routing fields (as per protocol simplification)
   uint8_t ownMac[6];
@@ -71,8 +72,6 @@ bool ProtobufCodec::decodeMeshMessage(const uint8_t* data, size_t len,
   outMsg.hopCount = 0;
   memcpy(outMsg.lastHopMacAddress, ownMac, 6);
 
-  Logger::logln("PROTOBUF", "Auto-generated routing fields", LogLevel::LOG_DEBUG);
-
   while (ptr < end) {
     uint32_t fieldNumber;
     uint8_t wireType;
@@ -81,8 +80,6 @@ bool ProtobufCodec::decodeMeshMessage(const uint8_t* data, size_t len,
       logDecodeError("Failed to read field key");
       return false;
     }
-
-    Logger::logln("PROTOBUF", "Processing field " + String(fieldNumber) + " (wire type " + String(wireType) + ")", LogLevel::LOG_DEBUG);
 
     switch (fieldNumber) {
       case 1:  // messageType
@@ -96,7 +93,6 @@ bool ProtobufCodec::decodeMeshMessage(const uint8_t* data, size_t len,
           return false;
         }
         outMsg.messageType = static_cast<planetopia::mesh::MeshMessageType>(msgType);
-        Logger::logln("PROTOBUF", "Decoded messageType: " + String(msgType), LogLevel::LOG_DEBUG);
         break;
 
       case 2:  // dataType
@@ -110,7 +106,6 @@ bool ProtobufCodec::decodeMeshMessage(const uint8_t* data, size_t len,
           return false;
         }
         outMsg.dataType = static_cast<planetopia::adapter::adapter_types>(dataType);
-        Logger::logln("PROTOBUF", "Decoded dataType: " + String(dataType), LogLevel::LOG_DEBUG);
         break;
 
       case 3:  // targetMacAddress
@@ -129,7 +124,6 @@ bool ProtobufCodec::decodeMeshMessage(const uint8_t* data, size_t len,
           return false;
         }
         memcpy(outMsg.targetMacAddress, macData, 6);
-        Logger::logln("PROTOBUF", "Decoded targetMacAddress", LogLevel::LOG_DEBUG);
         break;
 
       case 4:  // data
@@ -148,12 +142,10 @@ bool ProtobufCodec::decodeMeshMessage(const uint8_t* data, size_t len,
           return false;
         }
         memcpy(outMsg.data, dataPtr, dataLen);
-        Logger::logln("PROTOBUF", "Decoded data: " + String(dataLen) + " bytes", LogLevel::LOG_DEBUG);
         break;
 
       default:
         // Skip unknown fields
-        Logger::logln("PROTOBUF", "Skipping unknown field " + String(fieldNumber), LogLevel::LOG_DEBUG);
         if (!skipField(ptr, end, wireType)) {
           logDecodeError("Failed to skip unknown field");
           return false;
@@ -162,8 +154,7 @@ bool ProtobufCodec::decodeMeshMessage(const uint8_t* data, size_t len,
     }
   }
 
-  Logger::logln("PROTOBUF", "Setting lastHopMacAddress to own MAC", LogLevel::LOG_DEBUG);
-  Logger::logln("PROTOBUF", "Successfully decoded mesh message", LogLevel::LOG_DEBUG);
+  LOG_D("CODEC", "Decode ok type=%u", (unsigned)outMsg.messageType);
   return true;
 }
 
