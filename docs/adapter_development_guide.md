@@ -274,23 +274,11 @@ You can also change the adapter type at runtime using the serial configuration c
 
 ### Method 3: Clear EEPROM and Restart
 
-To reset to factory defaults:
+Use the **reset button** (hold 5 seconds, then confirm within 3 seconds) — this calls
+`EEPROM_Manager::getInstance().clearAll()` internally and handles the commit.
 
-1. **Option A**: Clear the specific EEPROM address:
-   ```cpp
-   // Add this temporarily to setup() in main.ino
-   EEPROM.write(8, 0xFF);  // Clear adapter type
-   EEPROM.commit();
-   ```
-
-2. **Option B**: Clear all EEPROM:
-   ```cpp
-   // Add this temporarily to setup() in main.ino
-   for (int i = 0; i < 512; i++) {
-       EEPROM.write(i, 0xFF);
-   }
-   EEPROM.commit();
-   ```
+Do not call `EEPROM.write()` or `EEPROM.commit()` directly — route all EEPROM I/O
+through `EEPROM_Manager` to respect DEV_MODE and address constants.
 
 ## Adapter Architecture Overview
 
@@ -382,7 +370,7 @@ Connect to the master node's serial port to see:
 | Compilation errors | Check includes and namespace usage |
 | Adapter not responding | Verify pin configuration and hardware setup |
 | Mesh messages not received | Check adapter type filtering logic |
-| EEPROM not persisting | Ensure `EEPROM.commit()` is called |
+| EEPROM not persisting | Use `EEPROM_Manager::getInstance()` methods — never call `EEPROM.write/commit` directly |
 | Wrong pin being used | Verify default pin constant is set correctly |
 
 ### 6. Debugging Tips

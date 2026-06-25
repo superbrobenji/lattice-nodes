@@ -4,7 +4,7 @@ Planetopia follows Tiger-Style engineering principles: safety first, performance
 
 ## 0. Quick checklist before opening a PR
 
-- [ ] `arduino-cli compile -e --fqbn esp32:esp32:esp32` builds with **no warnings** (`-Wall -Wextra -Werror` enabled).
+- [ ] `arduino-cli compile -e --fqbn esp32:esp32:esp32da main` builds with **no warnings** (run locally — not in CI).
 - [ ] `clang-format -style=file` applied; `git diff --check` shows no whitespace errors.
 - [ ] No `new`, `malloc`, or unbounded `std::vector` growth after setup.
 - [ ] All errors funnel through `src/error/Error.h` (`planetopia::err::*`).
