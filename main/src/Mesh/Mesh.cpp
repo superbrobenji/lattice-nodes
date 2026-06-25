@@ -161,7 +161,8 @@ Mesh::Mesh()
   : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0),
     bootEpoch(0), txSeqNum(0), replayCacheIdx(0),
     lastRelayedEpoch(0), lastRelayedSeqNum(0),
-    hasMasterMac(false), peerCount(0) {
+    hasMasterMac(false), peerCount(0),
+    recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
@@ -173,6 +174,7 @@ Mesh::Mesh()
   memset(replayCache, 0, sizeof(replayCache));
   memset(knownMasterMac, 0xFF, 6);
   memset(peerMacs, 0, sizeof(peerMacs));
+  memset(recvQueue, 0, sizeof(recvQueue));
 }
 
 bool Mesh::appendPeer(const PeerInfo& peer) {
@@ -492,66 +494,59 @@ void Mesh::onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_statu
   Logger::logln("MESH", "Last Packet Send Status: " + statusStr, LogLevel::LOG_DEBUG);
 }
 
-void Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uint8_t* incomingData, int len) {
-  planetopia::err::check(incomingData != nullptr, planetopia::utils::ErrorType::CONFIG_ERROR, "Mesh incomingData is null");
-  planetopia::err::check(len >= sizeof(mesh_message), planetopia::utils::ErrorType::CONFIG_ERROR, "Mesh data length too small");
-  if (!incomingData || len < sizeof(mesh_message)) {
-    planetopia::err::fail(planetopia::core::ErrorTypeDigit::COMM,
-                         planetopia::core::ModuleDigit::MESH,
-                         4,
-                         "MESH: Invalid incoming data or length");
+void IRAM_ATTR Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uint8_t* incomingData, int len) {
+  if (!instance || !info || !incomingData) return;
+  if (static_cast<size_t>(len) < sizeof(mesh_message)) return;
+
+  uint8_t nextHead = (instance->recvQueueHead + 1) % RECV_QUEUE_SIZE;
+  if (nextHead == instance->recvQueueTail) {
+    // Queue full — drop packet
     return;
   }
 
-  mesh_message msg;
-  memcpy(&msg, incomingData, sizeof(msg));
+  RecvQueueEntry& slot = instance->recvQueue[instance->recvQueueHead];
+  memcpy(slot.srcMac, info->src_addr, 6);
+  memcpy(&slot.msg, incomingData, sizeof(mesh_message));
+  instance->recvQueueHead = nextHead;
+}
 
-  Logger::logln("MESH", "Bytes received:", LogLevel::LOG_DEBUG);
-  printMeshMessage(msg);
+void Mesh::drainRecvQueue() {
+  while (recvQueueTail != recvQueueHead) {
+    RecvQueueEntry& entry = recvQueue[recvQueueTail];
+    recvQueueTail = (recvQueueTail + 1) % RECV_QUEUE_SIZE;
 
-  // Reject unsupported protocol versions (protoVersion=0 = old firmware pre-Task13)
-  if (msg.protoVersion != PROTO_VERSION) {
-    Logger::logln("MESH", "Unsupported proto version, dropping", LogLevel::LOG_WARN);
-    return;
-  }
+    const mesh_message& msg = entry.msg;
 
-  // Replay protection: drop messages already seen
-  if (isReplay(msg)) {
-    Logger::logln("MESH", "Replayed message dropped", LogLevel::LOG_WARN);
-    return;
-  }
+    // Proto version check
+    if (msg.protoVersion != 0 && msg.protoVersion != PROTO_VERSION) {
+      Logger::logln("MESH", "Unsupported proto version, dropping", LogLevel::LOG_WARN);
+      continue;
+    }
 
-  // Enrollment frames are processed before the peer allowlist check (chicken-and-egg exemption)
-  if (msg.messageType == MESH_TYPE_ENROLLMENT) {
-    processEnrollmentRequest(msg);
-    return;
-  }
+    // Replay check
+    if (msg.protoVersion == PROTO_VERSION && msg.epochNum > 0) {
+      if (isReplay(msg)) {
+        Logger::logln("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
+        continue;
+      }
+    }
 
-  // Update peer last-seen (only for enrolled/known peers)
-  updatePeerLastSeen(info);
+    // Update last-seen for known peers only (no EEPROM write — see Task 4)
+    updatePeerLastSeen(entry.srcMac);
 
-  switch (msg.messageType) {
-    case MESH_TYPE_MASTER_BEACON:
-      processMasterBeacon(msg);
-      break;
-    case MESH_TYPE_ADAPTER_DATA:
-      processAdapterData(msg);
-      break;
-    case MESH_TYPE_JOIN_ACK:
-      processJoinAck(msg);
-      break;
+    switch (msg.messageType) {
+    case MESH_TYPE_ENROLLMENT:    processEnrollmentRequest(msg); break;
+    case MESH_TYPE_JOIN_ACK:      processJoinAck(msg);           break;
+    case MESH_TYPE_MASTER_BEACON: processMasterBeacon(msg);      break;
+    case MESH_TYPE_ADAPTER_DATA:  processAdapterData(msg);       break;
     default:
-      Logger::logln("MESH", "Unknown message type", LogLevel::LOG_WARN);
-      break;
+      Logger::logln("MESH", "Unknown message type, dropping", LogLevel::LOG_WARN);
+    }
   }
 }
 
-void Mesh::dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data, int len) {
-  if (instance) {
-    planetopia::utils::ErrorCore::getInstance().setCallbackContext(true);
-    instance->onDataRecvCallback(mac_addr, data, len);
-    planetopia::utils::ErrorCore::getInstance().setCallbackContext(false);
-  }
+void IRAM_ATTR Mesh::dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data, int len) {
+  instance->onDataRecvCallback(mac_addr, data, len);
 }
 
 void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
@@ -751,12 +746,12 @@ void Mesh::checkMasterTimeout() {
 }
 
 // ---------- Tiger Style helper implementations ----------
-void Mesh::updatePeerLastSeen(const esp_now_recv_info* info) {
-  if (!info || !info->src_addr) return;
-  if (planetopia::utils::MacAddress(info->src_addr) == planetopia::utils::MacAddress(deviceMacAddress)) return;
+void Mesh::updatePeerLastSeen(const uint8_t mac[6]) {
+  if (!mac) return;
+  if (planetopia::utils::MacAddress(mac) == planetopia::utils::MacAddress(deviceMacAddress)) return;
   // Enrollment is the only path for new peers — do not auto-add unknown senders here.
   // Unknown senders are silently ignored for non-enrollment messages.
-  PeerInfo* p = findPeer(info->src_addr);
+  PeerInfo* p = findPeer(mac);
   if (p) {
     p->lastSeenMillis = millis();
   }
@@ -985,12 +980,19 @@ void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
 // --------------------------------------------------------
 
 void Mesh::loop() {
+  drainRecvQueue();
+
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
   // Serial.write() must not be called from that callback — safe to do here in loop().
   if (_pendingEnrollmentRelay) {
     _pendingEnrollmentRelay = false;
     planetopia::adapter::Serial_Adapter::relayEnrollmentToServer(
         _pendingEnrollmentMac, _pendingEnrollmentPubKey);
+  }
+
+  // Master beacon — broadcastMasterBeacon() guards timing internally via lastBeaconMillis
+  if (isMaster) {
+    broadcastMasterBeacon();
   }
 }
 

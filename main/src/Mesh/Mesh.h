@@ -81,8 +81,8 @@ private:
   void printMeshMessage(const mesh_message& msg);
 
   static void onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status);
-  void onDataRecvCallback(const esp_now_recv_info* mac, const uint8_t* incomingData, int len);
-  static void dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data, int len);
+  void IRAM_ATTR onDataRecvCallback(const esp_now_recv_info* mac, const uint8_t* incomingData, int len);
+  static void IRAM_ATTR dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data, int len);
 
   mesh_message buildMessage(adapter_types type, const uint8_t data[12], MeshMessageType msgType);
 
@@ -119,7 +119,7 @@ private:
   bool meshKeyIsSet() const;
 
   // --- Tiger Style refactor helpers ---
-  void updatePeerLastSeen(const esp_now_recv_info* info);
+  void updatePeerLastSeen(const uint8_t mac[6]);
   void processMasterBeacon(const mesh_message& msg);
   void processAdapterData(const mesh_message& msg);
 
@@ -160,6 +160,23 @@ private:
   volatile bool _pendingEnrollmentRelay = false;
   uint8_t       _pendingEnrollmentMac[6]{};
   uint8_t       _pendingEnrollmentPubKey[32]{};
+
+  // --- ESP-NOW receive ring buffer (lock-free SPSC) ---
+  static constexpr size_t RECV_QUEUE_SIZE = 8;
+
+  struct RecvQueueEntry {
+    uint8_t srcMac[6];
+    mesh_message msg;
+  };
+
+  RecvQueueEntry recvQueue[RECV_QUEUE_SIZE];
+  volatile uint8_t recvQueueHead;  // written by WiFi task (callback)
+  uint8_t recvQueueTail;           // read by main task (loop)
+
+  void drainRecvQueue();
+
+  // Beacon timer (moved from broadcastMasterBeacon for loop() integration)
+  uint32_t lastBeaconMs;
 
 public:
   Mesh();

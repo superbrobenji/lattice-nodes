@@ -304,11 +304,7 @@ void loop() {
     redLed.blink(2, 200, 200);
   }
 
-  mesh.loop();
-
-  if (mesh.getIsMaster()) {
-    mesh.broadcastMasterBeacon();
-  }
+  mesh.loop();  // drains recv queue, ticks beacon (if master)
 
   mesh.checkMasterTimeout();
 
