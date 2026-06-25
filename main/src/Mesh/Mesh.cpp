@@ -357,6 +357,10 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t data[12], MeshMe
 }
 
 void Mesh::transmit(const adapter_types type, const uint8_t data[12]) {
+  if (!instance) {
+    Logger::logln("MESH", "transmit() called before init", LogLevel::LOG_WARN);
+    return;
+  }
   if (instance->isMaster) {
     instance->broadcastAdapterData(type, data);
     return;

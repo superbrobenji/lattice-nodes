@@ -326,68 +326,47 @@ void loop() {
 
   if (configButton.isPressed()) {
     if (!buttonWasPressed) {
-      // Just started pressing
       buttonWasPressed = true;
       holdStart = millis();
-    } else {
-      // Already holding, check duration
-      if (millis() - holdStart >= BUTTON_HOLD_TIME_MS) {
-        // Toggle master flag!
-        if (isDevMode) {
-          // Toggle runtime master flag without EEPROM persistence
-          bool newMaster = !mesh.getIsMaster();
-          mesh.setIsMaster(newMaster);
-          devMasterFlag = newMaster;
-          Logger::logln("MAIN", String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
-          if (newMaster) {
-            greenLed.blink(3, 150, 150);
-          } else {
-            greenLed.blink(2, 150, 150);
-          }
-        } else {
-          bool wasMaster = EEPROM_Manager::getInstance().loadMasterFlag();
-          bool newMaster = !wasMaster;
-          EEPROM_Manager::getInstance().saveMasterFlag(newMaster);
-          Logger::logln("MAIN", String("Button held 5s: CONFIG TOGGLED. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
-          Logger::logln("MAIN", "Restarting in 2 seconds for new role...", LogLevel::LOG_INFO);
-          if (newMaster) {
-            greenLed.blink(3, 200, 200);
-          } else {
-            greenLed.blink(2, 200, 200);
-          }
-          delay(2000);
-          ESP.restart();
-        }
-      }
-    }
-  } else {
-    buttonWasPressed = false;  // Reset state if released
-  }
-
-  // Reset button handling
-  if (resetButton.isPressed()) {
-    if (!resetButtonWasPressed) {
-      // Just started pressing reset button
-      resetButtonWasPressed = true;
-      resetHoldStart = millis();
-    } else {
-      // Already holding reset button, check duration
-      if (millis() - resetHoldStart >= BUTTON_HOLD_TIME_MS) {
-        // Clear all EEPROM!
-        Logger::logln("MAIN", "Reset button held 5s: CLEARING ALL EEPROM!", LogLevel::LOG_WARN);
-        EEPROM_Manager::getInstance().clearAll();
-
-        // Visual feedback
-        redLed.blink(5, 100, 100);
-        greenLed.blink(5, 100, 100);
-
-        Logger::logln("MAIN", "EEPROM cleared. Restarting in 3 seconds...", LogLevel::LOG_INFO);
-        delay(3000);
+    } else if (millis() - holdStart >= BUTTON_HOLD_TIME_MS) {
+      buttonWasPressed = false;  // Reset BEFORE action to prevent re-fire
+      if (isDevMode) {
+        bool newMaster = !mesh.getIsMaster();
+        mesh.setIsMaster(newMaster);
+        devMasterFlag = newMaster;
+        Logger::logln("MAIN", String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
+        greenLed.blink(newMaster ? 3 : 2, 150, 150);
+      } else {
+        bool wasMaster = EEPROM_Manager::getInstance().loadMasterFlag();
+        bool newMaster = !wasMaster;
+        EEPROM_Manager::getInstance().saveMasterFlag(newMaster);
+        Logger::logln("MAIN", String("Button held 5s: CONFIG TOGGLED. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
+        Logger::logln("MAIN", "Restarting in 2 seconds for new role...", LogLevel::LOG_INFO);
+        greenLed.blink(newMaster ? 3 : 2, 200, 200);
+        delay(2000);
         ESP.restart();
       }
     }
   } else {
-    resetButtonWasPressed = false;  // Reset state if released
+    buttonWasPressed = false;
+  }
+
+  if (resetButton.isPressed()) {
+    if (!resetButtonWasPressed) {
+      resetButtonWasPressed = true;
+      resetHoldStart = millis();
+    } else if (millis() - resetHoldStart >= BUTTON_HOLD_TIME_MS) {
+      resetButtonWasPressed = false;  // Reset BEFORE action
+      Logger::logln("MAIN", "Reset button held 5s: CLEARING ALL EEPROM!", LogLevel::LOG_WARN);
+      EEPROM_Manager::getInstance().clearAll();
+      redLed.blink(5, 100, 100);
+      greenLed.blink(5, 100, 100);
+      Logger::logln("MAIN", "EEPROM cleared. Restarting in 3 seconds...", LogLevel::LOG_INFO);
+      delay(3000);
+      ESP.restart();
+    }
+  } else {
+    resetButtonWasPressed = false;
   }
   // Periodic health report
   static unsigned long lastHealth = 0;
