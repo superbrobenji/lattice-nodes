@@ -736,6 +736,7 @@ void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t data[12]
 }
 
 void Mesh::debugDumpRadio() {
+  if (!EEPROM_Manager::getInstance().getDevMode()) return;
   uint8_t ch;
   esp_wifi_get_channel(&ch, nullptr);
   String out = String("DBG Channel=") + String(ch) + " Key=";

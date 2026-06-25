@@ -72,7 +72,6 @@ bool ErrorCore::shouldRestart(ErrorType t) const {
 [[noreturn]] void ErrorCore::restartDevice() {
   Logger::logln("ErrorCore", "Restarting device...", LogLevel::LOG_WARN);
   ESP.restart();
-  while (true) {}
 }
 }
 }

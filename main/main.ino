@@ -145,9 +145,6 @@ void setup() {
                             planetopia::core::ModuleDigit::CORE,
                             1,
                             "MAIN: Failed to initialize green LED");
-      while (true) {
-        delay(1000);
-      }
     }
   }
 
@@ -168,10 +165,6 @@ void setup() {
                           planetopia::core::ModuleDigit::CORE,
                           2,
                           "EEPROM Manager init failed!");
-    while (true) {
-      redLed.blink(4, 100, 100);
-      delay(1000);
-    }
   }
 
   // Disable Bluetooth — unused, saves 20-30mA
@@ -223,10 +216,6 @@ void setup() {
                           planetopia::core::ModuleDigit::CORE,
                           3,
                           "MAIN: Failed to create PIR adapter");
-    while (true) {
-      redLed.blink(3, 150, 150);
-      delay(800);
-    }
   }
   Logger::logln("MAIN", "Adapter created", LogLevel::LOG_INFO);
 
@@ -236,10 +225,6 @@ void setup() {
                           planetopia::core::ModuleDigit::CORE,
                           4,
                           "MAIN: Adapter failed to initialize");
-    while (true) {
-      redLed.blink(6, 100, 100);
-      delay(1000);
-    }
   }
   Logger::logln("MAIN", "Adapter initialized", LogLevel::LOG_INFO);
 
@@ -249,8 +234,6 @@ void setup() {
                           planetopia::core::ModuleDigit::MESH,
                           1,
                           "MAIN: Mesh init failed — cannot operate without mesh");
-    // fatal() is [[noreturn]], so the while(true) below is never reached
-    while (true) { delay(1000); }
   }
 
   // Nodes must always receive — modem sleep drops ESP-NOW packets without AP sync
