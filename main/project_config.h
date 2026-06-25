@@ -92,6 +92,15 @@ static constexpr uint8_t TX_POWER_VALUES[] = { 8, 56, 80 };
 constexpr TxPowerPreset DEFAULT_TX_POWER_PRESET = TxPowerPreset::OUTDOOR;
 
 // =====================
+// 8. Simulation Mode
+// =====================
+// Set to 1 (or define via -DSIMULATE_MODE=1 build flag) to enable simulation mode
+// (serial-injected fake events for single-device dev/test). Never enabled in production.
+#ifndef SIMULATE_MODE
+  #define SIMULATE_MODE 0
+#endif
+
+// =====================
 // 9. Global Limits (Tiger Style)
 // =====================
 // Maximum allowed routing hops in the mesh network

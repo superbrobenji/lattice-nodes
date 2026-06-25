@@ -26,6 +26,13 @@ public:
   // Relay a completed enrollment public key to the server over serial
   static void relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]);
 
+#if SIMULATE_MODE
+  static constexpr uint8_t OP_SIM_PIR_TRIGGER = 0xD0;  // Inject fake PIR event
+  static constexpr uint8_t OP_SIM_FAKE_BEACON = 0xD1;  // Inject fake master beacon [D1][6B mac][4B epoch][2B seq]
+  static constexpr uint8_t OP_SIM_FAKE_PEER   = 0xD2;  // Inject fake peer [D2][6B mac][32B pubkey]
+  static constexpr uint8_t OP_SIM_DUMP_STATE  = 0xD3;  // Dump current mesh state to serial
+#endif
+
 private:
   // Protobuf-over-serial framing: 2-byte little-endian length prefix + protobuf payload
   enum class FrameState : uint8_t { AwaitingLen1,

@@ -252,6 +252,18 @@ public:
   uint8_t getHopCount() const {
     return isMaster ? 0 : currentMaster.distance;
   }
+
+#if SIMULATE_MODE
+  // Inject a message directly into the receive queue (bypasses radio — for dev/test only)
+  void injectReceivedMessage(const uint8_t* srcMac, const mesh_message& msg) {
+    uint8_t nextHead = (recvQueueHead + 1) % RECV_QUEUE_SIZE;
+    if (nextHead == recvQueueTail) return;  // Queue full — drop
+    RecvQueueEntry& slot = recvQueue[recvQueueHead];
+    memcpy(slot.srcMac, srcMac, 6);
+    slot.msg = msg;
+    recvQueueHead = nextHead;
+  }
+#endif
 };
 
 }  // namespace mesh

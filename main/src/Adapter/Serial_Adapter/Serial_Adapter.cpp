@@ -6,6 +6,9 @@
 #include "src/Mesh/Mesh.h"
 #include <cstring>
 #include <cstdio>
+#if SIMULATE_MODE
+#include "src/Adapter/PIR_Adapter/PIR_Adapter.h"
+#endif
 
 namespace planetopia {
 namespace adapter {
@@ -549,6 +552,42 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
       Logger::logln("Serial_Adapter", "Server rejected enrollment request", LogLevel::LOG_WARN);
       return;
     }
+
+#if SIMULATE_MODE
+    if (op == OP_SIM_PIR_TRIGGER) {
+      Logger::logln("SIM", "Injecting fake PIR event", LogLevel::LOG_WARN);
+      planetopia::adapter::PIR_Adapter* pirAdapter = planetopia::adapter::PIR_Adapter::getInstance();
+      if (pirAdapter) pirAdapter->simulateMotion();
+      return;
+
+    } else if (op == OP_SIM_FAKE_BEACON && len >= 13) {
+      Logger::logln("SIM", "Injecting fake master beacon", LogLevel::LOG_WARN);
+      planetopia::mesh::mesh_message fakeBeacon{};
+      fakeBeacon.protoVersion = planetopia::mesh::PROTO_VERSION;
+      fakeBeacon.messageType  = planetopia::mesh::MESH_TYPE_MASTER_BEACON;
+      memcpy(fakeBeacon.originMacAddress, &data[1], 6);
+      memcpy(&fakeBeacon.epochNum, &data[7], 4);
+      memcpy(&fakeBeacon.seqNum,   &data[11], 2);
+      planetopia::mesh::Mesh* meshRef = planetopia::mesh::Mesh::getInstance();
+      if (meshRef) meshRef->injectReceivedMessage(fakeBeacon.originMacAddress, fakeBeacon);
+      return;
+
+    } else if (op == OP_SIM_DUMP_STATE) {
+      Logger::logln("SIM", "=== Mesh State Dump ===", LogLevel::LOG_WARN);
+      planetopia::mesh::Mesh* meshRef = planetopia::mesh::Mesh::getInstance();
+      if (meshRef) {
+        meshRef->debugDumpRadio();
+        for (size_t i = 0; i < meshRef->getPeerCount(); ++i) {
+          const planetopia::mesh::PeerInfo& p = meshRef->getPeerList()[i];
+          Serial.printf("  Peer[%d]: %02X:%02X:%02X:%02X:%02X:%02X last=%lums\n",
+            (int)i,
+            p.mac[0], p.mac[1], p.mac[2], p.mac[3], p.mac[4], p.mac[5],
+            (unsigned long)p.lastSeenMillis);
+        }
+      }
+      return;
+    }
+#endif
   }
 
   planetopia::mesh::mesh_message msg;

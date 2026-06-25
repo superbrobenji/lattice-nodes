@@ -19,6 +19,14 @@ public:
   static void detectMotionTrampoline();
   static void sendDataTrampoline(adapter_types adapterType, uint8_t data[12]);
 
+  // Singleton accessor (used by Serial_Adapter in SIMULATE_MODE)
+  static PIR_Adapter* getInstance() { return instance; }
+
+#if SIMULATE_MODE
+  // Inject a fake PIR motion event (bypasses hardware interrupt)
+  void simulateMotion();
+#endif
+
 private:
   hardware::Pir _pir;
   uint16_t _cooldownSeconds;
