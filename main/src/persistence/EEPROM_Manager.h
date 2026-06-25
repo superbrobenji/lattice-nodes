@@ -17,12 +17,16 @@ constexpr uint16_t PEER_LIST = 32;    // Peer MAC addresses (60 bytes)
 constexpr uint16_t ADAPTER_TYPE = 8;  // Adapter type (1 byte)
 constexpr uint16_t REBOOT_REASON = 92;  // 1 byte: last reset reason
 constexpr uint16_t REBOOT_COUNT  = 93;  // 1 byte: consecutive unexpected reboot count
-constexpr uint16_t RESERVED = 94;       // Reserved for future use
+constexpr uint16_t RESERVED = 94;       // Reserved for future use (3 bytes: 94, 95, 96)
+constexpr uint16_t PRIVATE_KEY   = 97;  // 32 bytes: Curve25519 private key
+constexpr uint16_t PUBLIC_KEY    = 129; // 32 bytes: Curve25519 public key
+constexpr uint16_t KEYPAIR_CRC   = 161; // 2 bytes: CRC16 over private+public key
+constexpr uint16_t ENROLLED_FLAG = 163; // 1 byte: 0x01 = enrolled, 0xFF = not enrolled
 }
 
 // EEPROM size constants
 namespace EEPROM_SIZES {
-constexpr uint16_t TOTAL_SIZE = 128;
+constexpr uint16_t TOTAL_SIZE = 256;
 constexpr uint8_t MESH_KEY_SIZE = 16;
 constexpr uint8_t MAX_PEERS = 10;
 constexpr uint8_t PEER_MAC_SIZE = 6;
@@ -80,6 +84,12 @@ public:
   void saveRebootCount(uint8_t count);
   void saveRebootReason(uint8_t reason);
   uint8_t loadRebootReason();
+
+  // Keypair operations
+  bool loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32);
+  void saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32);
+  bool loadEnrolledFlag();
+  void saveEnrolledFlag(bool enrolled);
 
   // Utility operations
   void clearAll();

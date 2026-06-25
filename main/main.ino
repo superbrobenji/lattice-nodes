@@ -249,6 +249,20 @@ void setup() {
     while (true) { delay(1000); }
   }
   mesh.debugDumpRadio();
+
+  // Print device public key for provisioning (admin copies this to server)
+  // The private key is NEVER printed — only the public key is output here.
+  {
+    const uint8_t* pubKey = mesh.getDevicePublicKey();
+    Serial.print("PLANETOPIA_PUBKEY:");
+    for (int i = 0; i < 32; ++i) {
+      if (pubKey[i] < 0x10) Serial.print("0");
+      Serial.print(pubKey[i], HEX);
+    }
+    Serial.println();
+    Logger::logln("MAIN", "Public key printed to serial for provisioning", LogLevel::LOG_INFO);
+  }
+
   bool isMaster;
   if (isDevMode) {
     isMaster = devMasterFlag;

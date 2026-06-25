@@ -8,6 +8,10 @@
 #include <WiFi.h>
 #include <cstring>
 #include "../../project_config.h"
+#include <mbedtls/ecdh.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/ecp.h>
 
 namespace planetopia {
 namespace mesh {
@@ -36,6 +40,8 @@ Mesh::Mesh()
   memset(currentMaster.nextHop, 0, 6);
   memset(lastSeenMasterMac, 0, 6);
   memset(deviceMacAddress, 0, 6);
+  memset(devicePrivateKey, 0, 32);
+  memset(devicePublicKey, 0, 32);
   peerMacs.clear();
   peerMacs.reserve(MAX_PEERS);  // pre-allocate to avoid runtime realloc
 }
@@ -228,6 +234,51 @@ bool Mesh::setupWiFi() {
 void Mesh::loadPersistentState() {
   loadPeersFromEEPROM();
   loadMeshKeyFromEEPROM();
+  loadOrGenerateKeypair();
+}
+
+void Mesh::loadOrGenerateKeypair() {
+  if (EEPROM_Manager::getInstance().loadKeypair(devicePrivateKey, devicePublicKey)) {
+    Logger::logln("MESH", "Device keypair loaded from EEPROM", LogLevel::LOG_INFO);
+    return;
+  }
+
+  Logger::logln("MESH", "Generating new Curve25519 keypair...", LogLevel::LOG_INFO);
+
+  // Use the low-level ECP API directly to avoid the opaque ecdh context internals
+  // that are private in the mbedTLS 3.x non-legacy context.
+  mbedtls_ecp_group grp;
+  mbedtls_mpi d;
+  mbedtls_ecp_point Q;
+  mbedtls_entropy_context entropy;
+  mbedtls_ctr_drbg_context ctr_drbg;
+
+  mbedtls_ecp_group_init(&grp);
+  mbedtls_mpi_init(&d);
+  mbedtls_ecp_point_init(&Q);
+  mbedtls_entropy_init(&entropy);
+  mbedtls_ctr_drbg_init(&ctr_drbg);
+
+  const char* pers = "planetopia_keygen";
+  mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+                         reinterpret_cast<const uint8_t*>(pers), strlen(pers));
+
+  mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_CURVE25519);
+  mbedtls_ecdh_gen_public(&grp, &d, &Q, mbedtls_ctr_drbg_random, &ctr_drbg);
+
+  // Export private scalar (d) — 32 bytes big-endian (NEVER printed to serial)
+  mbedtls_mpi_write_binary(&d, devicePrivateKey, 32);
+  // Export public key X coordinate — 32 bytes (Curve25519 public key is X only)
+  mbedtls_mpi_write_binary(&Q.MBEDTLS_PRIVATE(X), devicePublicKey, 32);
+
+  mbedtls_ecp_group_free(&grp);
+  mbedtls_mpi_free(&d);
+  mbedtls_ecp_point_free(&Q);
+  mbedtls_ctr_drbg_free(&ctr_drbg);
+  mbedtls_entropy_free(&entropy);
+
+  EEPROM_Manager::getInstance().saveKeypair(devicePrivateKey, devicePublicKey);
+  Logger::logln("MESH", "New keypair generated and saved", LogLevel::LOG_INFO);
 }
 
 bool Mesh::setupEspNow() {

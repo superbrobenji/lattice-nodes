@@ -114,6 +114,11 @@ private:
   bool setupEspNow();
   void loadPersistentState();
 
+  // Curve25519 keypair
+  uint8_t devicePrivateKey[32];
+  uint8_t devicePublicKey[32];
+  void loadOrGenerateKeypair();
+
 public:
   Mesh();
   bool init();
@@ -152,6 +157,9 @@ public:
 
   // Debug helper
   void debugDumpRadio();
+
+  // Provisioning: public key accessor (private key never exposed)
+  const uint8_t* getDevicePublicKey() const { return devicePublicKey; }
 };
 
 }

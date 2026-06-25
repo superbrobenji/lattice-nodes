@@ -265,6 +265,64 @@ uint8_t EEPROM_Manager::loadRebootReason() {
   return EEPROM.read(EEPROM_ADDRESSES::REBOOT_REASON);
 }
 
+// CRC16 (CCITT) over a byte buffer
+static uint16_t crc16(const uint8_t* data, size_t len) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= static_cast<uint16_t>(data[i]) << 8;
+    for (int j = 0; j < 8; ++j)
+      crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : (crc << 1);
+  }
+  return crc;
+}
+
+// Keypair operations
+bool EEPROM_Manager::loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
+  if (!ensureInitialized()) return false;
+  for (int i = 0; i < 32; ++i) {
+    privateKey32[i] = EEPROM.read(EEPROM_ADDRESSES::PRIVATE_KEY + i);
+    publicKey32[i]  = EEPROM.read(EEPROM_ADDRESSES::PUBLIC_KEY  + i);
+  }
+  uint16_t stored = static_cast<uint16_t>(EEPROM.read(EEPROM_ADDRESSES::KEYPAIR_CRC))
+                  | (static_cast<uint16_t>(EEPROM.read(EEPROM_ADDRESSES::KEYPAIR_CRC + 1)) << 8);
+  uint8_t both[64];
+  memcpy(both, privateKey32, 32);
+  memcpy(both + 32, publicKey32, 32);
+  uint16_t computed = crc16(both, 64);
+  if (stored != computed) {
+    Logger::logln("EEPROM", "Keypair CRC mismatch — keys unset or corrupted", LogLevel::LOG_WARN);
+    return false;
+  }
+  return true;
+}
+
+void EEPROM_Manager::saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32) {
+  if (!ensureInitialized() || isDevMode) return;
+  for (int i = 0; i < 32; ++i) {
+    EEPROM.write(EEPROM_ADDRESSES::PRIVATE_KEY + i, privateKey32[i]);
+    EEPROM.write(EEPROM_ADDRESSES::PUBLIC_KEY  + i, publicKey32[i]);
+  }
+  uint8_t both[64];
+  memcpy(both, privateKey32, 32);
+  memcpy(both + 32, publicKey32, 32);
+  uint16_t crc = crc16(both, 64);
+  EEPROM.write(EEPROM_ADDRESSES::KEYPAIR_CRC,     static_cast<uint8_t>(crc & 0xFF));
+  EEPROM.write(EEPROM_ADDRESSES::KEYPAIR_CRC + 1, static_cast<uint8_t>((crc >> 8) & 0xFF));
+  EEPROM.commit();
+  logOperation("Keypair saved");
+}
+
+bool EEPROM_Manager::loadEnrolledFlag() {
+  if (!ensureInitialized()) return false;
+  return EEPROM.read(EEPROM_ADDRESSES::ENROLLED_FLAG) == 0x01;
+}
+
+void EEPROM_Manager::saveEnrolledFlag(bool enrolled) {
+  if (!ensureInitialized() || isDevMode) return;
+  EEPROM.write(EEPROM_ADDRESSES::ENROLLED_FLAG, enrolled ? 0x01 : 0xFF);
+  EEPROM.commit();
+}
+
 // Utility operations
 void EEPROM_Manager::clearAll() {
   if (!ensureInitialized()) return;
