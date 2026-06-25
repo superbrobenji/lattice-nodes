@@ -15,6 +15,10 @@ public:
   bool isPressed();
   // Returns true if held for the given ms (blocking call)
   bool waitForHold(uint32_t ms);
+
+private:
+  static constexpr uint8_t DEBOUNCE_READS = 3;
+  static constexpr uint8_t DEBOUNCE_DELAY_MS = 5;
 };
 
 }  // namespace hardware

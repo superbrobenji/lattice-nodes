@@ -46,7 +46,8 @@ constexpr int RED_LED_PIN   = 33;
 constexpr int GREEN_LED_PIN = 26;
 // Buttons
 constexpr int CONFIG_BUTTON_PIN = 32;
-constexpr int RESET_BUTTON_PIN  = 35;
+// GPIO 35 is input-only (no internal pull resistors) — use GPIO 25 or similar
+constexpr int RESET_BUTTON_PIN  = 25;
 // Seven-segment (TM1637) display – optional
 constexpr int SEVSEG_DATA_PIN = 23; // DIO
 constexpr int SEVSEG_CLK_PIN  = 22; // CLK

@@ -24,8 +24,12 @@ bool Button::init() {
 }
 
 bool Button::isPressed() {
-  // Active HIGH (assumes INPUT_PULLDOWN or external pull-down)
-  return digitalRead(_pin) == HIGH;
+  uint8_t highCount = 0;
+  for (uint8_t i = 0; i < DEBOUNCE_READS; ++i) {
+    if (digitalRead(_pin) == HIGH) ++highCount;
+    if (i < DEBOUNCE_READS - 1) delay(DEBOUNCE_DELAY_MS);
+  }
+  return highCount >= 2;  // majority vote: 2 of 3 reads HIGH
 }
 
 bool Button::waitForHold(uint32_t ms) {
