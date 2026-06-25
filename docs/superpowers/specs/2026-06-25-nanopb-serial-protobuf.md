@@ -1,8 +1,8 @@
 # Firmware Spec: nanopb Serial Protobuf Migration
 
 **Date:** 2026-06-25
-**Repo:** planetopia-nodes (`feat/firmware-overhaul`)
-**Related server change:** motionSensorServer commits f60d4fd..fa3dcf7 (field reorder + enrollment Protobuf)
+**Repo:** planetopia-nodes (branch off `main` after firmware-overhaul merge)
+**Paired server change:** motionSensorServer — add fields 8-11 to proto + enrollment handler
 
 ---
 
@@ -16,17 +16,15 @@ No behaviour visible to the mesh (ESP-NOW layer) changes. Only the serial wire f
 
 ## Background / Why Now
 
-The server was updated to match the agreed proto schema. Three bugs in the current firmware serial layer need fixing together:
-
-1. **ProtobufCodec.cpp** — exists in `main/src/Mesh/serialization/` but is never used anywhere. Dead code compiled into every test binary.
+1. **ProtobufCodec.cpp** — exists in `main/src/Mesh/serialization/` but is never used. Dead code compiled into every test binary.
 2. **Serial_Adapter inline codec** — duplicates ProtobufCodec with its own hand-rolled varint/zigzag/bytes helpers. Two implementations of the same thing, neither with test coverage for edge cases.
-3. **`relayEnrollmentToServer()`** — sends raw binary `[0xC0][6B mac][32B pubkey]` with a 2-byte length prefix. The server reads 2-byte length → tries `proto.Unmarshal(39 bytes starting with 0xC0)` → succeeds but gets a zero-value message → treats every enrollment request as a PIR event. **Enrollment is currently silently broken.**
+3. **`relayEnrollmentToServer()`** — sends raw binary `[0xC0][6B mac][32B pubkey]` with a 2-byte length prefix. The server reads 2-byte length → tries `proto.Unmarshal(39 bytes starting with 0xC0)` → fails silently (treats as unknown PIR event). **Enrollment is currently silently broken.**
 
 ---
 
 ## Proto Schema (source of truth)
 
-Both firmware and server must use this schema. The server's `mesh.proto` was already updated to match this.
+Both firmware and server must use this schema.
 
 **`main/proto/mesh.proto`** (create this file):
 
@@ -35,17 +33,26 @@ syntax = "proto3";
 package mesh;
 
 message MeshMessage {
-  uint32 messageType       = 1;  // 0=ADAPTER_DATA, 1=MASTER_BEACON, 2=ENROLLMENT, 3=JOIN_ACK
+  uint32 messageType       = 1;
+  // 0 = ADAPTER_DATA      (device→server: normal adapter data)
+  // 1 = MASTER_BEACON     (device→server: mesh heartbeat)
+  // 2 = ENROLLMENT        (device→server: node requests to join)
+  // 3 = SERIAL_CMD_BROADCAST (server→device: broadcast adapter data command)
+  // 4 = JOIN_ACK          (server→device: enrollment approved/rejected)
+  //
+  // NOTE: 3 is reserved for server→device commands (matches server's
+  // MessageTypeSerialCmdBroadcast = 3). JOIN_ACK is 4 to avoid collision.
+
   sint32 dataType          = 2;  // zigzag: -1=UNKNOWN, 0=PIR, 1=WIFI, 2=LED, 3=SERIAL
   bytes  originMacAddress  = 3;  // 6 bytes
   bytes  targetMacAddress  = 4;  // 6 bytes
   bytes  lastHopMacAddress = 5;  // 6 bytes
-  bytes  data              = 6;  // up to 12 bytes
+  bytes  data              = 6;  // up to 12 bytes of adapter payload
   uint32 hopCount          = 7;
-  uint32 epochNum          = 8;  // sender boot epoch
-  uint32 seqNum            = 9;  // per-boot sequence counter
+  uint32 epochNum          = 8;  // sender boot epoch (replay protection)
+  uint32 seqNum            = 9;  // per-boot sequence counter (replay protection)
   uint32 protoVersion      = 10; // must be 1 for v1 messages
-  bytes  public_key        = 11; // enrollment/join_ack: 32-byte Curve25519 public key
+  bytes  public_key        = 11; // optional: 32-byte Curve25519 key (ENROLLMENT/JOIN_ACK only)
 }
 ```
 
@@ -56,25 +63,73 @@ MeshMessage.originMacAddress  max_size:6  fixed_length:true
 MeshMessage.targetMacAddress  max_size:6  fixed_length:true
 MeshMessage.lastHopMacAddress max_size:6  fixed_length:true
 MeshMessage.data              max_size:12
-MeshMessage.public_key        max_size:32 fixed_length:true
+MeshMessage.public_key        max_size:32
 ```
 
-The `fixed_length:true` fields generate `pb_byte_t field[N]` (direct array).
-The `data` field without `fixed_length` generates `uint8_t data[12]; pb_size_t data_count;`.
+`fixed_length:true` fields generate `pb_byte_t field[N]` (always-present fixed array).
+`data` without `fixed_length` generates `uint8_t data[12]; pb_size_t data_count;` — set `data_count` to the real payload length, not always 12.
+`public_key` without `fixed_length` generates `bool has_public_key; uint8_t public_key[32];` — only set `has_public_key = true` when encoding enrollment/join_ack with a real key. This avoids sending 34 wasted bytes (tag+len+32 zeros) on every PIR/health/beacon message.
+
+### Message type values in firmware
+
+Add to `Mesh.h` (the `MeshMessageType` enum):
+```cpp
+MESH_TYPE_ADAPTER_DATA      = 0,
+MESH_TYPE_MASTER_BEACON     = 1,
+MESH_TYPE_ENROLLMENT        = 2,
+MESH_TYPE_SERIAL_CMD_BROADCAST = 3,  // server→device only; device never sends this
+MESH_TYPE_JOIN_ACK          = 4,     // server→device only; was 3 in original spec — CHANGED to avoid collision
+```
+
+Update `SERIAL_MSG_BROADCAST = 3` in `Serial_Adapter.h` to `SERIAL_MSG_BROADCAST = 3` (unchanged — already correct, just add `SERIAL_MSG_JOIN_ACK = 4`).
+
+---
+
+## Server-Side Changes Required
+
+The server (`motionSensorServer`) needs a paired update before enrollment works end-to-end. The firmware can land first (proto3 unknown fields are ignored by the current server, so existing ADAPTER_DATA and MASTER_BEACON flows are unaffected):
+
+### `server/orchistrator/mesh/mesh.proto`
+Add fields 8-11:
+```proto
+uint32 epochNum      = 8;
+uint32 seqNum        = 9;
+uint32 protoVersion  = 10;
+bytes  public_key    = 11;
+```
+Add comment clarifying messageType=4 is JOIN_ACK.
+
+### `server/orchistrator/mesh/constants.go`
+```go
+MessageTypeEnrollment        uint32 = 2
+MessageTypeSerialCmdBroadcast uint32 = 3  // existing — unchanged
+MessageTypeJoinAck           uint32 = 4  // new
+```
+
+### `server/orchistrator/mesh/server.go`
+In `handleMessage()` switch:
+```go
+case MessageTypeEnrollment:
+    return ms.handleEnrollment(msg)
+```
+
+`handleEnrollment()` should:
+1. Extract `msg.OriginMacAddress` (6B) and `msg.PublicKey` (32B)
+2. Call `nodeauth.Registry.Approve(mac, pubkey)` or `Reject(mac)` (the `nodeauth/` package already exists)
+3. Build JOIN_ACK response:
+   - Approved: `messageType=4, originMacAddress=mac, public_key=pubkey (non-zero)`
+   - Rejected: `messageType=4, originMacAddress=mac, public_key` absent (has_public_key=false → server sends with empty bytes)
+4. Call `ms.serialComm.WriteFrame(joinAck)`
+
+### `server/orchistrator/mesh/mesh.pb.go`
+Regenerate from updated `mesh.proto` using `protoc`.
 
 ---
 
 ## Toolchain Setup
 
-nanopb pip package provides the generator only — the C runtime must be added separately.
-
-### Generator (already installed)
-```
-python3 ...nanopb/generator/nanopb_generator.py
-```
-
-### C runtime
-Copy these 7 files from nanopb 0.4.x release into `main/src/Mesh/serialization/nanopb/`:
+### nanopb C runtime
+Download nanopb 0.4.9.1 and copy these 7 files into `main/src/Mesh/serialization/nanopb/`:
 - `pb.h`
 - `pb_encode.h` + `pb_encode.c`
 - `pb_decode.h` + `pb_decode.c`
@@ -90,15 +145,13 @@ python3 <nanopb_generator.py> \
   main/proto/mesh.proto
 ```
 
-Produces:
+Produces (commit both):
 - `main/src/Mesh/serialization/mesh.pb.h`
 - `main/src/Mesh/serialization/mesh.pb.c`
 
-Both files are committed to the repo (generated from the committed proto).
-
 ---
 
-## Files Changed
+## Files Changed (Firmware)
 
 ### Create
 
@@ -125,11 +178,11 @@ Both files are committed to the repo (generated from the committed proto).
 
 | File | What changes |
 |------|-------------|
-| `main/src/Mesh/Mesh.h` | Add `enrollmentPublicKey[32]` to `mesh_message` struct |
-| `main/src/Adapter/Serial_Adapter/Serial_Adapter.h` | Remove private codec helpers + enrollment opcodes; add nanopb includes |
-| `main/src/Adapter/Serial_Adapter/Serial_Adapter.cpp` | Replace encodeMeshMessage/decodeMeshMessage/relayEnrollmentToServer/handleCompleteFrame |
+| `main/src/Mesh/Mesh.h` | Add `enrollmentPublicKey[32]` to `mesh_message`; add `MESH_TYPE_SERIAL_CMD_BROADCAST=3`, `MESH_TYPE_JOIN_ACK=4` to enum |
+| `main/src/Adapter/Serial_Adapter/Serial_Adapter.h` | Remove private codec helpers + old enrollment opcodes (0xC0-0xC2); add `SERIAL_MSG_JOIN_ACK=4`; add nanopb includes |
+| `main/src/Adapter/Serial_Adapter/Serial_Adapter.cpp` | Replace encodeMeshMessage/decodeMeshMessage/relayEnrollmentToServer; update handleCompleteFrame for JOIN_ACK |
 | `tests/CMakeLists.txt` | Swap ProtobufCodec.cpp for nanopb + mesh.pb.c; remove test_protobuf_codec target |
-| `tests/unit/test_serial_framing.cpp` | Update to test nanopb encode/decode path |
+| `tests/unit/test_serial_framing.cpp` | Update to test nanopb encode/decode round-trip |
 
 ---
 
@@ -137,7 +190,7 @@ Both files are committed to the repo (generated from the committed proto).
 
 ### `main/src/Mesh/Mesh.h` — mesh_message struct
 
-Add one field at the end of the struct (zero-padded for normal messages):
+Add `enrollmentPublicKey` at the end:
 
 ```cpp
 struct mesh_message {
@@ -151,18 +204,28 @@ struct mesh_message {
   uint8_t hopCount;
   uint32_t epochNum;
   uint16_t seqNum;
-  uint8_t enrollmentPublicKey[32]; // NEW: zero normally; set for ENROLLMENT/JOIN_ACK
+  uint8_t enrollmentPublicKey[32]; // zero for non-enrollment messages
+};
+// Update static_assert: sizeof changes from 43 to 75 bytes
+static_assert(sizeof(mesh_message) == 75, "mesh_message struct size mismatch");
+```
+
+ESP-NOW sends this struct as raw bytes. 75 bytes is well within the 250-byte ESP-NOW limit. All `esp_now_send` call sites use `sizeof(mesh_message)` — no hardcoded size to update.
+
+Update the `MeshMessageType` enum:
+```cpp
+enum class MeshMessageType : uint8_t {
+  MESH_TYPE_ADAPTER_DATA         = 0,
+  MESH_TYPE_MASTER_BEACON        = 1,
+  MESH_TYPE_ENROLLMENT           = 2,
+  MESH_TYPE_SERIAL_CMD_BROADCAST = 3,  // server→device only
+  MESH_TYPE_JOIN_ACK             = 4,  // server→device only
 };
 ```
 
-This struct is the ESP-NOW (raw binary) internal representation. It is NOT the Protobuf schema. Size increases from 43 to 75 bytes — only affects in-memory representation, not the ESP-NOW payload (ESP-NOW still sends raw struct bytes).
-
-> **Open question**: Is the ESP-NOW payload size constrained? ESP-NOW max payload is 250 bytes so 75 bytes is fine. But if any other code does `sizeof(mesh_message)` for a size assertion or allocation, check those sites.
-
 ### `main/src/Adapter/Serial_Adapter/Serial_Adapter.h`
 
-Add before the class declaration:
-
+Add includes before class declaration:
 ```cpp
 #include "src/Mesh/serialization/nanopb/pb.h"
 #include "src/Mesh/serialization/nanopb/pb_encode.h"
@@ -170,24 +233,7 @@ Add before the class declaration:
 #include "src/Mesh/serialization/mesh.pb.h"
 ```
 
-Remove from the private section — all of these are replaced by nanopb:
-
-```cpp
-// REMOVE these private methods:
-size_t writeVarint(uint8_t* out, uint32_t value);
-size_t writeZigZag32(uint8_t* out, int32_t value);
-size_t writeKey(uint8_t* out, uint32_t fieldNumber, uint8_t wireType);
-size_t writeBytesField(uint8_t* out, uint32_t fieldNumber, const uint8_t* data, size_t len);
-size_t writeSint32Field(uint8_t* out, uint32_t fieldNumber, int32_t value);
-size_t writeUint32Field(uint8_t* out, uint32_t fieldNumber, uint32_t value);
-bool readVarint(const uint8_t*& ptr, const uint8_t* end, uint32_t& out);
-bool readZigZag32(const uint8_t*& ptr, const uint8_t* end, int32_t& out);
-bool readKey(const uint8_t*& ptr, const uint8_t* end, uint32_t& fieldNumber, uint8_t& wireType);
-bool readLengthDelimited(const uint8_t*& ptr, const uint8_t* end, const uint8_t*& dataPtr, size_t& dataLen);
-```
-
-Remove enrollment opcodes (raw binary protocol replaced by Protobuf):
-
+Remove old enrollment opcode constants (0xC0-0xC2 raw protocol replaced by Protobuf):
 ```cpp
 // REMOVE:
 static constexpr uint8_t OP_ENROLLMENT_REQ     = 0xC0;
@@ -195,11 +241,30 @@ static constexpr uint8_t OP_ENROLLMENT_APPROVE = 0xC1;
 static constexpr uint8_t OP_ENROLLMENT_REJECT  = 0xC2;
 ```
 
-Keep all other opcodes (`OP_HEALTH_REQ`, `OP_HEALTH_REPORT`, `OP_CONFIG_SET`, `OP_TX_POWER_SET`).
+Add join-ack message type alias:
+```cpp
+static constexpr uint32_t SERIAL_MSG_JOIN_ACK = 4;
+// SERIAL_MSG_BROADCAST = 3 stays — it is the server→device command type
+```
+
+Remove all private hand-rolled codec method declarations:
+```cpp
+// REMOVE all of these:
+size_t writeVarint(...);
+size_t writeZigZag32(...);
+size_t writeKey(...);
+size_t writeBytesField(...);
+size_t writeSint32Field(...);
+size_t writeUint32Field(...);
+bool readVarint(...);
+bool readZigZag32(...);
+bool readKey(...);
+bool readLengthDelimited(...);
+```
 
 ### `main/src/Adapter/Serial_Adapter/Serial_Adapter.cpp`
 
-Remove all private helper implementations (writeVarint through readLengthDelimited).
+Remove all private helper implementations (everything from `writeVarint` through `readLengthDelimited`).
 
 **Replace `encodeMeshMessage()`:**
 
@@ -217,39 +282,31 @@ size_t Serial_Adapter::encodeMeshMessage(const planetopia::mesh::mesh_message& m
   memcpy(pbMsg.targetMacAddress,   msg.targetMacAddress,   6);
   memcpy(pbMsg.lastHopMacAddress,  msg.lastHopMacAddress,  6);
 
-  // data field: nanopb generates uint8_t data[12] + pb_size_t data_count
-  pbMsg.data_count = 12;
-  memcpy(pbMsg.data, msg.data, 12);
+  // data: set actual byte count (current protocol always uses 12)
+  static_assert(sizeof(msg.data) == 12, "data field size mismatch");
+  pbMsg.data_count = sizeof(msg.data);
+  memcpy(pbMsg.data, msg.data, pbMsg.data_count);
 
-  // public_key only for enrollment/join_ack frames that carry a key
-  if (msg.messageType == planetopia::mesh::MESH_TYPE_ENROLLMENT ||
-      msg.messageType == planetopia::mesh::MESH_TYPE_JOIN_ACK) {
+  // public_key only for enrollment/join_ack frames with a real key
+  if (msg.messageType == planetopia::mesh::MeshMessageType::MESH_TYPE_ENROLLMENT ||
+      msg.messageType == planetopia::mesh::MeshMessageType::MESH_TYPE_JOIN_ACK) {
     bool nonZero = false;
     for (int i = 0; i < 32; ++i) {
       if (msg.enrollmentPublicKey[i]) { nonZero = true; break; }
     }
     if (nonZero) {
+      pbMsg.has_public_key = true;
       memcpy(pbMsg.public_key, msg.enrollmentPublicKey, 32);
-      // proto3 bytes with fixed_length — nanopb always encodes if max_size is set
-      // No has_ field needed; if all-zero, the bytes field is omitted by pb_encode
     }
   }
 
   pb_ostream_t stream = pb_ostream_from_buffer(out, outCap);
   if (!pb_encode(&stream, MeshMessage_fields, &pbMsg)) {
-    Logger::logln("Serial_Adapter",
-      String("pb_encode failed: ") + PB_GET_ERROR(&stream), LogLevel::LOG_ERROR);
     return 0;
   }
   return stream.bytes_written;
 }
 ```
-
-> **Note on `data_count`**: nanopb generates `data_count` for `bytes` fields with `max_size` but without `fixed_length`. `data_count` is the actual byte count to encode. Always set it to the real payload length, not always 12. The current protocol always uses 12 bytes — if that changes, update accordingly.
-
-> **Note on `public_key`**: With `fixed_length:true`, nanopb generates `pb_byte_t public_key[32]` with no `has_` field. If the key bytes are all zero, pb_encode will still encode the field (fixed_length fields are always included). The server will receive 32 zero bytes and interpret it as a rejection. This is the intended behavior for JOIN_ACK with no key.
->
-> **Alternative**: if you want to suppress the key field entirely for rejections, use an `.options` entry of `max_size:32` without `fixed_length:true` — that generates `has_public_key` + `public_key[32]`, and you set `has_public_key = nonZero`.
 
 **Replace `decodeMeshMessage()`:**
 
@@ -261,8 +318,6 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len,
   MeshMessage pbMsg = MeshMessage_init_zero;
   pb_istream_t stream = pb_istream_from_buffer(data, len);
   if (!pb_decode(&stream, MeshMessage_fields, &pbMsg)) {
-    Logger::logln("Serial_Adapter",
-      String("pb_decode failed: ") + PB_GET_ERROR(&stream), LogLevel::LOG_ERROR);
     return false;
   }
 
@@ -273,10 +328,14 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len,
   outMsg.seqNum       = static_cast<uint16_t>(pbMsg.seqNum);
   outMsg.protoVersion = static_cast<uint8_t>(pbMsg.protoVersion);
   memcpy(outMsg.targetMacAddress, pbMsg.targetMacAddress, 6);
-  memcpy(outMsg.data, pbMsg.data, pbMsg.data_count < 12 ? pbMsg.data_count : 12);
-  memcpy(outMsg.enrollmentPublicKey, pbMsg.public_key, 32);
+  size_t dataToCopy = pbMsg.data_count < 12 ? pbMsg.data_count : 12;
+  memcpy(outMsg.data, pbMsg.data, dataToCopy);
 
-  // Auto-generate routing fields (server only sends essential fields)
+  if (pbMsg.has_public_key) {
+    memcpy(outMsg.enrollmentPublicKey, pbMsg.public_key, 32);
+  }
+
+  // Routing fields auto-filled — server only sends target; device fills origin/lastHop
   readOwnMac(outMsg.originMacAddress);
   readOwnMac(outMsg.lastHopMacAddress);
 
@@ -289,65 +348,50 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len,
 ```cpp
 void Serial_Adapter::relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]) {
   planetopia::mesh::mesh_message msg = {};
-  msg.messageType = planetopia::mesh::MESH_TYPE_ENROLLMENT;
+  msg.messageType  = planetopia::mesh::MeshMessageType::MESH_TYPE_ENROLLMENT;
   msg.protoVersion = 1;
-  memcpy(msg.originMacAddress, mac, 6);
+  memcpy(msg.originMacAddress,    mac,    6);
   memcpy(msg.enrollmentPublicKey, pubKey, 32);
 
   uint8_t encoded[128];
   size_t n = encodeMeshMessage(msg, encoded, sizeof(encoded));
-  if (n == 0) {
-    Logger::logln("Serial_Adapter", "Failed to encode enrollment request", LogLevel::LOG_ERROR);
-    return;
-  }
+  if (n == 0) return;
+
   uint8_t lenLE[2] = {
     static_cast<uint8_t>(n & 0xFF),
     static_cast<uint8_t>((n >> 8) & 0xFF)
   };
   Serial.write(lenLE, 2);
   Serial.write(encoded, n);
-  Logger::logln("Serial_Adapter", "Enrollment request sent as Protobuf", LogLevel::LOG_INFO);
 }
 ```
 
 **Update `handleCompleteFrame()`:**
 
-Remove the raw opcode detection block at the top:
-```cpp
-// REMOVE this entire block:
-if (len >= 1) {
-    uint8_t op = data[0];
-    if (op == OP_ENROLLMENT_APPROVE && len >= 39) { ... }
-    else if (op == OP_ENROLLMENT_REJECT) { ... }
-}
-```
+Remove the raw opcode detection block (was handling `0xC1` ENROLLMENT_APPROVE / `0xC2` REJECT in the raw binary format).
 
-After `decodeMeshMessage()` succeeds, add JOIN_ACK handling before the existing ADAPTER_DATA/BROADCAST handling:
+After `decodeMeshMessage()` succeeds, dispatch on `msg.messageType` before the existing ADAPTER_DATA/BROADCAST path:
 
 ```cpp
-if (msg.messageType == planetopia::mesh::MESH_TYPE_JOIN_ACK) {
-  bool approved = false;
-  for (int i = 0; i < 32; ++i) {
-    if (msg.enrollmentPublicKey[i]) { approved = true; break; }
-  }
-  if (approved) {
-    Logger::logln("Serial_Adapter", "Server approved enrollment, registering peer", LogLevel::LOG_INFO);
+if (msg.messageType == planetopia::mesh::MeshMessageType::MESH_TYPE_JOIN_ACK) {
+  if (pbMsg.has_public_key) {  // non-zero key = approved
     planetopia::mesh::Mesh* meshInstance = planetopia::mesh::Mesh::getInstance();
     if (meshInstance) {
       meshInstance->enrollPeer(msg.originMacAddress, msg.enrollmentPublicKey);
     }
-  } else {
-    Logger::logln("Serial_Adapter", "Server rejected enrollment request", LogLevel::LOG_WARN);
   }
+  // else: server rejected — no action needed (node retries on next enrollment interval)
   return;
 }
 ```
 
+Note: `pbMsg` is the decoded nanopb struct — pass it through or re-check `msg.enrollmentPublicKey` (which was filled from `pbMsg.public_key` if `has_public_key` was true).
+
 ### `tests/CMakeLists.txt`
 
 In `FIRMWARE_SOURCES`:
-- **Remove**: `../main/src/Mesh/serialization/ProtobufCodec.cpp`
-- **Add**:
+- Remove: `../main/src/Mesh/serialization/ProtobufCodec.cpp`
+- Add:
   ```cmake
   ../main/src/Mesh/serialization/mesh.pb.c
   ../main/src/Mesh/serialization/nanopb/pb_encode.c
@@ -364,12 +408,17 @@ ${CMAKE_CURRENT_SOURCE_DIR}/../main/src/Mesh/serialization
 Remove the test target:
 ```cmake
 # Remove:
-add_unit_test(test_protobuf_codec     unit/test_protobuf_codec.cpp)
+add_unit_test(test_protobuf_codec  unit/test_protobuf_codec.cpp)
 ```
 
 ### `tests/unit/test_serial_framing.cpp`
 
-Update to test nanopb encode/decode instead of ProtobufCodec. The test intent stays the same: encode a `mesh_message` → decode it → fields match. Remove any direct ProtobufCodec includes or calls.
+Replace with tests that verify nanopb encode→decode round-trip via `Serial_Adapter`'s public API:
+- Encode a `mesh_message` (ADAPTER_DATA with 12-byte payload) → decode → fields match
+- Encode ENROLLMENT with public key → decode → `has_public_key=true`, key bytes match
+- Encode JOIN_ACK with zero key → decode → `has_public_key=false`
+- Truncated buffer → `pb_decode` returns false
+- Frame state machine tests (AwaitingLen1 → AwaitingLen2 → AwaitingPayload) remain unchanged
 
 ---
 
@@ -379,51 +428,40 @@ Update to test nanopb encode/decode instead of ProtobufCodec. The test intent st
 ```
 [2B LE length = 39][0xC0][6B mac][32B pubkey]   // raw binary, NOT Protobuf
 ```
-Server's `proto.Unmarshal` tries to parse `0xC0...` as Protobuf → gets garbage → treats as PIR event.
+Server's `proto.Unmarshal` tries to parse `0xC0...` → gets garbage.
 
 ### After (correct)
 ```
 [2B LE length = N][Protobuf-encoded MeshMessage]
   messageType = 2 (ENROLLMENT)
   originMacAddress = enrolling node MAC (6 bytes)
-  public_key = Curve25519 public key (32 bytes)
+  public_key = Curve25519 public key (32 bytes, has_public_key=true)
   protoVersion = 1
 ```
-Server decodes cleanly via `proto.Unmarshal` → `msg.MessageType == 2` → enrollment handler.
+Server decodes cleanly → `msg.MessageType == 2` → enrollment handler.
 
-### Approval (server → master → node)
-```
-[2B LE length = N][Protobuf-encoded MeshMessage]
-  messageType = 3 (JOIN_ACK)
-  originMacAddress = approved node MAC (6 bytes)
-  public_key = approved Curve25519 public key (32 bytes, non-zero = approved)
-```
+### JOIN_ACK (server → master → node)
 
-### Rejection (server → master → node)
+**Approved:**
 ```
-[2B LE length = N][Protobuf-encoded MeshMessage]
-  messageType = 3 (JOIN_ACK)
-  originMacAddress = rejected node MAC (6 bytes)
-  public_key absent / all-zero = rejection
+messageType = 4 (JOIN_ACK)
+originMacAddress = approved node MAC
+public_key = 32-byte key (has_public_key=true)
 ```
 
----
-
-## Open Questions for Review
-
-1. **`enrollmentPublicKey` in `mesh_message` struct**: Adding 32 bytes increases the struct from 43 to 75 bytes. All ESP-NOW code sends `sizeof(mesh_message)` bytes — this increases the ESP-NOW payload size. Confirm no ESP-NOW peer has a hardcoded payload size check. (ESP-NOW limit is 250 bytes so capacity is fine.)
-
-2. **`fixed_length:true` on `public_key`**: With `fixed_length:true`, pb_encode always sends 32 zero bytes even for non-enrollment messages where `enrollmentPublicKey` is zero-filled. This adds ~34 bytes (field tag + length + 32 bytes) to every message. Alternative: remove `fixed_length:true` from `public_key`, use `has_public_key` bool, only set it when there's a real key. This saves ~34 bytes per non-enrollment message.
-
-3. **`data` field always sent as 12 bytes**: Currently `encodeMeshMessage` always writes 12 bytes for `data`. If the actual payload is shorter (e.g., a health report uses 12 bytes but a PIR report might use fewer), `data_count` should reflect the real length. Existing protocol always packs 12 bytes, so this is a no-op change — but it's worth confirming.
-
-4. **Proto version on all outgoing frames**: `relayEnrollmentToServer` sets `protoVersion = 1`. Other outgoing serial frames (health reports sent as ADAPTER_DATA) set `protoVersion` via `buildMessage()`. Confirm all outgoing serial frames set `protoVersion = 1`.
+**Rejected:**
+```
+messageType = 4 (JOIN_ACK)
+originMacAddress = rejected node MAC
+public_key = absent (has_public_key=false)
+```
 
 ---
 
 ## Success Criteria
 
-- `cmake --build tests/build` passes with zero errors and all tests green
-- `test_serial_framing` exercises nanopb encode → decode round-trip
-- Serial output: enrollment frame parses as valid Protobuf on the server (`proto.Unmarshal` succeeds, `messageType == 2`)
-- JOIN_ACK from server decoded correctly: non-zero `public_key` → `enrollPeer` called; zero/absent key → rejection logged
+- `arduino-cli compile --fqbn esp32:esp32:esp32da main` — zero errors
+- `cmake --build tests/build && ctest` — all tests green
+- `test_serial_framing` exercises nanopb encode → decode round-trip (ADAPTER_DATA, ENROLLMENT, JOIN_ACK)
+- Serial capture: enrollment frame decodes cleanly as valid Protobuf with `messageType=2` and `public_key` present
+- JOIN_ACK with non-zero key triggers `enrollPeer()`; absent key is ignored

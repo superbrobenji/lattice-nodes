@@ -258,9 +258,18 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len, planetop
     memcpy(outMsg.enrollmentPublicKey, pbMsg.public_key.bytes, 32);
   }
 
-  // Auto-fill routing fields that the server doesn't send
-  readOwnMac(outMsg.originMacAddress);
-  readOwnMac(outMsg.lastHopMacAddress);
+  // For server-to-device messages (JOIN_ACK, SERIAL_CMD_BROADCAST) the MAC
+  // fields on the wire are meaningful and must not be overwritten.
+  // For device-originated relays (ADAPTER_DATA, MASTER_BEACON) the server
+  // leaves routing fields blank, so we fill them in with our own MAC.
+  if (outMsg.messageType != planetopia::mesh::MESH_TYPE_JOIN_ACK &&
+      outMsg.messageType != planetopia::mesh::MESH_TYPE_SERIAL_CMD_BROADCAST) {
+    readOwnMac(outMsg.originMacAddress);
+    readOwnMac(outMsg.lastHopMacAddress);
+  } else {
+    memcpy(outMsg.originMacAddress,  pbMsg.originMacAddress,  6);
+    memcpy(outMsg.lastHopMacAddress, pbMsg.lastHopMacAddress, 6);
+  }
 
   Logger::logln("Serial_Adapter", "Successfully decoded protobuf message", LogLevel::LOG_DEBUG);
   return true;
@@ -376,7 +385,7 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
                            6,
                            "Serial_Adapter: transmit function not set");
     }
-  } else if (msg.messageType == SERIAL_MSG_BROADCAST) {
+  } else if (msg.messageType == planetopia::mesh::MESH_TYPE_SERIAL_CMD_BROADCAST) {
     Logger::logln("Serial_Adapter", "Broadcasting adapter data to all peers", LogLevel::LOG_DEBUG);
     // Broadcast adapter data to all peers
     planetopia::mesh::Mesh::broadcastAdapterDataStatic(msg.dataType, msg.data);

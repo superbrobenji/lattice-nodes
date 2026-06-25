@@ -138,6 +138,43 @@ TEST(NanopbCodec, EmptyBuffer_DecodesAsZeroMessage) {
   EXPECT_FALSE(dec.has_public_key);
 }
 
+// --- JOIN_ACK decode: originMacAddress must be preserved from the wire, not clobbered ---
+// This is the precondition for the C1 fix: the codec must faithfully round-trip
+// the enrolling node's MAC so that handleCompleteFrame → enrollPeer gets the
+// correct MAC and does not register the master as its own peer.
+TEST(NanopbCodec, JoinAckDecode_PreservesOriginMac) {
+  mesh_MeshMessage enc = mesh_MeshMessage_init_zero;
+  enc.messageType  = 4;  // JOIN_ACK
+  enc.protoVersion = 1;
+
+  const uint8_t nodeMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  memcpy(enc.originMacAddress, nodeMac, 6);
+
+  enc.has_public_key    = true;
+  enc.public_key.size   = 32;
+  memset(enc.public_key.bytes, 0xAB, 32);
+
+  enc.has_data  = true;
+  enc.data.size = 12;
+  memset(enc.data.bytes, 0, 12);
+
+  uint8_t buf[256];
+  size_t n = encodeMsg(enc, buf, sizeof(buf));
+  ASSERT_GT(n, 0u);
+
+  mesh_MeshMessage dec;
+  ASSERT_TRUE(decodeMsg(buf, n, dec));
+
+  EXPECT_EQ(dec.messageType, 4u) << "messageType must survive round-trip";
+  EXPECT_EQ(memcmp(dec.originMacAddress, nodeMac, 6), 0)
+      << "JOIN_ACK originMacAddress must match the enrolling node MAC on the wire, "
+         "not the master device's own MAC";
+  ASSERT_TRUE(dec.has_public_key);
+  EXPECT_EQ(dec.public_key.size, 32u);
+  for (int i = 0; i < 32; ++i)
+    EXPECT_EQ(dec.public_key.bytes[i], 0xAB) << "public_key.bytes[" << i << "]";
+}
+
 // --- sint32 zigzag: UNKNOWN_ADAPTER = -1 survives round-trip ---
 TEST(NanopbCodec, ZigZag_UnknownAdapter) {
   mesh_MeshMessage enc = mesh_MeshMessage_init_zero;

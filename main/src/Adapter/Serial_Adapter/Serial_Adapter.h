@@ -47,12 +47,10 @@ private:
   static size_t encodeMeshMessage(const planetopia::mesh::mesh_message& msg, uint8_t* out, size_t outCap);
   static bool decodeMeshMessage(const uint8_t* data, size_t len, planetopia::mesh::mesh_message& outMsg);
   void handleCompleteFrame(const uint8_t* data, size_t len);
-  // Interpret messageType for Serial control:
-  // messageType == 0 (ADAPTER_DATA): targeted send via normal mesh transmit (to master)
-  // messageType == 3 (SERIAL_MSG_BROADCAST): broadcast adapter data via mesh
-  // messageType == 4 (JOIN_ACK): server approved or rejected enrollment
-  static constexpr uint32_t SERIAL_MSG_BROADCAST = 3;
-  static constexpr uint32_t SERIAL_MSG_JOIN_ACK   = 4;
+  // Interpret messageType for Serial control (uses planetopia::mesh::MeshMessageType):
+  // MESH_TYPE_ADAPTER_DATA (0)         : targeted send via normal mesh transmit (to master)
+  // MESH_TYPE_SERIAL_CMD_BROADCAST (3) : broadcast adapter data via mesh (server→device)
+  // MESH_TYPE_JOIN_ACK (4)             : server approved or rejected enrollment (server→device)
 
   // Health reporter
   static void sendHealthReport();
