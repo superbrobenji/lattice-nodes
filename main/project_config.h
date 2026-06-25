@@ -38,7 +38,9 @@ constexpr uint8_t RELAY_JITTER_MAX_MS = 64;
 // =====================
 // Wi-Fi / ESP-NOW channel – ALL nodes must match
 constexpr uint8_t WIFI_CHANNEL = 1;
-// Global 16-byte AES key – ALWAYS used for ESP-NOW encryption
+// Global 16-byte AES key – ALWAYS used for ESP-NOW encryption.
+// WARNING: Change this before deployment. Every node in a mesh must share the same key.
+// Generate a random key: python3 -c "import os; print([hex(b) for b in os.urandom(16)])"
 inline constexpr uint8_t DEFAULT_MESH_KEY[16] = {
   0x12,0x34,0x56,0x78, 0x9A,0xBC,0xDE,0xF0,
   0x11,0x22,0x33,0x44, 0x55,0x66,0x77,0x88};
@@ -62,9 +64,12 @@ constexpr bool ENABLE_SEVSEG_DISPLAY = true;
 // =====================
 // 5. Mesh Bootstrap Peers
 // =====================
+// TODO: Replace these with your actual device MAC addresses before flashing.
+// Run `esptool.py chip_id` or read from the serial output on first boot.
+// All nodes in a mesh must share identical WIFI_CHANNEL and DEFAULT_MESH_KEY.
 inline constexpr uint8_t DEFAULT_PEERS[][6] = {
-  {0xEC,0x64,0xC9,0x5D,0xAC,0x18}, // master
-  {0xEC,0x64,0xC9,0x5D,0x22,0x20}  // sample node
+  {0xAA,0xBB,0xCC,0xDD,0xEE,0x01}, // master — replace with real MAC
+  {0xAA,0xBB,0xCC,0xDD,0xEE,0x02}  // node   — replace with real MAC
 };
 constexpr int NUM_DEFAULT_PEERS = sizeof(DEFAULT_PEERS) / sizeof(DEFAULT_PEERS[0]);
 
