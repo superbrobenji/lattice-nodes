@@ -343,8 +343,7 @@ mesh_message Mesh::buildMessage(adapter_types type, const uint8_t data[12], Mesh
 
 // ---------- Tiger Style init helpers ----------
 bool Mesh::init() {
-  instance = this;
-
+  // instance already set in constructor; no need to repeat
   // 1. Load persisted peers/keys
   loadPersistentState();
 

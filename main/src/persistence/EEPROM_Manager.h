@@ -63,7 +63,6 @@ constexpr uint16_t PEER_LIST_SIZE = MAX_PEERS * PEER_RECORD_SIZE;           // 3
 
 class EEPROM_Manager {
 private:
-  static EEPROM_Manager* instance;
   bool isInitialized;
   bool isDevMode;
 
@@ -79,6 +78,12 @@ private:
 public:
   // Singleton pattern
   static EEPROM_Manager& getInstance();
+
+  // Delete copy and move to enforce singleton
+  EEPROM_Manager(const EEPROM_Manager&) = delete;
+  EEPROM_Manager& operator=(const EEPROM_Manager&) = delete;
+  EEPROM_Manager(EEPROM_Manager&&) = delete;
+  EEPROM_Manager& operator=(EEPROM_Manager&&) = delete;
 
   // Initialization and configuration
   bool init();

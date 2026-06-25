@@ -4,9 +4,6 @@
 namespace planetopia {
 namespace utils {
 
-// Static instance pointer
-EEPROM_Manager* EEPROM_Manager::instance = nullptr;
-
 EEPROM_Manager::EEPROM_Manager()
   : isInitialized(false), isDevMode(false) {
 }
@@ -18,10 +15,8 @@ EEPROM_Manager::~EEPROM_Manager() {
 }
 
 EEPROM_Manager& EEPROM_Manager::getInstance() {
-  if (instance == nullptr) {
-    instance = new EEPROM_Manager();
-  }
-  return *instance;
+  static EEPROM_Manager instance;
+  return instance;
 }
 
 // Tiger Style helpers
