@@ -178,14 +178,15 @@ void EEPROM_Manager::savePeerList(const uint8_t* peerList, size_t numPeers) {
     return;
   }
 
-  // Clear existing peer list first
-  clearPeerList();
-
-  // Write new peer list
-  for (int i = 0; i < numPeers * EEPROM_SIZES::PEER_MAC_SIZE; ++i) {
+  // Write all-0xFF first to blank slots, then new data, single commit at the end.
+  // Never commit between clear and write — power loss would erase the list permanently.
+  for (int i = 0; i < EEPROM_SIZES::PEER_LIST_SIZE; ++i) {
+    EEPROM.write(EEPROM_ADDRESSES::PEER_LIST + i, 0xFF);
+  }
+  for (int i = 0; i < static_cast<int>(numPeers * EEPROM_SIZES::PEER_MAC_SIZE); ++i) {
     EEPROM.write(EEPROM_ADDRESSES::PEER_LIST + i, peerList[i]);
   }
-  EEPROM.commit();
+  EEPROM.commit();  // Single commit — atomic from power-loss perspective
   logOperation("Peer list saved", String(numPeers).c_str());
 }
 

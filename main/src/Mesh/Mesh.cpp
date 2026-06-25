@@ -142,16 +142,8 @@ void Mesh::addPeerToEEPROM(const uint8_t mac[6]) {
   peer.lastSeenMillis = millis();
   peerMacs.push_back(peer);
   savePeersToEEPROM();
-  registerPeerWithEspNow(peer.mac, meshKey);
-
-  esp_now_peer_info_t info = {};
-  memcpy(info.peer_addr, mac, 6);
-  info.channel = 0;
-  info.encrypt = true;
-  memcpy(info.lmk, meshKey, MESH_KEY_SIZE);
-  esp_err_t result = esp_now_add_peer(&info);
-  planetopia::err::checkEsp(result, planetopia::utils::ErrorType::COMMUNICATION_FAIL, "addPeerToEEPROM: add_peer failed");
-  Logger::logln("MESH", "Peer added for encryption", LogLevel::LOG_DEBUG);
+  registerPeerWithEspNow(peer.mac, meshKey);  // This is the only call needed
+  Logger::logln("MESH", "Peer added", LogLevel::LOG_DEBUG);
 }
 
 void Mesh::removePeerFromEEPROM(const uint8_t mac[6]) {
@@ -176,7 +168,7 @@ PeerInfo* Mesh::findPeer(const uint8_t mac[6]) {
 bool Mesh::isPeerInRange(const uint8_t mac[6]) {
   PeerInfo* peer = findPeer(mac);
   if (!peer) return false;
-  return millis() - peer->lastSeenMillis < 8000;  // Considered in range if seen in last 8s
+  return millis() - peer->lastSeenMillis < planetopia::config::STALE_PEER_THRESHOLD_MS;
 }
 PeerInfo* Mesh::findNextHopToMaster() {
   // For this mesh: nextHop == currentMaster.nextHop
