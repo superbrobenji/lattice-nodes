@@ -5,7 +5,6 @@ Connects to ESP32 nodes over serial, sends protobuf frames, verifies responses.
 import struct
 import time
 import serial
-import threading
 from typing import Optional
 
 

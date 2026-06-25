@@ -5,7 +5,7 @@ Requires: master ESP32 on MASTER_PORT, node ESP32 on NODE_PORT.
 import pytest
 import os
 import time
-from harness import Node, OP_ENROLLMENT_REQ
+from harness import Node
 
 MASTER_PORT = os.getenv('MASTER_PORT', '/dev/ttyUSB0')
 NODE_PORT   = os.getenv('NODE_PORT',   '/dev/ttyUSB1')
@@ -34,7 +34,7 @@ def test_node_prints_public_key_on_boot(node):
 
 
 @pytest.mark.integration
-def test_master_receives_enrollment_request(master, node):
+def test_master_receives_enrollment_request(master, _node):
     """Master should relay OP_ENROLLMENT_REQ to server (serial) within 15s."""
     # Master should log enrollment request after node broadcasts
     enrolled = master.wait_for_log('Enrollment request complete, relaying to server', timeout=15.0)

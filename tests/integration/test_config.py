@@ -47,7 +47,6 @@ def test_config_set_from_non_master_rejected(node):
     node.send_opcode(OP_CONFIG_SET, bytes([0x03]))  # Try to set SERIAL_ADAPTER
 
     # Wait briefly — if the node applies the config, it logs "Adapter configured"
-    rejected = not node.wait_for_log('CONFIG_SET from non-master MAC rejected', timeout=3.0)
     # This test verifies the master/relay rejects it — harder to test directly
     # without a third node. Mark as informational for now.
     pytest.skip("Requires 3-node setup to verify rejection on relay")
