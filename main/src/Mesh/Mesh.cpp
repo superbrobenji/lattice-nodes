@@ -33,22 +33,57 @@ static void derivePeerLMK(const uint8_t* ownPrivateKey32, const uint8_t* peerPub
   mbedtls_entropy_init(&entropy);
   mbedtls_ctr_drbg_init(&ctr_drbg);
 
+  int ret = 0;
+
   const char* pers = "planetopia_ecdh";
-  mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                         reinterpret_cast<const uint8_t*>(pers), strlen(pers));
-  mbedtls_ecdh_setup(&ecdh, MBEDTLS_ECP_DP_CURVE25519);
+  ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+                               reinterpret_cast<const uint8_t*>(pers), strlen(pers));
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 10,
+                           "MESH: derivePeerLMK — ctr_drbg_seed failed");
+  }
+
+  ret = mbedtls_ecdh_setup(&ecdh, MBEDTLS_ECP_DP_CURVE25519);
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 11,
+                           "MESH: derivePeerLMK — ecdh_setup failed");
+  }
 
   // Load own private key and peer public key (X coordinate only for Curve25519)
-  mbedtls_mpi_read_binary(&ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(d),
-                           ownPrivateKey32, 32);
-  mbedtls_mpi_read_binary(&ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(X),
-                           peerPublicKey32, 32);
-  mbedtls_mpi_lset(&ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(Z), 1);
+  ret = mbedtls_mpi_read_binary(&ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(d),
+                                 ownPrivateKey32, 32);
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 12,
+                           "MESH: derivePeerLMK — mpi_read_binary (private key) failed");
+  }
+
+  ret = mbedtls_mpi_read_binary(&ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(X),
+                                 peerPublicKey32, 32);
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 13,
+                           "MESH: derivePeerLMK — mpi_read_binary (peer public key) failed");
+  }
+
+  ret = mbedtls_mpi_lset(&ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(Z), 1);
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 14,
+                           "MESH: derivePeerLMK — mpi_lset (Qp.Z) failed");
+  }
 
   uint8_t sharedSecret[32] = {};
   size_t outLen = 0;
-  mbedtls_ecdh_calc_secret(&ecdh, &outLen, sharedSecret, sizeof(sharedSecret),
-                            mbedtls_ctr_drbg_random, &ctr_drbg);
+  ret = mbedtls_ecdh_calc_secret(&ecdh, &outLen, sharedSecret, sizeof(sharedSecret),
+                                  mbedtls_ctr_drbg_random, &ctr_drbg);
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 15,
+                           "MESH: derivePeerLMK — ecdh_calc_secret failed");
+  }
 
   mbedtls_ecdh_free(&ecdh);
   mbedtls_ctr_drbg_free(&ctr_drbg);
@@ -57,15 +92,44 @@ static void derivePeerLMK(const uint8_t* ownPrivateKey32, const uint8_t* peerPub
   // KDF: SHA256(sharedSecret || "planetopia-lmk"), take first 16 bytes
   mbedtls_sha256_context sha;
   mbedtls_sha256_init(&sha);
-  mbedtls_sha256_starts(&sha, 0);  // 0 = SHA-256, not SHA-224
-  mbedtls_sha256_update(&sha, sharedSecret, 32);
+
+  ret = mbedtls_sha256_starts(&sha, 0);  // 0 = SHA-256, not SHA-224
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 16,
+                           "MESH: derivePeerLMK — sha256_starts failed");
+  }
+
+  ret = mbedtls_sha256_update(&sha, sharedSecret, 32);
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 17,
+                           "MESH: derivePeerLMK — sha256_update (secret) failed");
+  }
+
   const uint8_t label[] = "planetopia-lmk";
-  mbedtls_sha256_update(&sha, label, sizeof(label) - 1);
+  ret = mbedtls_sha256_update(&sha, label, sizeof(label) - 1);
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 18,
+                           "MESH: derivePeerLMK — sha256_update (label) failed");
+  }
+
   uint8_t digest[32];
-  mbedtls_sha256_finish(&sha, digest);
+  ret = mbedtls_sha256_finish(&sha, digest);
+  if (ret != 0) {
+    planetopia::err::fatal(planetopia::core::ErrorTypeDigit::CONFIG,
+                           planetopia::core::ModuleDigit::MESH, 19,
+                           "MESH: derivePeerLMK — sha256_finish failed");
+  }
+
   mbedtls_sha256_free(&sha);
 
   memcpy(lmk16Out, digest, 16);
+
+  // Zero sensitive buffers after use (Fix 2)
+  memset(sharedSecret, 0, sizeof(sharedSecret));
+  memset(digest, 0, sizeof(digest));
 }
 
 static void registerPeerWithEspNow(const uint8_t mac[6], const uint8_t* ownPrivateKey32, const uint8_t* peerPublicKey32) {
