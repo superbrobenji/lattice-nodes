@@ -20,7 +20,7 @@ PIR_Adapter::PIR_Adapter(int pin)
     _motionSent(false),
     _interruptEnabled(false),
     _initialized(false) {
-  _adapterType = PIR_ADAPTER;
+  _adapterType = adapter_types::PIR_ADAPTER;
 }
 
 bool PIR_Adapter::init() {
@@ -100,6 +100,14 @@ void PIR_Adapter::loop() {
 void PIR_Adapter::onMeshDataImpl(const planetopia::mesh::mesh_message& /*message*/) {
   // No-op for PIR: currently nothing to do on inbound messages of this type
 }
+
+#if SIMULATE_MODE
+void PIR_Adapter::simulateMotion() {
+  // Directly signal motion without requiring hardware interrupt
+  Logger::logln("PIR_Adapter", "SIM: Injecting fake PIR motion event", LogLevel::LOG_WARN);
+  _pir.signalMotion();
+}
+#endif
 
 }  // namespace adapter
 }  // namespace planetopia

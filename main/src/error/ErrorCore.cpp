@@ -7,7 +7,8 @@ using planetopia::core::makeErrorCode;
 namespace planetopia {
 namespace utils {
 ErrorCore::ErrorCore()
-  : _errorLed(nullptr), _display(nullptr), _initialized(false) {}
+  : _errorLed(nullptr), _display(nullptr), _initialized(false),
+    _pendingBlink(false), _pendingBlinkType(ErrorType::GENERIC), _inCallbackContext(false) {}
 ErrorCore& ErrorCore::getInstance() {
   static ErrorCore i;
   return i;
@@ -31,9 +32,24 @@ void ErrorCore::signalError(ErrorTypeDigit t, ModuleDigit m, uint8_t sub, const 
   signalError(lt, msg);
 }
 void ErrorCore::signalError(ErrorType type, const char* msg) {
-  if (_initialized && _errorLed) blinkPattern(type);
   if (msg) Logger::logln("Error", String("ERROR: ") + msg, LogLevel::LOG_ERROR);
+  if (_initialized && _errorLed) {
+    if (_inCallbackContext) {
+      // Defer blink to main loop — never block in callback context
+      _pendingBlink = true;
+      _pendingBlinkType = type;
+    } else {
+      blinkPattern(type);
+    }
+  }
   if (shouldRestart(type)) restartDevice();
+}
+
+void ErrorCore::drainPendingBlink() {
+  if (_pendingBlink) {
+    _pendingBlink = false;
+    blinkPattern(_pendingBlinkType);
+  }
 }
 void ErrorCore::blinkPattern(ErrorType t) {
   int b = 1;
@@ -54,10 +70,8 @@ bool ErrorCore::shouldRestart(ErrorType t) const {
   return t == ErrorType::MEMORY_ERROR || t == ErrorType::HARDWARE_FAILURE;
 }
 [[noreturn]] void ErrorCore::restartDevice() {
-  delay(500);
   Logger::logln("ErrorCore", "Restarting device...", LogLevel::LOG_WARN);
   ESP.restart();
-  while (true) {}
 }
 }
 }

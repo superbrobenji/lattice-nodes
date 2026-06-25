@@ -35,6 +35,13 @@ public:
 
   // Set dev mode flag (bypasses EEPROM operations)
   static void setDevMode(bool isDev);
+
+  // Named conversion functions for EEPROM
+  static adapter_types adapterTypeFromEEPROM(uint8_t raw);
+  static uint8_t adapterTypeToEEPROM(adapter_types type);
+
+private:
+  static bool isDevMode_;
 };
 
 }

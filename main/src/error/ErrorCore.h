@@ -22,6 +22,8 @@ public:
   void init(planetopia::hardware::Led* led, planetopia::hardware::SevenSegDisplay* display = nullptr);
   void signalError(core::ErrorTypeDigit t, core::ModuleDigit m, uint8_t sub, const char* msg = nullptr);
   void signalError(ErrorType type, const char* msg = nullptr);
+  void setCallbackContext(bool inCallback) { _inCallbackContext = inCallback; }
+  void drainPendingBlink();  // Call from main loop
   ErrorCore(const ErrorCore&) = delete;
   ErrorCore& operator=(const ErrorCore&) = delete;
 private:
@@ -29,6 +31,9 @@ private:
   planetopia::hardware::Led* _errorLed;
   planetopia::hardware::SevenSegDisplay* _display;
   bool _initialized;
+  volatile bool _pendingBlink;
+  ErrorType _pendingBlinkType;
+  bool _inCallbackContext;  // set true when inside ESP-NOW recv task
   void blinkPattern(ErrorType);
   bool shouldRestart(ErrorType) const;
   [[noreturn]] void restartDevice();

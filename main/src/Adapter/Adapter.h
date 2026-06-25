@@ -14,12 +14,12 @@ namespace planetopia {
 namespace adapter {
 
 // Enum for identifying adapter types
-enum adapter_types {
+enum class adapter_types : int32_t {
   UNKNOWN_ADAPTER = -1,
-  PIR_ADAPTER,
-  WIFI_ADAPTER,
-  LED_ADAPTER,
-  SERIAL_ADAPTER
+  PIR_ADAPTER = 0,
+  WIFI_ADAPTER = 1,
+  LED_ADAPTER = 2,
+  SERIAL_ADAPTER = 3
 };
 
 // Abstract base class for all adapters
@@ -41,7 +41,10 @@ public:
 
   virtual bool init() = 0;  // To be implemented by derived classes
   virtual void loop() = 0;  // Called repeatedly in the main loop
-  // Called when mesh data is received; filters by adapter type before dispatch
+  // Called when mesh data is received.
+  // Handles OP_CONFIG_SET (SERIAL_ADAPTER dataType) for ALL node types in the base class
+  // so that any node can be reconfigured regardless of its current adapter type.
+  // For all other message types, filters by adapter type before dispatching to onMeshDataImpl().
   void onMeshData(const planetopia::mesh::mesh_message& message);
 
 protected:

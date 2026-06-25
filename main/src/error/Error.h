@@ -53,8 +53,20 @@ inline bool checkEsp(esp_err_t status, utils::ErrorType type, const char* msg) {
 }
 }
 }
-#define ERROR_ASSERT(cond, msg) planetopia::err::check((cond), utils::ErrorType::CONFIG_ERROR, (msg))
-#define ERROR_CHECK(cond, t, msg) planetopia::err::check((cond), (t), (msg))
-#define ERROR_CHECK_ESP_OK(expr, t, m) planetopia::err::checkEsp((expr), (t), (m))
+
+template<typename... Args>
+inline bool ERROR_ASSERT(bool cond, const char* msg) {
+  return planetopia::err::check(cond, planetopia::utils::ErrorType::CONFIG_ERROR, msg);
+}
+
+template<typename T>
+inline bool ERROR_CHECK(bool cond, T t, const char* msg) {
+  return planetopia::err::check(cond, t, msg);
+}
+
+template<typename T>
+inline bool ERROR_CHECK_ESP_OK(esp_err_t expr, T t, const char* msg) {
+  return planetopia::err::checkEsp(expr, t, msg);
+}
 
 #endif
