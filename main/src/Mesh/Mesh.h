@@ -6,7 +6,6 @@
 #include <WiFi.h>
 #include <Arduino.h>
 #include <esp_wifi.h>
-#include <vector>
 #include <array>
 #include <cstdint>
 #include "src/Adapter/Adapter.h"
@@ -74,7 +73,8 @@ private:
 
   esp_now_peer_info_t peerInfo;
 
-  std::vector<PeerInfo> peerMacs;  // List of all known peers
+  PeerInfo peerMacs[MAX_PEERS];    // Fixed-size peer list (no heap alloc)
+  size_t peerCount;                // Number of valid entries in peerMacs
 
   void readMacAddress();
   void printMac(const uint8_t mac[6]);
@@ -104,6 +104,9 @@ private:
   PeerInfo* findPeer(const uint8_t mac[6]);
   bool isPeerInRange(const uint8_t mac[6]);
   PeerInfo* findNextHopToMaster();
+
+  // Bounds-checked insert into peerMacs fixed array
+  bool appendPeer(const PeerInfo& peer);
 
   void sendMessage(const uint8_t target[6], mesh_message msg);
   void broadcastToAllPeers(mesh_message msg);
@@ -187,9 +190,8 @@ public:
   // Peer management API (optional, can be used in your app/UI)
   void addPeer(const uint8_t mac[6]);
   void removePeer(const uint8_t mac[6]);
-  const std::vector<PeerInfo>& getPeerList() const {
-    return peerMacs;
-  }
+  const PeerInfo* getPeerList() const { return peerMacs; }
+  size_t getPeerCount() const { return peerCount; }
 
   // Broadcast adapter data to all peers
   void broadcastAdapterData(adapter_types type, const uint8_t data[12]);

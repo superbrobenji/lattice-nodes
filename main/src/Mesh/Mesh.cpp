@@ -161,7 +161,7 @@ Mesh::Mesh()
   : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0),
     bootEpoch(0), txSeqNum(0), replayCacheIdx(0),
     lastRelayedEpoch(0), lastRelayedSeqNum(0),
-    hasMasterMac(false) {
+    hasMasterMac(false), peerCount(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
@@ -172,8 +172,13 @@ Mesh::Mesh()
   memset(devicePublicKey, 0, 32);
   memset(replayCache, 0, sizeof(replayCache));
   memset(knownMasterMac, 0xFF, 6);
-  peerMacs.clear();
-  peerMacs.reserve(MAX_PEERS);  // pre-allocate to avoid runtime realloc
+  memset(peerMacs, 0, sizeof(peerMacs));
+}
+
+bool Mesh::appendPeer(const PeerInfo& peer) {
+  if (peerCount >= MAX_PEERS) return false;
+  peerMacs[peerCount++] = peer;
+  return true;
 }
 
 void Mesh::readMacAddress() {
@@ -214,7 +219,7 @@ void Mesh::printMeshMessage(const mesh_message& msg) {
 
 // --- EEPROM Peer Management ---
 void Mesh::loadPeersFromEEPROM() {
-  peerMacs.clear();
+  peerCount = 0;
 
   // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key
   uint8_t peerRecords[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_RECORD_SIZE];
@@ -233,20 +238,20 @@ void Mesh::loadPeersFromEEPROM() {
         memcpy(peer.mac, record, 6);
         memcpy(peer.publicKey, record + 6, 32);
         peer.lastSeenMillis = 0;
-        peerMacs.push_back(peer);
+        appendPeer(peer);
       }
     }
   }
 
   // Fallback in dev mode or when list is empty
-  if (peerMacs.empty()) {
+  if (peerCount == 0) {
     Logger::logln("MESH", "Peer list empty; loading defaults from config", LogLevel::LOG_INFO);
     for (int i = 0; i < planetopia::config::NUM_DEFAULT_PEERS; ++i) {
       PeerInfo peer;
       memcpy(peer.mac, planetopia::config::DEFAULT_PEERS[i], 6);
       memset(peer.publicKey, 0, 32);  // Public key not known yet for config defaults
       peer.lastSeenMillis = 0;
-      peerMacs.push_back(peer);
+      appendPeer(peer);
     }
   }
 }
@@ -256,19 +261,19 @@ void Mesh::savePeersToEEPROM() {
   uint8_t peerRecords[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_RECORD_SIZE];
   memset(peerRecords, 0xFF, sizeof(peerRecords));
 
-  for (size_t i = 0; i < peerMacs.size() && i < EEPROM_SIZES::MAX_PEERS; ++i) {
+  for (size_t i = 0; i < peerCount && i < EEPROM_SIZES::MAX_PEERS; ++i) {
     uint8_t* record = peerRecords + (i * EEPROM_SIZES::PEER_RECORD_SIZE);
     memcpy(record, peerMacs[i].mac, 6);
     memcpy(record + 6, peerMacs[i].publicKey, 32);
   }
 
-  EEPROM_Manager::getInstance().savePeerList(peerRecords, peerMacs.size());
+  EEPROM_Manager::getInstance().savePeerList(peerRecords, peerCount);
 }
 
 void Mesh::addPeerToEEPROM(const uint8_t mac[6]) {
   if (findPeer(mac) || planetopia::utils::MacAddress(mac) == planetopia::utils::MacAddress(deviceMacAddress)) return;
 
-  if (peerMacs.size() >= MAX_PEERS) {
+  if (peerCount >= MAX_PEERS) {
     planetopia::err::fail(planetopia::core::ErrorTypeDigit::MEMORY,
                          planetopia::core::ModuleDigit::MESH,
                          2,
@@ -280,16 +285,16 @@ void Mesh::addPeerToEEPROM(const uint8_t mac[6]) {
   memcpy(peer.mac, mac, 6);
   memset(peer.publicKey, 0, 32);  // Public key unknown until enrollment
   peer.lastSeenMillis = millis();
-  peerMacs.push_back(peer);
+  appendPeer(peer);
   savePeersToEEPROM();
-  registerPeerWithEspNow(peer.mac, devicePrivateKey, peer.publicKey);
+  registerPeerWithEspNow(peerMacs[peerCount - 1].mac, devicePrivateKey, peerMacs[peerCount - 1].publicKey);
   Logger::logln("MESH", "Peer added", LogLevel::LOG_DEBUG);
 }
 
 void Mesh::removePeerFromEEPROM(const uint8_t mac[6]) {
-  for (auto it = peerMacs.begin(); it != peerMacs.end(); ++it) {
-    if (planetopia::utils::MacAddress(it->mac) == planetopia::utils::MacAddress(mac)) {
-      peerMacs.erase(it);
+  for (size_t i = 0; i < peerCount; ++i) {
+    if (planetopia::utils::MacAddress(peerMacs[i].mac) == planetopia::utils::MacAddress(mac)) {
+      peerMacs[i] = peerMacs[--peerCount];  // swap with last, shrink count
       break;
     }
   }
@@ -300,8 +305,8 @@ void Mesh::removePeerFromEEPROM(const uint8_t mac[6]) {
 }
 
 PeerInfo* Mesh::findPeer(const uint8_t mac[6]) {
-  for (auto& peer : peerMacs) {
-    if (planetopia::utils::MacAddress(peer.mac) == planetopia::utils::MacAddress(mac)) return &peer;
+  for (size_t i = 0; i < peerCount; ++i) {
+    if (planetopia::utils::MacAddress(peerMacs[i].mac) == planetopia::utils::MacAddress(mac)) return &peerMacs[i];
   }
   return nullptr;
 }
@@ -313,11 +318,11 @@ bool Mesh::isPeerInRange(const uint8_t mac[6]) {
 PeerInfo* Mesh::findNextHopToMaster() {
   // For this mesh: nextHop == currentMaster.nextHop
   if (currentMaster.distance == 0xFF) return nullptr;
-  for (auto& peer : peerMacs) {
-    if (planetopia::utils::MacAddress(peer.mac) == planetopia::utils::MacAddress(currentMaster.nextHop)
-        && isPeerInRange(peer.mac)
-        && planetopia::utils::MacAddress(peer.mac) != planetopia::utils::MacAddress(deviceMacAddress))
-      return &peer;
+  for (size_t i = 0; i < peerCount; ++i) {
+    if (planetopia::utils::MacAddress(peerMacs[i].mac) == planetopia::utils::MacAddress(currentMaster.nextHop)
+        && isPeerInRange(peerMacs[i].mac)
+        && planetopia::utils::MacAddress(peerMacs[i].mac) != planetopia::utils::MacAddress(deviceMacAddress))
+      return &peerMacs[i];
   }
   return nullptr;
 }
@@ -455,8 +460,8 @@ bool Mesh::setupEspNow() {
     return false;
   }
   esp_now_set_pmk(meshKey);
-  for (auto& p : peerMacs) {
-    registerPeerWithEspNow(p.mac, devicePrivateKey, p.publicKey);
+  for (size_t i = 0; i < peerCount; ++i) {
+    registerPeerWithEspNow(peerMacs[i].mac, devicePrivateKey, peerMacs[i].publicKey);
   }
   esp_now_register_send_cb(onDataSentCallback);
   esp_now_register_recv_cb(Mesh::dataRecvTrampoline);
@@ -567,14 +572,14 @@ void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
 }
 
 void Mesh::broadcastToAllPeers(mesh_message msg) {
-  if (peerMacs.empty()) {
+  if (peerCount == 0) {
     Logger::logln("MESH", "WARNING: No peers to broadcast to!", LogLevel::LOG_WARN);
     return;
   }
-  for (const auto& mac : peerMacs) {
-    if (memcmp(mac.mac, deviceMacAddress, 6) == 0) continue;  // Skip self
-    memcpy(msg.targetMacAddress, mac.mac, 6);
-    sendMessage(mac.mac, msg);
+  for (size_t i = 0; i < peerCount; ++i) {
+    if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0) continue;  // Skip self
+    memcpy(msg.targetMacAddress, peerMacs[i].mac, 6);
+    sendMessage(peerMacs[i].mac, msg);
   }
 }
 
@@ -642,7 +647,7 @@ void Mesh::broadcastMasterBeacon() {
 // Optional peer management (can be used in your admin tools)
 void Mesh::addPeer(const uint8_t mac[6]) {
   if (!findPeer(mac)) {
-    if (peerMacs.size() >= MAX_PEERS) {
+    if (peerCount >= MAX_PEERS) {
       planetopia::err::fail(planetopia::core::ErrorTypeDigit::MEMORY,
                             planetopia::core::ModuleDigit::MESH,
                             6,
@@ -654,9 +659,9 @@ void Mesh::addPeer(const uint8_t mac[6]) {
     memcpy(p.mac, mac, 6);
     memset(p.publicKey, 0, 32);  // Public key unknown until enrollment
     p.lastSeenMillis = 0;
-    peerMacs.push_back(p);
+    appendPeer(p);
     savePeersToEEPROM();
-    registerPeerWithEspNow(p.mac, devicePrivateKey, p.publicKey);
+    registerPeerWithEspNow(peerMacs[peerCount - 1].mac, devicePrivateKey, peerMacs[peerCount - 1].publicKey);
   }
 }
 void Mesh::removePeer(const uint8_t mac[6]) {
@@ -944,7 +949,7 @@ void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
     // Update existing peer's public key
     memcpy(p->publicKey, publicKey32, 32);
   } else {
-    if (peerMacs.size() >= MAX_PEERS) {
+    if (peerCount >= MAX_PEERS) {
       Logger::logln("MESH", "Peer list full, cannot enroll", LogLevel::LOG_WARN);
       return;
     }
@@ -952,8 +957,8 @@ void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
     memcpy(newPeer.mac, mac, 6);
     memcpy(newPeer.publicKey, publicKey32, 32);
     newPeer.lastSeenMillis = 0;
-    peerMacs.push_back(newPeer);
-    p = &peerMacs.back();
+    appendPeer(newPeer);
+    p = &peerMacs[peerCount - 1];
   }
   savePeersToEEPROM();
 
