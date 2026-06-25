@@ -7,6 +7,7 @@
 #include "src/error/ErrorCore.h"
 #include "src/persistence/EEPROM_Manager.h"
 #include "project_config.h"
+#include <esp_task_wdt.h>
 
 constexpr unsigned long MASTER_BEACON_INTERVAL_MS = planetopia::config::MASTER_BEACON_INTERVAL_MS;
 
@@ -263,7 +264,16 @@ void setup() {
   adapter->setTransmitFn(&planetopia::mesh::Mesh::transmit);
 
   mesh.linkDataRecvCallback(dataRecvCallback);
-  
+
+  // Configure task watchdog: 10-second timeout
+  esp_task_wdt_config_t wdtConfig = {
+    .timeout_ms = 10000,
+    .idle_core_mask = 0,
+    .trigger_panic = true,
+  };
+  esp_task_wdt_init(&wdtConfig);
+  esp_task_wdt_add(nullptr);  // Add current task
+
   // Validate configuration for potential server communication issues
   validateServerConfiguration();
   
@@ -285,6 +295,7 @@ void loop() {
 
   mesh.checkMasterTimeout();
 
+  esp_task_wdt_reset();
   if (adapter) {
     adapter->loop();
   }
