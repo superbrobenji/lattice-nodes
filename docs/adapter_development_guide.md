@@ -86,7 +86,7 @@ Create the corresponding `.cpp` file in `main/src/Adapter/[AdapterName]_Adapter/
 ```cpp
 #include "[AdapterName]_Adapter.h"
 #include "src/Mesh/Mesh.h"
-#include "src/utils/Logger.h"
+#include "src/core/Logger.h"
 
 namespace planetopia {
 namespace adapter {
@@ -137,7 +137,7 @@ void [AdapterName]_Adapter::onMeshDataImpl(const planetopia::mesh::mesh_message&
 ```cpp
 #include "Temp_Adapter.h"
 #include "src/Mesh/Mesh.h"
-#include "src/utils/Logger.h"
+#include "src/core/Logger.h"
 
 namespace planetopia {
 namespace adapter {
@@ -258,15 +258,9 @@ In `main/src/Adapter/AdapterFactory.cpp`, add the include for your adapter:
 To change the default adapter for testing, modify `main/src/Adapter/AdapterFactory.cpp`:
 
 ```cpp
-void AdapterFactory::initializeDefaultsIfUnset() {
-    // Check if adapter type is already set
-    if (EEPROM.read(ADAPTER_TYPE_ADDR_FACTORY) == 0xFF) {
-        // Set default adapter type (change this line for testing)
-        EEPROM.write(ADAPTER_TYPE_ADDR_FACTORY, TEMP_ADAPTER);  // Changed from PIR_ADAPTER
-        EEPROM.commit();
-        Logger::logln(LogLevel::LOG_INFO, "Set default adapter type to TEMP_ADAPTER");
-    }
-}
+// Do not call this method directly — change DEFAULT_ADAPTER in project_config.h instead.
+// AdapterFactory::initializeDefaultsIfUnset() reads from EEPROM_Manager, which already
+// seeds from project_config.h::DEFAULT_ADAPTER on a blank device.
 ```
 
 ### Method 2: Use the Serial Configuration Command
@@ -395,7 +389,8 @@ Connect to the master node's serial port to see:
 
 1. **Add logging** to your adapter's methods:
    ```cpp
-   Logger::logln(LogLevel::LOG_INFO, "Temp_Adapter: Temperature read: %.1f", _lastTemperature);
+   // Logger::logln takes (tag, message, level). For formatted strings, use String():
+   Logger::logln("TEMP", ("Temp_Adapter: Temperature read: " + String(_lastTemperature, 1)).c_str(), LogLevel::LOG_INFO);
    ```
 
 2. **Check mesh message flow** by adding logging to `onMeshDataImpl`
