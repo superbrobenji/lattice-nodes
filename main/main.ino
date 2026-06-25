@@ -250,9 +250,10 @@ void setup() {
   }
   mesh.debugDumpRadio();
 
-  // Print device public key for provisioning (admin copies this to server)
+  // Print device public key for provisioning (admin copies this to server).
+  // Only printed when not yet enrolled — enrolled nodes have already been provisioned.
   // The private key is NEVER printed — only the public key is output here.
-  {
+  if (!mesh.isEnrolled()) {
     const uint8_t* pubKey = mesh.getDevicePublicKey();
     Serial.print("PLANETOPIA_PUBKEY:");
     for (int i = 0; i < 32; ++i) {

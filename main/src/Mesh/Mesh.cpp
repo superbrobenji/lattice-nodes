@@ -160,7 +160,8 @@ static void registerPeerWithEspNow(const uint8_t mac[6], const uint8_t* ownPriva
 Mesh::Mesh()
   : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0),
     bootEpoch(0), txSeqNum(0), replayCacheIdx(0),
-    lastRelayedEpoch(0), lastRelayedSeqNum(0) {
+    lastRelayedEpoch(0), lastRelayedSeqNum(0),
+    hasMasterMac(false) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
@@ -170,6 +171,7 @@ Mesh::Mesh()
   memset(devicePrivateKey, 0, 32);
   memset(devicePublicKey, 0, 32);
   memset(replayCache, 0, sizeof(replayCache));
+  memset(knownMasterMac, 0xFF, 6);
   peerMacs.clear();
   peerMacs.reserve(MAX_PEERS);  // pre-allocate to avoid runtime realloc
 }
@@ -377,6 +379,10 @@ void Mesh::loadPersistentState() {
   loadPeersFromEEPROM();
   loadMeshKeyFromEEPROM();
   loadOrGenerateKeypair();
+  hasMasterMac = EEPROM_Manager::getInstance().loadKnownMasterMac(knownMasterMac);
+  if (hasMasterMac) {
+    Logger::logln("MESH", "Known master MAC loaded from EEPROM", LogLevel::LOG_INFO);
+  }
 }
 
 void Mesh::loadOrGenerateKeypair() {
@@ -759,6 +765,26 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     return;
   }
 
+  // TOFU master MAC enforcement
+  if (hasMasterMac && memcmp(msg.originMacAddress, knownMasterMac, 6) != 0) {
+    // Beacon from a different MAC than the known master
+    if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
+      // Current master still fresh — reject the impostor
+      Logger::logln("MESH", "Beacon from unexpected MAC rejected (master still alive)", LogLevel::LOG_WARN);
+      return;
+    }
+    // Current master is stale — accept new master (master hotswap)
+    Logger::logln("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
+    memcpy(knownMasterMac, msg.originMacAddress, 6);
+    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+  } else if (!hasMasterMac) {
+    // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
+    memcpy(knownMasterMac, msg.originMacAddress, 6);
+    hasMasterMac = true;
+    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+    Logger::logln("MESH", "Master MAC learned from first beacon (TOFU fallback)", LogLevel::LOG_INFO);
+  }
+
   if (planetopia::utils::MacAddress(lastSeenMasterMac) != planetopia::utils::MacAddress(msg.originMacAddress) && lastSeenMasterMac[0] != 0) {
     Logger::logln("MESH", "WARNING: Multiple masters detected!", LogLevel::LOG_WARN);
     planetopia::err::fail(planetopia::core::ErrorTypeDigit::CONFIG,
@@ -796,6 +822,15 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 }
 
 void Mesh::processAdapterData(const mesh_message& msg) {
+  // Config-modifying opcodes are only accepted from the known master (S3 fix)
+  static constexpr uint8_t OP_CONFIG_SET = 0xA0;
+  bool isConfigOpcode = (msg.dataType == adapter_types::SERIAL_ADAPTER &&
+                         msg.data[0] == OP_CONFIG_SET);
+  if (isConfigOpcode && hasMasterMac &&
+      memcmp(msg.originMacAddress, knownMasterMac, 6) != 0) {
+    Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
+    return;
+  }
   if (externalRecvCallback) externalRecvCallback(msg);
 }
 
@@ -894,6 +929,14 @@ void Mesh::processJoinAck(const mesh_message& msg) {
   }
   Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
   EEPROM_Manager::getInstance().saveEnrolledFlag(true);
+
+  // The node sending JOIN_ACK is the master — record its MAC (TOFU)
+  if (!hasMasterMac) {
+    memcpy(knownMasterMac, msg.originMacAddress, 6);
+    hasMasterMac = true;
+    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+    Logger::logln("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
+  }
 }
 
 void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {

@@ -384,6 +384,32 @@ void EEPROM_Manager::saveBootEpoch(uint32_t epoch) {
   EEPROM.commit();
 }
 
+// TOFU master MAC operations
+bool EEPROM_Manager::loadKnownMasterMac(uint8_t mac[6]) {
+  if (!ensureInitialized()) return false;
+  for (int i = 0; i < 6; ++i) mac[i] = EEPROM.read(EEPROM_ADDRESSES::KNOWN_MASTER_MAC + i);
+  // All 0xFF means unset (factory state)
+  bool allFF = true;
+  for (int i = 0; i < 6; ++i) {
+    if (mac[i] != 0xFF) { allFF = false; break; }
+  }
+  return !allFF;
+}
+
+void EEPROM_Manager::saveKnownMasterMac(const uint8_t mac[6]) {
+  if (!ensureInitialized() || isDevMode) return;
+  for (int i = 0; i < 6; ++i) EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC + i, mac[i]);
+  EEPROM.commit();
+  logOperation("Known master MAC saved");
+}
+
+void EEPROM_Manager::clearKnownMasterMac() {
+  if (!ensureInitialized() || isDevMode) return;
+  for (int i = 0; i < 6; ++i) EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC + i, 0xFF);
+  EEPROM.commit();
+  logOperation("Known master MAC cleared");
+}
+
 // Utility operations
 void EEPROM_Manager::clearAll() {
   if (!ensureInitialized()) return;

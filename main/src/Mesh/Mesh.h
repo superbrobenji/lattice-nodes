@@ -149,6 +149,10 @@ private:
   uint32_t lastRelayedEpoch;
   uint16_t lastRelayedSeqNum;
 
+  // TOFU master MAC — learned on first enrollment beacon, persisted across reboots
+  uint8_t knownMasterMac[6];
+  bool    hasMasterMac;
+
   // Pending enrollment relay (filled in ESP-NOW callback, drained in loop())
   volatile bool _pendingEnrollmentRelay = false;
   uint8_t       _pendingEnrollmentMac[6]{};
