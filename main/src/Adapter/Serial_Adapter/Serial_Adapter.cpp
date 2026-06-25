@@ -465,8 +465,43 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len, planetop
   return true;
 }
 
+void Serial_Adapter::relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]) {
+  // Raw enrollment frame: [C0][6B mac][32B pubkey] = 39 bytes total
+  uint8_t frame[39];
+  frame[0] = OP_ENROLLMENT_REQ;
+  memcpy(&frame[1], mac, 6);
+  memcpy(&frame[7], pubKey, 32);
+
+  // 2-byte little-endian length prefix (matches the framing protocol)
+  uint8_t lenLE[2] = { static_cast<uint8_t>(39 & 0xFF), static_cast<uint8_t>((39 >> 8) & 0xFF) };
+  Serial.write(lenLE, 2);
+  Serial.write(frame, 39);
+  Logger::logln("Serial_Adapter", "Enrollment request relayed to server", LogLevel::LOG_INFO);
+}
+
 void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
   Logger::logln("Serial_Adapter", "Handling complete frame of " + String(len) + " bytes", LogLevel::LOG_INFO);
+
+  // Check for raw enrollment opcodes before attempting protobuf decode
+  if (len >= 1) {
+    uint8_t op = data[0];
+    if (op == OP_ENROLLMENT_APPROVE && len >= 39) {
+      // Server approved: [C1][6B mac][32B pubkey]
+      uint8_t approvedMac[6];
+      uint8_t approvedPubKey[32];
+      memcpy(approvedMac,    &data[1], 6);
+      memcpy(approvedPubKey, &data[7], 32);
+      Logger::logln("Serial_Adapter", "Server approved enrollment, registering peer", LogLevel::LOG_INFO);
+      planetopia::mesh::Mesh* meshInstance = planetopia::mesh::Mesh::getInstance();
+      if (meshInstance) {
+        meshInstance->enrollPeer(approvedMac, approvedPubKey);
+      }
+      return;
+    } else if (op == OP_ENROLLMENT_REJECT) {
+      Logger::logln("Serial_Adapter", "Server rejected enrollment request", LogLevel::LOG_WARN);
+      return;
+    }
+  }
 
   planetopia::mesh::mesh_message msg;
   if (!decodeMeshMessage(data, len, msg)) {

@@ -3,6 +3,7 @@
 #include "src/core/Logger.h"
 #include "src/error/Error.h"  // unified error
 #include "src/persistence/EEPROM_Manager.h"
+#include "src/Adapter/Serial_Adapter/Serial_Adapter.h"  // for relayEnrollmentToServer
 // Error.h already provides ERROR_CHECK macros
 #include <esp_now.h>
 #include <WiFi.h>
@@ -469,7 +470,13 @@ void Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uint8_t* inco
   Logger::logln("MESH", "Bytes received:", LogLevel::LOG_DEBUG);
   printMeshMessage(msg);
 
-  // Update peer last-seen
+  // Enrollment frames are processed before the peer allowlist check (chicken-and-egg exemption)
+  if (msg.messageType == MESH_TYPE_ENROLLMENT) {
+    processEnrollmentRequest(msg);
+    return;
+  }
+
+  // Update peer last-seen (only for enrolled/known peers)
   updatePeerLastSeen(info);
 
   switch (msg.messageType) {
@@ -478,6 +485,9 @@ void Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uint8_t* inco
       break;
     case MESH_TYPE_ADAPTER_DATA:
       processAdapterData(msg);
+      break;
+    case MESH_TYPE_JOIN_ACK:
+      processJoinAck(msg);
       break;
     default:
       Logger::logln("MESH", "Unknown message type", LogLevel::LOG_WARN);
@@ -693,10 +703,10 @@ void Mesh::checkMasterTimeout() {
 void Mesh::updatePeerLastSeen(const esp_now_recv_info* info) {
   if (!info || !info->src_addr) return;
   if (planetopia::utils::MacAddress(info->src_addr) == planetopia::utils::MacAddress(deviceMacAddress)) return;
+  // Enrollment is the only path for new peers — do not auto-add unknown senders here.
+  // Unknown senders are silently ignored for non-enrollment messages.
   PeerInfo* p = findPeer(info->src_addr);
-  if (!p) {
-    addPeerToEEPROM(info->src_addr);
-  } else {
+  if (p) {
     p->lastSeenMillis = millis();
   }
 }
@@ -736,6 +746,141 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 
 void Mesh::processAdapterData(const mesh_message& msg) {
   if (externalRecvCallback) externalRecvCallback(msg);
+}
+
+bool Mesh::isEnrolled() const {
+  return EEPROM_Manager::getInstance().loadEnrolledFlag();
+}
+
+void Mesh::sendEnrollmentRequest() {
+  mesh_message msg = {};
+  msg.messageType = MESH_TYPE_ENROLLMENT;
+  msg.dataType = adapter_types::UNKNOWN_ADAPTER;
+  memcpy(msg.originMacAddress, deviceMacAddress, 6);
+  memset(msg.targetMacAddress, 0xFF, 6);  // broadcast
+  memcpy(msg.lastHopMacAddress, deviceMacAddress, 6);
+  msg.hopCount = 0;
+
+  // Chunk 0: data[0]=0x00 (chunk index), data[1..11] = pubkey[0..10]
+  msg.data[0] = 0x00;
+  memcpy(&msg.data[1], devicePublicKey, 11);
+  esp_now_send(nullptr, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  delay(10);
+
+  // Chunk 1: data[0]=0x01, data[1..11] = pubkey[11..21]
+  msg.data[0] = 0x01;
+  memcpy(&msg.data[1], devicePublicKey + 11, 11);
+  esp_now_send(nullptr, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  delay(10);
+
+  // Chunk 2: data[0]=0x02, data[1..10] = pubkey[22..31], data[11]=0x00 (padding)
+  msg.data[0] = 0x02;
+  memcpy(&msg.data[1], devicePublicKey + 22, 10);
+  msg.data[11] = 0x00;
+  esp_now_send(nullptr, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+
+  Logger::logln("MESH", "Enrollment request sent (3 chunks)", LogLevel::LOG_INFO);
+}
+
+void Mesh::processEnrollmentRequest(const mesh_message& msg) {
+  if (!isMaster) {
+    // Non-master nodes ignore enrollment requests (only master talks to server)
+    return;
+  }
+
+  // Accumulate chunks from this MAC
+  uint8_t chunkIdx = msg.data[0];
+  const uint8_t* sender = msg.originMacAddress;
+
+  // Static buffer: up to 4 concurrent enrolling nodes
+  static struct { uint8_t mac[6]; uint8_t key[32]; uint8_t received; } buf[4] = {};
+  int slot = -1;
+  for (int i = 0; i < 4; ++i) {
+    if (memcmp(buf[i].mac, sender, 6) == 0) { slot = i; break; }
+  }
+  if (slot < 0) {
+    // Find an empty slot (received == 0 and mac is all-zero)
+    for (int i = 0; i < 4; ++i) {
+      bool empty = true;
+      for (int j = 0; j < 6; ++j) { if (buf[i].mac[j] != 0) { empty = false; break; } }
+      if (empty) { slot = i; break; }
+    }
+  }
+  if (slot < 0) {
+    Logger::logln("MESH", "Enrollment buffer full, dropping request", LogLevel::LOG_WARN);
+    return;
+  }
+  memcpy(buf[slot].mac, sender, 6);
+
+  if (chunkIdx == 0x00) {
+    memcpy(buf[slot].key, &msg.data[1], 11);
+    buf[slot].received |= 1;
+  } else if (chunkIdx == 0x01) {
+    memcpy(buf[slot].key + 11, &msg.data[1], 11);
+    buf[slot].received |= 2;
+  } else if (chunkIdx == 0x02) {
+    memcpy(buf[slot].key + 22, &msg.data[1], 10);
+    buf[slot].received |= 4;
+  }
+
+  if ((buf[slot].received & 0x07) == 0x07) {
+    // All 3 chunks received — relay to server via serial
+    Logger::logln("MESH", "Enrollment request complete, relaying to server", LogLevel::LOG_INFO);
+    planetopia::adapter::Serial_Adapter::relayEnrollmentToServer(buf[slot].mac, buf[slot].key);
+    memset(&buf[slot], 0, sizeof(buf[slot]));  // Clear buffer slot
+  }
+}
+
+void Mesh::processJoinAck(const mesh_message& msg) {
+  // Verify the ack is addressed to us
+  if (memcmp(msg.targetMacAddress, deviceMacAddress, 6) != 0) return;
+  // Verify fingerprint matches our public key (first 4 bytes)
+  if (memcmp(msg.data, devicePublicKey, 4) != 0) {
+    Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
+    return;
+  }
+  Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
+  EEPROM_Manager::getInstance().saveEnrolledFlag(true);
+}
+
+void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
+  PeerInfo* p = findPeer(mac);
+  if (p) {
+    // Update existing peer's public key
+    memcpy(p->publicKey, publicKey32, 32);
+  } else {
+    if (peerMacs.size() >= MAX_PEERS) {
+      Logger::logln("MESH", "Peer list full, cannot enroll", LogLevel::LOG_WARN);
+      return;
+    }
+    PeerInfo newPeer;
+    memcpy(newPeer.mac, mac, 6);
+    memcpy(newPeer.publicKey, publicKey32, 32);
+    newPeer.lastSeenMillis = 0;
+    peerMacs.push_back(newPeer);
+    p = &peerMacs.back();
+  }
+  savePeersToEEPROM();
+
+  // Re-register with encryption now that we have the public key
+  if (esp_now_is_peer_exist(mac)) {
+    esp_now_del_peer(mac);
+  }
+  registerPeerWithEspNow(mac, devicePrivateKey, publicKey32);
+
+  // Send JOIN_ACK unicast to new node
+  mesh_message ack = {};
+  ack.messageType = MESH_TYPE_JOIN_ACK;
+  ack.dataType = adapter_types::UNKNOWN_ADAPTER;
+  memcpy(ack.originMacAddress, deviceMacAddress, 6);
+  memcpy(ack.targetMacAddress, mac, 6);
+  memcpy(ack.lastHopMacAddress, deviceMacAddress, 6);
+  ack.hopCount = 0;
+  // Include first 4 bytes of approved node's pubkey as fingerprint
+  memcpy(ack.data, publicKey32, 4);
+  // Broadcast so node receives it even before it's in the peer list
+  esp_now_send(nullptr, reinterpret_cast<const uint8_t*>(&ack), sizeof(ack));
+  Logger::logln("MESH", "JOIN_ACK sent to newly enrolled node", LogLevel::LOG_INFO);
 }
 // --------------------------------------------------------
 

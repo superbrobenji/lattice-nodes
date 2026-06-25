@@ -15,9 +15,15 @@ public:
   void onMeshDataImpl(const planetopia::mesh::mesh_message& message) override;
 
   // Serial control opcodes (shared between serial and mesh paths)
-  static constexpr uint8_t OP_CONFIG_SET    = 0xA0;  // [A0][6B targetMac][1B adapterType]
-  static constexpr uint8_t OP_HEALTH_REQ    = 0xB0;  // [B0]
-  static constexpr uint8_t OP_HEALTH_REPORT = 0xB1;  // [B1][1B adapterType][6B mac][4B uptime]
+  static constexpr uint8_t OP_CONFIG_SET       = 0xA0;  // [A0][6B targetMac][1B adapterType]
+  static constexpr uint8_t OP_HEALTH_REQ       = 0xB0;  // [B0]
+  static constexpr uint8_t OP_HEALTH_REPORT    = 0xB1;  // [B1][1B adapterType][6B mac][4B uptime]
+  static constexpr uint8_t OP_ENROLLMENT_REQ    = 0xC0;  // [C0][6B mac][32B pubkey] node→server
+  static constexpr uint8_t OP_ENROLLMENT_APPROVE = 0xC1; // [C1][6B mac][32B pubkey] server→node
+  static constexpr uint8_t OP_ENROLLMENT_REJECT  = 0xC2; // [C2][6B mac] server→node
+
+  // Relay a completed enrollment public key to the server over serial
+  static void relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]);
 
 private:
   // Protobuf-over-serial framing: 2-byte little-endian length prefix + protobuf payload

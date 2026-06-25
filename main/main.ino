@@ -309,6 +309,21 @@ void loop() {
 
   mesh.checkMasterTimeout();
 
+  // Enrollment state machine: non-master nodes that are not yet enrolled
+  // broadcast their public key every 10 seconds and skip sensor data forwarding
+  // until approved by the server and JOIN_ACK received.
+  static uint32_t lastEnrollmentBroadcast = 0;
+  if (!mesh.isEnrolled() && !mesh.getIsMaster()) {
+    if (millis() - lastEnrollmentBroadcast > 10000) {
+      lastEnrollmentBroadcast = millis();
+      mesh.sendEnrollmentRequest();
+      Logger::logln("MAIN", "Enrollment request sent (awaiting server approval)", LogLevel::LOG_INFO);
+    }
+    esp_task_wdt_reset();
+    // Do not forward sensor data until enrolled
+    return;
+  }
+
   esp_task_wdt_reset();
   if (adapter) {
     adapter->loop();

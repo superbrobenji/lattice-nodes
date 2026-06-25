@@ -21,8 +21,10 @@ using planetopia::utils::EEPROM_SIZES::MAX_PEERS;  // Use constant from EEPROM_M
 
 // --- Mesh protocol message type ---
 enum MeshMessageType : uint8_t {
-  MESH_TYPE_ADAPTER_DATA = 0,
+  MESH_TYPE_ADAPTER_DATA  = 0,
   MESH_TYPE_MASTER_BEACON = 1,
+  MESH_TYPE_ENROLLMENT    = 2,  // New node → master: public key announcement
+  MESH_TYPE_JOIN_ACK      = 3,  // Master → new node: enrollment approved
 };
 
 // --- Mesh message struct ---
@@ -115,6 +117,10 @@ private:
   bool setupEspNow();
   void loadPersistentState();
 
+  // Enrollment helpers
+  void processEnrollmentRequest(const mesh_message& msg);
+  void processJoinAck(const mesh_message& msg);
+
   // Curve25519 keypair
   uint8_t devicePrivateKey[32];
   uint8_t devicePublicKey[32];
@@ -161,9 +167,17 @@ public:
 
   // Provisioning: public key accessor (private key never exposed)
   const uint8_t* getDevicePublicKey() const { return devicePublicKey; }
+
+  // Singleton accessor (used by Serial_Adapter for enrollment callbacks)
+  static Mesh* getInstance() { return instance; }
+
+  // Enrollment protocol
+  void sendEnrollmentRequest();
+  bool isEnrolled() const;
+  void enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]);
 };
 
-}
-}
+}  // namespace mesh
+}  // namespace planetopia
 
 #endif  // MESH_H
