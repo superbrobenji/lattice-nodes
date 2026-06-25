@@ -41,7 +41,10 @@ jobs:
 
       - name: Check formatting
         run: |
-          find main/src -name '*.cpp' -o -name '*.h' | \
+          find main/src \( -name '*.cpp' -o -name '*.h' \) \
+            ! -path '*/nanopb/*' \
+            ! -name 'mesh.pb.h' \
+            ! -name 'mesh.pb.c' | \
             xargs clang-format --style=file --dry-run --Werror
 
   static-analysis:
@@ -60,4 +63,6 @@ jobs:
             --suppress=unmatchedSuppression \
             --inline-suppr \
             -I main/src \
+            --exclude=main/src/Mesh/serialization/nanopb \
+            --exclude=main/src/Mesh/serialization/mesh.pb.c \
             main/src/ 2>&1
