@@ -20,7 +20,7 @@ PIR_Adapter::PIR_Adapter(int pin)
     _motionSent(false),
     _interruptEnabled(false),
     _initialized(false) {
-  _adapterType = PIR_ADAPTER;
+  _adapterType = adapter_types::PIR_ADAPTER;
 }
 
 bool PIR_Adapter::init() {

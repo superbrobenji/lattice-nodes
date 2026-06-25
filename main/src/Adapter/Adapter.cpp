@@ -12,7 +12,7 @@ namespace adapter {
 using namespace planetopia::utils;
 
 Adapter::Adapter(int pin)
-  : _pin(pin), _adapterType(UNKNOWN_ADAPTER), mesh_transmit_fn(nullptr) {
+  : _pin(pin), _adapterType(adapter_types::UNKNOWN_ADAPTER), mesh_transmit_fn(nullptr) {
   Logger::logln("Adapter", "Base adapter initialized with UNKNOWN_ADAPTER", LogLevel::LOG_DEBUG);
 }
 
@@ -42,7 +42,7 @@ void Adapter::onMeshData(const planetopia::mesh::mesh_message& message) {
   // This must run in the base class so virtual dispatch to per-type no-ops cannot
   // swallow the opcode on PIR/LED/WiFi nodes.
   static constexpr uint8_t OP_CONFIG_SET = 0xA0;
-  if (message.dataType == SERIAL_ADAPTER) {
+  if (message.dataType == adapter_types::SERIAL_ADAPTER) {
     const uint8_t op = message.data[0];
     if (op == OP_CONFIG_SET) {
       uint8_t ownMac[6];
@@ -64,7 +64,7 @@ void Adapter::onMeshData(const planetopia::mesh::mesh_message& message) {
     }
     // Other SERIAL_ADAPTER opcodes (e.g. OP_HEALTH_REQ) are Serial-node-specific;
     // fall through to onMeshDataImpl so Serial_Adapter can handle them.
-    if (_adapterType != SERIAL_ADAPTER) return;
+    if (_adapterType != adapter_types::SERIAL_ADAPTER) return;
   }
 
   // Normal per-adapter dispatch

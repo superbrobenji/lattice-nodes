@@ -54,7 +54,7 @@ constexpr int NUM_DEFAULT_PEERS = planetopia::config::NUM_DEFAULT_PEERS;
 static inline void validateServerConfiguration() {
   // Check if this is a master node intended for server communication
   bool isMasterNode = isDevMode ? devMasterFlag : EEPROM_Manager::getInstance().loadMasterFlag();
-  bool hasSerialAdapter = (adapter && adapter->getAdapterType() == SERIAL_ADAPTER);
+  bool hasSerialAdapter = (adapter && adapter->getAdapterType() == planetopia::adapter::adapter_types::SERIAL_ADAPTER);
   bool loggingDisabled = (planetopia::config::DEFAULT_LOG_LEVEL == planetopia::utils::LogLevel::LOG_NONE);
   
   if (isMasterNode && !hasSerialAdapter && planetopia::config::DEFAULT_LOG_LEVEL != planetopia::utils::LogLevel::LOG_NONE) {

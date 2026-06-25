@@ -21,11 +21,11 @@ void AdapterFactory::setDevMode(bool isDev) {
 
 Adapter* AdapterFactory::createAdapter(adapter_types type, int pin) {
   switch (type) {
-    case PIR_ADAPTER:
+    case adapter_types::PIR_ADAPTER:
       Logger::logln("Factory", "Creating PIR_Adapter", LogLevel::LOG_INFO);
       return new PIR_Adapter(pin);
 
-    case SERIAL_ADAPTER:
+    case adapter_types::SERIAL_ADAPTER:
       Logger::logln("Factory", "Creating Serial_Adapter", LogLevel::LOG_INFO);
       return new Serial_Adapter(pin);
 
@@ -39,14 +39,24 @@ Adapter* AdapterFactory::createAdapter(adapter_types type, int pin) {
   }
 }
 
+adapter_types AdapterFactory::adapterTypeFromEEPROM(uint8_t raw) {
+  // uint8_t 0xFF (unset) maps to PIR_ADAPTER default
+  if (raw == 0xFF) return adapter_types::PIR_ADAPTER;
+  return static_cast<adapter_types>(static_cast<int8_t>(raw));
+}
+
+uint8_t AdapterFactory::adapterTypeToEEPROM(adapter_types type) {
+  return static_cast<uint8_t>(static_cast<int8_t>(type));
+}
+
 adapter_types AdapterFactory::loadAdapterTypeFromEEPROM() {
   if (isDevMode_) {
     Logger::logln("Factory", "Dev mode: returning default PIR adapter type", LogLevel::LOG_DEBUG);
-    return PIR_ADAPTER;  // Always return default in dev mode
+    return adapter_types::PIR_ADAPTER;  // Always return default in dev mode
   }
 
   uint8_t adapterType = EEPROM_Manager::getInstance().loadAdapterType();
-  return static_cast<adapter_types>(static_cast<int8_t>(adapterType));
+  return adapterTypeFromEEPROM(adapterType);
 }
 
 void AdapterFactory::saveAdapterTypeToEEPROM(adapter_types type) {
@@ -55,7 +65,7 @@ void AdapterFactory::saveAdapterTypeToEEPROM(adapter_types type) {
     return;  // Don't save to EEPROM in dev mode
   }
 
-  EEPROM_Manager::getInstance().saveAdapterType(static_cast<uint8_t>(static_cast<int8_t>(type)));
+  EEPROM_Manager::getInstance().saveAdapterType(adapterTypeToEEPROM(type));
 }
 
 Adapter* AdapterFactory::createFromEEPROM() {
@@ -73,19 +83,19 @@ void AdapterFactory::initializeDefaultsIfUnset() {
   // Check if adapter type is unset (0xFF) and set default if needed
   uint8_t currentType = EEPROM_Manager::getInstance().loadAdapterType();
   if (currentType == 0xFF) {
-    EEPROM_Manager::getInstance().saveAdapterType(static_cast<uint8_t>(static_cast<int8_t>(PIR_ADAPTER)));
+    EEPROM_Manager::getInstance().saveAdapterType(adapterTypeToEEPROM(adapter_types::PIR_ADAPTER));
   }
 }
 
 int AdapterFactory::getDefaultPinForAdapter(adapter_types type) {
   switch (type) {
-    case PIR_ADAPTER:
+    case adapter_types::PIR_ADAPTER:
       return PIR_ADAPTER_DEFAULT_PIN;
-    case WIFI_ADAPTER:
+    case adapter_types::WIFI_ADAPTER:
       return WIFI_ADAPTER_DEFAULT_PIN;
-    case LED_ADAPTER:
+    case adapter_types::LED_ADAPTER:
       return LED_ADAPTER_DEFAULT_PIN;
-    case SERIAL_ADAPTER:
+    case adapter_types::SERIAL_ADAPTER:
       return SERIAL_ADAPTER_DEFAULT_PIN;
     default:
       return PIR_ADAPTER_DEFAULT_PIN;  // fallback

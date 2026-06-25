@@ -626,7 +626,7 @@ void Mesh::broadcastMasterBeacon() {
   if (now - lastBeaconMillis < BEACON_INTERVAL_MS) return;
   lastBeaconMillis = now;
 
-  mesh_message beacon = buildMessage(planetopia::adapter::UNKNOWN_ADAPTER, nullptr, MESH_TYPE_MASTER_BEACON);
+  mesh_message beacon = buildMessage(adapter_types::UNKNOWN_ADAPTER, nullptr, MESH_TYPE_MASTER_BEACON);
   beacon.data[0] = 1;  // protocolVersion
   beacon.hopCount = 0;
 

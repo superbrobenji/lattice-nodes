@@ -42,9 +42,9 @@ struct __attribute__((packed)) mesh_message {
   uint32_t epochNum;              // Boot count of origin node (replay protection)
   uint16_t seqNum;                // Per-boot message counter 0-65535 (replay protection)
 };
-// sizeof(mesh_message) = 1+1+4+6+6+6+12+1+4+2 = 43 bytes (adapter_types is int = 4B)
+// sizeof(mesh_message) = 1+1+1+6+6+6+12+1+4+2 = 40 bytes (adapter_types is int8_t = 1B)
 // With __attribute__((packed)): no padding between fields
-static_assert(sizeof(mesh_message) == 43, "mesh_message size changed — update server proto");
+static_assert(sizeof(mesh_message) == 40, "mesh_message size changed — update server proto");
 
 // Peer info struct for RAM and EEPROM storage
 struct PeerInfo {
