@@ -657,5 +657,49 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
   Logger::logln("Serial_Adapter", "Frame processing completed successfully", LogLevel::LOG_DEBUG);
 }
 
+
+#ifdef UNIT_TEST
+bool Serial_Adapter::injectByte(uint8_t byteIn) {
+  switch (frameState) {
+    case FrameState::AwaitingLen1:
+      frameLength = byteIn;
+      frameState = FrameState::AwaitingLen2;
+      break;
+
+    case FrameState::AwaitingLen2:
+      frameLength |= static_cast<uint16_t>(byteIn) << 8;
+      if (frameLength == 0 || frameLength > MAX_PAYLOAD) {
+        // Invalid length — reset
+        frameState = FrameState::AwaitingLen1;
+        frameLength = 0;
+        frameIndex = 0;
+      } else {
+        frameIndex = 0;
+        frameState = FrameState::AwaitingPayload;
+      }
+      break;
+
+    case FrameState::AwaitingPayload:
+      if (frameIndex >= MAX_PAYLOAD) {
+        frameState = FrameState::AwaitingLen1;
+        frameLength = 0;
+        frameIndex = 0;
+        break;
+      }
+      payloadBuffer[frameIndex++] = byteIn;
+      if (frameIndex >= frameLength) {
+        // Frame complete
+        _lastCompletedOpcode = payloadBuffer[0];
+        frameState = FrameState::AwaitingLen1;
+        frameLength = 0;
+        frameIndex = 0;
+        return true;
+      }
+      break;
+  }
+  return false;
+}
+#endif
+
 }  // namespace adapter
 }  // namespace planetopia

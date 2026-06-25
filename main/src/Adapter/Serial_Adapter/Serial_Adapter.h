@@ -62,6 +62,16 @@ private:
   static void sendHealthReport();
   static uint32_t lastHealthMillis;
   uint32_t lastReportedHopCount;
+
+#ifdef UNIT_TEST
+public:
+  // Feed one byte into the frame state machine.
+  // Returns true when a complete frame has been received and processed.
+  bool injectByte(uint8_t b);
+  uint8_t lastOpcode() const { return _lastCompletedOpcode; }
+private:
+  uint8_t _lastCompletedOpcode = 0;
+#endif
 };
 
 }  // namespace adapter
