@@ -29,7 +29,7 @@ static void registerPeerWithEspNow(const uint8_t mac[6], const uint8_t* lmk) {
 }
 
 Mesh::Mesh()
-  : isMaster(false), lastBeaconMillis(0) {
+  : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
@@ -345,8 +345,10 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t data[12], MeshMe
   if (nextHop && planetopia::utils::MacAddress(nextHop->mac) != planetopia::utils::MacAddress(deviceMacAddress)) {
     sendMessage(nextHop->mac, msg);
   } else {
-    Logger::logln("MESH", "No next hop to master, cannot send!", LogLevel::LOG_WARN);
-    // Optionally, could queue for later
+    Logger::logln("MESH", "No next hop to master — message dropped. Master timeout or unreachable.", LogLevel::LOG_WARN);
+    planetopia::err::fail(planetopia::core::ErrorTypeDigit::COMM,
+                         planetopia::core::ModuleDigit::MESH, 8,
+                         "MESH: message dropped, no route to master");
   }
 }
 
@@ -477,6 +479,19 @@ void Mesh::debugDumpRadio() {
   Logger::logln("MESH", out, LogLevel::LOG_INFO);
 }
 
+void Mesh::checkMasterTimeout() {
+  if (isMaster) return;
+  if (currentMaster.distance == 0xFF) return;  // No master known yet
+  if (millis() - lastMasterBeaconReceivedMs > MASTER_TIMEOUT_MS) {
+    Logger::logln("MESH", "Master beacon timeout — clearing route, treating as offline", LogLevel::LOG_WARN);
+    memset(currentMaster.mac, 0, 6);
+    currentMaster.distance = 0xFF;
+    memset(currentMaster.nextHop, 0, 6);
+    memset(lastSeenMasterMac, 0, 6);
+    lastMasterBeaconReceivedMs = 0;
+  }
+}
+
 // ---------- Tiger Style helper implementations ----------
 void Mesh::updatePeerLastSeen(const esp_now_recv_info* info) {
   if (!info || !info->src_addr) return;
@@ -504,6 +519,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
                          "Multiple master nodes detected! Network split or misconfiguration likely.");
   }
   memcpy(lastSeenMasterMac, msg.originMacAddress, 6);
+  lastMasterBeaconReceivedMs = millis();
 
   uint8_t newDistance = msg.hopCount + 1;
   if (currentMaster.distance == 0xFF || planetopia::utils::MacAddress(currentMaster.mac) != planetopia::utils::MacAddress(msg.originMacAddress) || newDistance < currentMaster.distance) {

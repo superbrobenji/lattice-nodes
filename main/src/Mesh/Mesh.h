@@ -80,6 +80,8 @@ private:
   MasterInfo currentMaster;
   bool isMaster;
   uint32_t lastBeaconMillis;
+  uint32_t lastMasterBeaconReceivedMs;
+  static constexpr uint32_t MASTER_TIMEOUT_MS = planetopia::config::MASTER_BEACON_INTERVAL_MS * 4;
 
   // Peer EEPROM management
   void loadPeersFromEEPROM();
@@ -123,6 +125,9 @@ public:
 
   // Master beacon: call in main loop if node is master; handles timing internally
   void broadcastMasterBeacon();
+
+  // Master timeout check: call in main loop; clears stale master route on timeout
+  void checkMasterTimeout();
 
   // Node role config
   void setIsMaster(bool value) {

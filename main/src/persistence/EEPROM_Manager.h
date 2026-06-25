@@ -15,7 +15,9 @@ constexpr uint16_t DEV_FLAG = 1;      // Dev mode flag (1 byte)
 constexpr uint16_t MESH_KEY = 16;     // Mesh encryption key (16 bytes)
 constexpr uint16_t PEER_LIST = 32;    // Peer MAC addresses (60 bytes)
 constexpr uint16_t ADAPTER_TYPE = 8;  // Adapter type (1 byte)
-constexpr uint16_t RESERVED = 92;     // Reserved for future use
+constexpr uint16_t REBOOT_REASON = 92;  // 1 byte: last reset reason
+constexpr uint16_t REBOOT_COUNT  = 93;  // 1 byte: consecutive unexpected reboot count
+constexpr uint16_t RESERVED = 94;       // Reserved for future use
 }
 
 // EEPROM size constants
@@ -72,6 +74,12 @@ public:
   // Adapter type operations
   uint8_t loadAdapterType();
   void saveAdapterType(uint8_t adapterType);
+
+  // Reboot tracking operations
+  uint8_t loadRebootCount();
+  void saveRebootCount(uint8_t count);
+  void saveRebootReason(uint8_t reason);
+  uint8_t loadRebootReason();
 
   // Utility operations
   void clearAll();

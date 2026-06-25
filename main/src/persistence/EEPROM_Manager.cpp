@@ -235,6 +235,26 @@ void EEPROM_Manager::saveAdapterType(uint8_t adapterType) {
   logOperation("Adapter type saved", String(adapterType).c_str());
 }
 
+// Reboot tracking operations
+uint8_t EEPROM_Manager::loadRebootCount() {
+  if (!ensureInitialized()) return 0;
+  return EEPROM.read(EEPROM_ADDRESSES::REBOOT_COUNT);
+}
+void EEPROM_Manager::saveRebootCount(uint8_t count) {
+  if (!ensureInitialized() || isDevMode) return;
+  EEPROM.write(EEPROM_ADDRESSES::REBOOT_COUNT, count);
+  EEPROM.commit();
+}
+void EEPROM_Manager::saveRebootReason(uint8_t reason) {
+  if (!ensureInitialized() || isDevMode) return;
+  EEPROM.write(EEPROM_ADDRESSES::REBOOT_REASON, reason);
+  EEPROM.commit();
+}
+uint8_t EEPROM_Manager::loadRebootReason() {
+  if (!ensureInitialized()) return 0xFF;
+  return EEPROM.read(EEPROM_ADDRESSES::REBOOT_REASON);
+}
+
 // Utility operations
 void EEPROM_Manager::clearAll() {
   if (!ensureInitialized()) return;

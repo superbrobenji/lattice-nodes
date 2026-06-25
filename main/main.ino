@@ -87,6 +87,28 @@ void setup() {
   
   Logger::setLogLevel(planetopia::config::DEFAULT_LOG_LEVEL);
 
+  // Check and log reset reason; escalate if WDT looping
+  {
+    esp_reset_reason_t reason = esp_reset_reason();
+    EEPROM_Manager& em = EEPROM_Manager::getInstance();
+    // EEPROM not yet inited here — init it early just for this check
+    em.init();
+    em.saveRebootReason(static_cast<uint8_t>(reason));
+    if (reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT || reason == ESP_RST_WDT) {
+      uint8_t count = em.loadRebootCount();
+      count = (count == 0xFF) ? 1 : count + 1;
+      em.saveRebootCount(count);
+      Logger::logln("MAIN", String("WARNING: WDT reset #") + count, LogLevel::LOG_WARN);
+      if (count >= 5) {
+        Logger::logln("MAIN", "5 consecutive WDT reboots — clearing state and halting", LogLevel::LOG_ERROR);
+        em.clearAll();
+        while (true) { delay(1000); }  // Force manual intervention
+      }
+    } else {
+      em.saveRebootCount(0);  // Clean boot resets the counter
+    }
+  }
+
   Logger::logln("MAIN", "Logger initialized", LogLevel::LOG_INFO);
 
   Led::setSystemErrorLed(&redLed);
@@ -260,6 +282,8 @@ void loop() {
   if (mesh.getIsMaster()) {
     mesh.broadcastMasterBeacon();
   }
+
+  mesh.checkMasterTimeout();
 
   if (adapter) {
     adapter->loop();
