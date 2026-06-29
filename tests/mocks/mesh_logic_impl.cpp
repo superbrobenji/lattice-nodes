@@ -184,6 +184,24 @@ PeerInfo* Mesh::findNextHopToMaster() {
   return nullptr;
 }
 
+void Mesh::broadcastToAllPeers(mesh_message msg) {
+  if (peerCount == 0) {
+    Logger::logln("MESH", "WARNING: No peers to broadcast to!", LogLevel::LOG_WARN);
+    return;
+  }
+  for (size_t i = 0; i < peerCount; ++i) {
+    if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0)
+      continue; // Skip self
+    sendMessage(peerMacs[i].mac, msg);
+  }
+}
+
+void Mesh::broadcastAdapterData(adapter_types type, const uint8_t data[12]) {
+  mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
+  memset(msg.targetMacAddress, 0xFF, 6); // broadcast indicator — relayed by all intermediate nodes
+  broadcastToAllPeers(msg);
+}
+
 void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) {
   externalRecvCallback = recvCallback;
 }

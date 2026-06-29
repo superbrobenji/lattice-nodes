@@ -75,7 +75,6 @@ void Mesh::loop() {}
 
 void Mesh::addPeer(const uint8_t*) {}
 void Mesh::removePeer(const uint8_t*) {}
-void Mesh::broadcastAdapterData(adapter_types, const uint8_t[12]) {}
 
 bool Mesh::isEnrolled() const { return false; }
 void Mesh::sendEnrollmentRequest() {}
@@ -103,7 +102,7 @@ void Mesh::removePeerFromEEPROM(const uint8_t*) {}
 // appendPeer is implemented in mesh_logic_impl.cpp (real logic)
 
 // sendMessage is implemented in mesh_logic_impl.cpp (real logic)
-void Mesh::broadcastToAllPeers(mesh_message) {}
+// broadcastToAllPeers is implemented in mesh_logic_impl.cpp (real logic)
 // transmitCore is implemented in mesh_logic_impl.cpp (real logic)
 
 void Mesh::loadMeshKeyFromEEPROM() {}

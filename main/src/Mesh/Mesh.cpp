@@ -645,7 +645,6 @@ void Mesh::broadcastToAllPeers(mesh_message msg) {
   for (size_t i = 0; i < peerCount; ++i) {
     if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0)
       continue; // Skip self
-    memcpy(msg.targetMacAddress, peerMacs[i].mac, 6);
     sendMessage(peerMacs[i].mac, msg);
   }
 }

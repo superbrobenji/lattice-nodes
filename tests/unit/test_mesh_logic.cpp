@@ -307,3 +307,80 @@ TEST_F(AdapterDataRelayTest, Master_DoesNotRelayUplink_DeliversLocally) {
   EXPECT_TRUE(callbackFired);
   EXPECT_EQ(espNowSentPackets.size(), before); // no relay
 }
+
+// ─── processAdapterData: downlink + broadcast relay ──────────────────────────
+
+TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysDownlinkToOtherTarget) {
+  // Node receives ADAPTER_DATA addressed to a different sensor — must relay outward
+  Mesh mesh = makeIntermediateNode();
+  // Add a second peer (different from master) to relay toward
+  PeerInfo extra{}; memcpy(extra.mac, kPeerMac, 6); extra.lastSeenMillis = 0;
+  mesh.appendPeer(extra);
+
+  mesh_message msg{};
+  msg.protoVersion = 1;
+  msg.messageType  = MESH_TYPE_ADAPTER_DATA;
+  msg.dataType     = adapter_types::PIR_ADAPTER;
+  memcpy(msg.originMacAddress,  kMasterMac, 6);
+  memcpy(msg.targetMacAddress,  kSensorMac, 6); // some other sensor, not me, not master
+  msg.hopCount = 1; msg.epochNum = 2; msg.seqNum = 1;
+
+  size_t before = espNowSentPackets.size();
+  mesh.processAdapterData(msg);
+
+  // Should relay to all peers: kMasterMac + kPeerMac (2 peers)
+  EXPECT_GT(espNowSentPackets.size(), before);
+  // Target preserved in every relayed copy
+  for (size_t i = before; i < espNowSentPackets.size(); ++i) {
+    const auto& sent = *reinterpret_cast<const mesh_message*>(
+        espNowSentPackets[i].data.data());
+    EXPECT_EQ(memcmp(sent.targetMacAddress, kSensorMac, 6), 0);
+    EXPECT_EQ(sent.hopCount, 2u);
+  }
+}
+
+TEST_F(AdapterDataRelayTest, IntermediateNode_BroadcastTarget_DeliveredAndRelayed) {
+  Mesh mesh = makeIntermediateNode();
+  PeerInfo extra{}; memcpy(extra.mac, kPeerMac, 6); extra.lastSeenMillis = 0;
+  mesh.appendPeer(extra);
+
+  bool callbackFired = false;
+  mesh.linkDataRecvCallback([&](mesh_message) { callbackFired = true; });
+
+  static constexpr uint8_t kBroadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+  mesh_message msg{};
+  msg.protoVersion = 1;
+  msg.messageType  = MESH_TYPE_ADAPTER_DATA;
+  msg.dataType     = adapter_types::PIR_ADAPTER;
+  memcpy(msg.originMacAddress,  kMasterMac,  6);
+  memcpy(msg.targetMacAddress,  kBroadcast,  6); // broadcast
+  msg.hopCount = 1; msg.epochNum = 3; msg.seqNum = 1;
+
+  size_t before = espNowSentPackets.size();
+  mesh.processAdapterData(msg);
+
+  EXPECT_TRUE(callbackFired);                                 // delivered locally
+  EXPECT_GT(espNowSentPackets.size(), before);                // AND relayed outward
+}
+
+TEST_F(AdapterDataRelayTest, BroadcastAdapterData_UsesBroadcastTargetMAC) {
+  // Verify master's broadcastAdapterData sets FF:FF target so multi-hop works
+  Mesh mesh = makeIntermediateNode();
+  mesh.isMaster = true;
+  // Add a peer so broadcastToAllPeers has someone to send to
+  PeerInfo extra{}; memcpy(extra.mac, kPeerMac, 6); extra.lastSeenMillis = 0;
+  mesh.appendPeer(extra);
+
+  static constexpr uint8_t kPayload[12] = {0x01,0x02,0x03,0,0,0,0,0,0,0,0,0};
+  size_t before = espNowSentPackets.size();
+  mesh.broadcastAdapterData(adapter_types::PIR_ADAPTER, kPayload);
+
+  EXPECT_GT(espNowSentPackets.size(), before);
+  // Every sent message should have FF:FF target
+  static constexpr uint8_t kBroadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+  for (size_t i = before; i < espNowSentPackets.size(); ++i) {
+    const auto& sent = *reinterpret_cast<const mesh_message*>(
+        espNowSentPackets[i].data.data());
+    EXPECT_EQ(memcmp(sent.targetMacAddress, kBroadcast, 6), 0);
+  }
+}
