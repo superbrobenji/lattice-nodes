@@ -323,6 +323,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // Local delivery
   bool isConfigOpcode =
       (msg.dataType == adapter_types::SERIAL_ADAPTER && msg.data[0] == OP_CONFIG_SET);
+  // TODO(dual-master): also allow secondary master MAC for CONFIG_SET
   if (isConfigOpcode && hasMasterMac && memcmp(msg.originMacAddress, knownMasterMac, 6) != 0) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;
