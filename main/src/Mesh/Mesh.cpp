@@ -645,7 +645,6 @@ void Mesh::broadcastToAllPeers(mesh_message msg) {
   for (size_t i = 0; i < peerCount; ++i) {
     if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0)
       continue; // Skip self
-    memcpy(msg.targetMacAddress, peerMacs[i].mac, 6);
     sendMessage(peerMacs[i].mac, msg);
   }
 }
@@ -661,7 +660,8 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t data[12], MeshMe
 
   // Only for adapter data, set target as master
   if (msgType == MESH_TYPE_ADAPTER_DATA) {
-    memcpy(msg.targetMacAddress, currentMaster.mac, 6);
+    memcpy(msg.targetMacAddress, currentMaster.mac,
+           6); // authoritative: overrides relay's original target
   }
 
   // Routing: always use next hop if possible
@@ -790,9 +790,7 @@ bool Mesh::meshKeyIsSet() const {
 
 void Mesh::broadcastAdapterData(adapter_types type, const uint8_t data[12]) {
   mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
-  // Broadcast: set target to FF:FF:... and hopCount=0
-  memset(msg.targetMacAddress, 0xFF, 6);
-  msg.hopCount = 0;
+  memset(msg.targetMacAddress, 0xFF, 6); // broadcast indicator — relayed by intermediate nodes
   broadcastToAllPeers(msg);
 }
 
@@ -922,16 +920,61 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 }
 
 void Mesh::processAdapterData(const mesh_message& msg) {
-  // Config-modifying opcodes are only accepted from the known master (S3 fix)
   static constexpr uint8_t OP_CONFIG_SET = 0xA0;
+  static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+  bool addressedToSelf = (memcmp(msg.targetMacAddress, deviceMacAddress, 6) == 0);
+  bool isBroadcastTarget = (memcmp(msg.targetMacAddress, kBroadcastMac, 6) == 0);
+  bool addressedToMaster =
+      hasMasterMac && (memcmp(msg.targetMacAddress, currentMaster.mac, 6) == 0);
+
+  if (!isMaster && !addressedToSelf && !isBroadcastTarget) {
+    if (addressedToMaster) {
+      // Uplink: relay toward master via routing table
+      if (msg.hopCount >= planetopia::config::MAX_HOPS)
+        return;
+      mesh_message relay = msg;
+      relay.hopCount++;
+      memcpy(relay.lastHopMacAddress, deviceMacAddress, 6);
+      transmitCore(relay.dataType, relay.data, MESH_TYPE_ADAPTER_DATA, &relay);
+      return;
+    }
+    // Downlink to another node: relay outward toward specific target
+    relayDownlink(msg);
+    return;
+  }
+
+  // Local delivery
   bool isConfigOpcode =
       (msg.dataType == adapter_types::SERIAL_ADAPTER && msg.data[0] == OP_CONFIG_SET);
   if (isConfigOpcode && hasMasterMac && memcmp(msg.originMacAddress, knownMasterMac, 6) != 0) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;
   }
+  // Warn if master receives adapter data not addressed to itself — unexpected topology
+  if (isMaster && !addressedToSelf && !isBroadcastTarget) {
+    Logger::logln("MESH", "Master received ADAPTER_DATA not addressed to self", LogLevel::LOG_WARN);
+  }
   if (externalRecvCallback)
     externalRecvCallback(msg);
+
+  // Broadcast: also relay so multi-hop nodes receive it (Task 3 test covers this)
+  if (isBroadcastTarget && !isMaster) {
+    relayDownlink(msg);
+  }
+}
+
+void Mesh::relayDownlink(const mesh_message& msg) {
+  if (msg.hopCount >= planetopia::config::MAX_HOPS)
+    return;
+  mesh_message relay = msg;
+  relay.hopCount++;
+  memcpy(relay.lastHopMacAddress, deviceMacAddress, 6);
+  for (size_t i = 0; i < peerCount; ++i) {
+    if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0)
+      continue;
+    sendMessage(peerMacs[i].mac, relay);
+  }
 }
 
 bool Mesh::isEnrolled() const {
@@ -1038,9 +1081,11 @@ void Mesh::processEnrollmentRequest(const mesh_message& msg) {
 }
 
 void Mesh::processJoinAck(const mesh_message& msg) {
-  // Verify the ack is addressed to us
-  if (memcmp(msg.targetMacAddress, deviceMacAddress, 6) != 0)
+  // Relay outward if not addressed to us (multi-hop enrollment)
+  if (memcmp(msg.targetMacAddress, deviceMacAddress, 6) != 0) {
+    relayDownlink(msg);
     return;
+  }
   // Verify fingerprint matches our public key (first 4 bytes)
   if (memcmp(msg.data, devicePublicKey, 4) != 0) {
     Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);

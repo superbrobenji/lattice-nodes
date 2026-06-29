@@ -68,14 +68,13 @@ Mesh::Mesh()
 
 bool Mesh::init() { return true; }
 
-void Mesh::linkDataRecvCallback(std::function<void(mesh_message)>) {}
+// linkDataRecvCallback is implemented in Mesh.cpp (real logic)
 void Mesh::broadcastMasterBeacon() {}
 void Mesh::checkMasterTimeout() {}
 void Mesh::loop() {}
 
 void Mesh::addPeer(const uint8_t*) {}
 void Mesh::removePeer(const uint8_t*) {}
-void Mesh::broadcastAdapterData(adapter_types, const uint8_t[12]) {}
 
 bool Mesh::isEnrolled() const { return false; }
 void Mesh::sendEnrollmentRequest() {}
@@ -99,14 +98,12 @@ void Mesh::savePeersToEEPROM() {}
 void Mesh::addPeerToEEPROM(const uint8_t*) {}
 void Mesh::removePeerFromEEPROM(const uint8_t*) {}
 
-PeerInfo* Mesh::findPeer(const uint8_t*) { return nullptr; }
-bool Mesh::isPeerInRange(const uint8_t*) { return false; }
-PeerInfo* Mesh::findNextHopToMaster() { return nullptr; }
-bool Mesh::appendPeer(const PeerInfo&) { return false; }
+// findPeer, isPeerInRange, findNextHopToMaster are implemented in mesh_logic_impl.cpp (real logic)
+// appendPeer is implemented in mesh_logic_impl.cpp (real logic)
 
-void Mesh::sendMessage(const uint8_t*, mesh_message) {}
-void Mesh::broadcastToAllPeers(mesh_message) {}
-void Mesh::transmitCore(const adapter_types, const uint8_t[12], MeshMessageType, const mesh_message*) {}
+// sendMessage is implemented in mesh_logic_impl.cpp (real logic)
+// broadcastToAllPeers is implemented in mesh_logic_impl.cpp (real logic)
+// transmitCore is implemented in mesh_logic_impl.cpp (real logic)
 
 void Mesh::loadMeshKeyFromEEPROM() {}
 void Mesh::saveMeshKeyToEEPROM(const uint8_t*) {}
@@ -115,18 +112,18 @@ bool Mesh::meshKeyIsSet() const { return false; }
 
 void Mesh::updatePeerLastSeen(const uint8_t*) {}
 // processMasterBeacon is implemented in mesh_logic_impl.cpp (real logic)
-void Mesh::processAdapterData(const mesh_message&) {}
+// processAdapterData is implemented in mesh_logic_impl.cpp (real logic)
 
 bool Mesh::setupWiFi() { return true; }
 bool Mesh::setupEspNow() { return true; }
 void Mesh::loadPersistentState() {}
 
 void Mesh::processEnrollmentRequest(const mesh_message&) {}
-void Mesh::processJoinAck(const mesh_message&) {}
+// processJoinAck is implemented in mesh_logic_impl.cpp (real logic)
 
 void Mesh::loadOrGenerateKeypair() {}
-// isReplay and processMasterBeacon are implemented in mesh_logic_impl.cpp (real logic)
-void Mesh::drainRecvQueue() {}
+// isReplay, processMasterBeacon, processAdapterData, processJoinAck, and
+// drainRecvQueue are implemented in mesh_logic_impl.cpp (real logic)
 
 }  // namespace mesh
 }  // namespace planetopia

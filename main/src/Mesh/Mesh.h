@@ -142,6 +142,7 @@ private:
   void updatePeerLastSeen(const uint8_t mac[6]);
   void processMasterBeacon(const mesh_message& msg);
   void processAdapterData(const mesh_message& msg);
+  void relayDownlink(const mesh_message& msg);
 
   // Setup helpers (Tiger Style refactor)
   bool setupWiFi();
