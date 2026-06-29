@@ -3,7 +3,6 @@
 #include "src/core/Logger.h"
 #include "src/error/Error.h" // unified error
 #include "src/persistence/EEPROM_Manager.h"
-#include "src/Adapter/Serial_Adapter/Serial_Adapter.h" // for relayEnrollmentToServer
 // Error.h already provides ERROR_CHECK macros
 #include <esp_now.h>
 #include <WiFi.h>
@@ -1073,17 +1072,25 @@ void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
 }
 // --------------------------------------------------------
 
+void Mesh::setEnrollmentRelayFn(EnrollmentRelayFn fn) {
+  _enrollmentRelayFn = fn;
+}
+
+void Mesh::drainPendingEnrollment() {
+  if (!_pendingEnrollmentRelay) return;
+  _pendingEnrollmentRelay = false;
+  if (_enrollmentRelayFn) {
+    _enrollmentRelayFn(_pendingEnrollmentMac, _pendingEnrollmentPubKey);
+  }
+}
+
 void Mesh::loop() {
   drainRecvQueue();
   EEPROM_Manager::getInstance().flushIfDirty();
 
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
   // Serial.write() must not be called from that callback — safe to do here in loop().
-  if (_pendingEnrollmentRelay) {
-    _pendingEnrollmentRelay = false;
-    planetopia::adapter::Serial_Adapter::relayEnrollmentToServer(_pendingEnrollmentMac,
-                                                                 _pendingEnrollmentPubKey);
-  }
+  drainPendingEnrollment();
 
   // Deferred beacon relay with jitter: dispatch once the per-node jitter window expires.
   // This spreads relay transmissions across all non-master nodes to avoid collision bursts.

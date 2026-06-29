@@ -68,6 +68,10 @@ struct MasterInfo {
   uint8_t nextHop[6]; // Next hop MAC
 };
 
+// Enrollment relay callback — registered by Serial_Adapter owner (main.ino).
+// Called from loop() when a pending enrollment is ready to relay to the server.
+typedef void (*EnrollmentRelayFn)(const uint8_t mac[6], const uint8_t pubKey[32]);
+
 class Mesh {
 #ifdef UNIT_TEST
   // In unit test builds, all members are public so test bodies (which live in
@@ -190,6 +194,7 @@ private:
   volatile bool _pendingEnrollmentRelay = false;
   uint8_t _pendingEnrollmentMac[6]{};
   uint8_t _pendingEnrollmentPubKey[32]{};
+  EnrollmentRelayFn _enrollmentRelayFn = nullptr;
 
   // --- ESP-NOW receive ring buffer (lock-free SPSC) ---
   static constexpr size_t RECV_QUEUE_SIZE = 8;
@@ -204,6 +209,7 @@ private:
   uint8_t recvQueueTail;          // read by main task (loop)
 
   void drainRecvQueue();
+  void drainPendingEnrollment();
 
   // Beacon timer (moved from broadcastMasterBeacon for loop() integration)
   uint32_t lastBeaconMs;
@@ -255,6 +261,9 @@ public:
   void sendEnrollmentRequest();
   bool isEnrolled() const;
   void enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]);
+
+  // Enrollment relay callback — set by Serial_Adapter owner (main.ino)
+  void setEnrollmentRelayFn(EnrollmentRelayFn fn);
 
   // Get current hop count to master (0 if this node is master)
   uint8_t getHopCount() const { return isMaster ? 0 : currentMaster.distance; }

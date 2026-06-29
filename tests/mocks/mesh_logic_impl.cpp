@@ -350,5 +350,17 @@ void Mesh::processEnrollmentRequest(const mesh_message& msg) {
                 LogLevel::LOG_INFO);
 }
 
+void Mesh::setEnrollmentRelayFn(EnrollmentRelayFn fn) {
+  _enrollmentRelayFn = fn;
+}
+
+void Mesh::drainPendingEnrollment() {
+  if (!_pendingEnrollmentRelay) return;
+  _pendingEnrollmentRelay = false;
+  if (_enrollmentRelayFn) {
+    _enrollmentRelayFn(_pendingEnrollmentMac, _pendingEnrollmentPubKey);
+  }
+}
+
 } // namespace mesh
 } // namespace planetopia

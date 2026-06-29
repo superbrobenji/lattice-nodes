@@ -235,6 +235,8 @@ void setup() {
                           "MAIN: Mesh init failed — cannot operate without mesh");
   }
 
+  mesh.setEnrollmentRelayFn(Serial_Adapter::relayEnrollmentToServer);
+
   // Nodes must always receive — modem sleep drops ESP-NOW packets without AP sync
   esp_wifi_set_ps(WIFI_PS_NONE);
 

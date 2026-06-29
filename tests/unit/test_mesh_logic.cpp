@@ -565,3 +565,58 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
   EXPECT_EQ(memcmp(mesh._pendingEnrollmentPubKey, kKey, 32), 0)
       << "Full 32-byte key must be copied without chunk reassembly";
 }
+
+// ---- EnrollmentRelayCallbackTest ----
+
+static const uint8_t* g_capturedMac = nullptr;
+static const uint8_t* g_capturedKey = nullptr;
+
+static void captureRelayFn(const uint8_t mac[6], const uint8_t pubKey[32]) {
+  g_capturedMac = mac;
+  g_capturedKey = pubKey;
+}
+
+class EnrollmentRelayCallbackTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    g_capturedMac = nullptr;
+    g_capturedKey = nullptr;
+    EEPROM.reset();
+  }
+};
+
+TEST_F(EnrollmentRelayCallbackTest, DrainCallsRegisteredCallback) {
+  Mesh mesh;
+  mesh.isMaster = true;
+  mesh.setEnrollmentRelayFn(captureRelayFn);
+
+  static constexpr uint8_t kMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  static constexpr uint8_t kKey[32] = {
+      0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+      0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+      0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+      0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
+
+  memcpy(mesh._pendingEnrollmentMac, kMac, 6);
+  memcpy(mesh._pendingEnrollmentPubKey, kKey, 32);
+  mesh._pendingEnrollmentRelay = true;
+
+  mesh.drainPendingEnrollment();
+
+  EXPECT_FALSE(mesh._pendingEnrollmentRelay) << "flag must clear after drain";
+  ASSERT_NE(g_capturedMac, nullptr) << "callback was not called";
+  EXPECT_EQ(memcmp(g_capturedMac, kMac, 6), 0) << "wrong MAC passed to callback";
+  EXPECT_EQ(memcmp(g_capturedKey, kKey, 32), 0) << "wrong pubKey passed to callback";
+}
+
+TEST_F(EnrollmentRelayCallbackTest, DrainWithNoCallbackClearsFlag) {
+  Mesh mesh;
+  mesh.isMaster = true;
+  // No callback registered.
+
+  mesh._pendingEnrollmentRelay = true;
+  mesh.drainPendingEnrollment();
+
+  EXPECT_FALSE(mesh._pendingEnrollmentRelay) << "flag must clear even with no callback";
+  EXPECT_EQ(g_capturedMac, nullptr) << "callback must not fire when unregistered";
+}
