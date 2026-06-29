@@ -95,5 +95,37 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   }
 }
 
+bool Mesh::appendPeer(const PeerInfo& peer) {
+  if (peerCount >= MAX_PEERS)
+    return false;
+  peerMacs[peerCount++] = peer;
+  return true;
+}
+
+void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
+  if (planetopia::utils::MacAddress(target) == planetopia::utils::MacAddress(deviceMacAddress)) {
+    Logger::logln("MESH", "Not sending to self. Skipped.", LogLevel::LOG_DEBUG);
+    return;
+  }
+  esp_err_t result = esp_now_send(target, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  if (result == ESP_OK) {
+    Logger::logln("MESH", "Message sent to peer", LogLevel::LOG_DEBUG);
+  } else {
+    Logger::logln("MESH", "Error sending message", LogLevel::LOG_WARN);
+  }
+}
+
+void Mesh::relayDownlink(const mesh_message& msg) {
+  if (isReplay(msg)) return;
+  if (msg.hopCount >= planetopia::config::MAX_HOPS) return;
+  mesh_message relay = msg;
+  relay.hopCount++;
+  memcpy(relay.lastHopMacAddress, deviceMacAddress, 6);
+  for (size_t i = 0; i < peerCount; ++i) {
+    if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0) continue;
+    sendMessage(peerMacs[i].mac, relay);
+  }
+}
+
 }  // namespace mesh
 }  // namespace planetopia

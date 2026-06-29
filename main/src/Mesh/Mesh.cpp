@@ -934,6 +934,18 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     externalRecvCallback(msg);
 }
 
+void Mesh::relayDownlink(const mesh_message& msg) {
+  if (isReplay(msg)) return;
+  if (msg.hopCount >= planetopia::config::MAX_HOPS) return;
+  mesh_message relay = msg;
+  relay.hopCount++;
+  memcpy(relay.lastHopMacAddress, deviceMacAddress, 6);
+  for (size_t i = 0; i < peerCount; ++i) {
+    if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0) continue;
+    sendMessage(peerMacs[i].mac, relay);
+  }
+}
+
 bool Mesh::isEnrolled() const {
   return EEPROM_Manager::getInstance().loadEnrolledFlag();
 }

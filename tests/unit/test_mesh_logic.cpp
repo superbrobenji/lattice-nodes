@@ -117,3 +117,113 @@ TEST_F(MeshLogicTest, BeaconRelay_NewerSeq_AllowsRelay) {
   mesh.processMasterBeacon(makeBeacon(masterMac, 1, 6));  // Newer seq
   EXPECT_TRUE(mesh.relayPending);
 }
+
+// ─── relayDownlink ───────────────────────────────────────────────────────────
+
+class RelayDownlinkTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    EEPROM.reset();
+    resetMillis();
+    resetEspNowMock();
+  }
+
+  static constexpr uint8_t kMyMac[6]    = {0x11,0x22,0x33,0x44,0x55,0x66};
+  static constexpr uint8_t kPeer1Mac[6] = {0xAA,0xAA,0xAA,0xAA,0xAA,0x01};
+  static constexpr uint8_t kPeer2Mac[6] = {0xBB,0xBB,0xBB,0xBB,0xBB,0x02};
+  static constexpr uint8_t kOriginMac[6]= {0xCC,0xCC,0xCC,0xCC,0xCC,0x03};
+
+  Mesh makeMeshWithPeers(int numPeers) {
+    Mesh mesh;
+    memcpy(mesh.deviceMacAddress, kMyMac, 6);
+    if (numPeers >= 1) {
+      PeerInfo p{}; memcpy(p.mac, kPeer1Mac, 6); p.lastSeenMillis = 0; mesh.appendPeer(p);
+    }
+    if (numPeers >= 2) {
+      PeerInfo p{}; memcpy(p.mac, kPeer2Mac, 6); p.lastSeenMillis = 0; mesh.appendPeer(p);
+    }
+    return mesh;
+  }
+
+  mesh_message makeDataMsg(const uint8_t origin[6], const uint8_t target[6],
+                           uint32_t epoch, uint16_t seq, uint8_t hopCount = 0) {
+    mesh_message m{};
+    m.protoVersion = 1;
+    m.messageType  = MESH_TYPE_ADAPTER_DATA;
+    m.dataType     = adapter_types::PIR_ADAPTER;
+    memcpy(m.originMacAddress, origin, 6);
+    memcpy(m.targetMacAddress, target, 6);
+    memcpy(m.lastHopMacAddress, origin, 6);
+    m.hopCount = hopCount;
+    m.epochNum = epoch;
+    m.seqNum   = seq;
+    return m;
+  }
+};
+
+constexpr uint8_t RelayDownlinkTest::kMyMac[];
+constexpr uint8_t RelayDownlinkTest::kPeer1Mac[];
+constexpr uint8_t RelayDownlinkTest::kPeer2Mac[];
+constexpr uint8_t RelayDownlinkTest::kOriginMac[];
+
+TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  PeerInfo p1{}; memcpy(p1.mac, kPeer1Mac, 6); p1.lastSeenMillis = 0; mesh.appendPeer(p1);
+  PeerInfo p2{}; memcpy(p2.mac, kPeer2Mac, 6); p2.lastSeenMillis = 0; mesh.appendPeer(p2);
+
+  auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1, /*hopCount=*/1);
+
+  mesh.relayDownlink(msg);
+
+  // 2 peers → 2 sends
+  EXPECT_EQ(espNowSentPackets.size(), 2u);
+  for (const auto& pkt : espNowSentPackets) {
+    const auto& sent = *reinterpret_cast<const mesh_message*>(pkt.data.data());
+    EXPECT_EQ(sent.hopCount, 2u);                          // incremented
+    EXPECT_EQ(memcmp(sent.targetMacAddress, kPeer2Mac, 6), 0); // target preserved
+    EXPECT_EQ(memcmp(sent.lastHopMacAddress, kMyMac, 6), 0);   // lastHop = my MAC
+  }
+}
+
+TEST_F(RelayDownlinkTest, DropsReplay) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  PeerInfo p1{}; memcpy(p1.mac, kPeer1Mac, 6); p1.lastSeenMillis = 0; mesh.appendPeer(p1);
+
+  auto msg = makeDataMsg(kOriginMac, kPeer1Mac, 1, 99);
+
+  mesh.isReplay(msg);  // Pre-record in replay cache
+  mesh.relayDownlink(msg);
+
+  EXPECT_EQ(espNowSentPackets.size(), 0u);
+}
+
+TEST_F(RelayDownlinkTest, DropsAtMaxHops) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  PeerInfo p1{}; memcpy(p1.mac, kPeer1Mac, 6); p1.lastSeenMillis = 0; mesh.appendPeer(p1);
+
+  auto msg = makeDataMsg(kOriginMac, kPeer1Mac, 1, 1,
+                         /*hopCount=*/planetopia::config::MAX_HOPS);
+
+  mesh.relayDownlink(msg);
+
+  EXPECT_EQ(espNowSentPackets.size(), 0u);
+}
+
+TEST_F(RelayDownlinkTest, SkipsSelf_WhenSelfInPeerList) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  PeerInfo p1{}; memcpy(p1.mac, kPeer1Mac, 6); p1.lastSeenMillis = 0; mesh.appendPeer(p1);
+  // Add self to peer list (shouldn't happen in production but guard against it)
+  PeerInfo self{}; memcpy(self.mac, kMyMac, 6); self.lastSeenMillis = 0;
+  mesh.appendPeer(self);
+
+  auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1);
+  mesh.relayDownlink(msg);
+
+  // Only 1 peer (kPeer1Mac) — self skipped
+  EXPECT_EQ(espNowSentPackets.size(), 1u);
+  EXPECT_EQ(memcmp(espNowSentPackets[0].addr, kPeer1Mac, 6), 0);
+}

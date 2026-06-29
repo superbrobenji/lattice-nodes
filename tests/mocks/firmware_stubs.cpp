@@ -102,9 +102,9 @@ void Mesh::removePeerFromEEPROM(const uint8_t*) {}
 PeerInfo* Mesh::findPeer(const uint8_t*) { return nullptr; }
 bool Mesh::isPeerInRange(const uint8_t*) { return false; }
 PeerInfo* Mesh::findNextHopToMaster() { return nullptr; }
-bool Mesh::appendPeer(const PeerInfo&) { return false; }
+// appendPeer is implemented in mesh_logic_impl.cpp (real logic)
 
-void Mesh::sendMessage(const uint8_t*, mesh_message) {}
+// sendMessage is implemented in mesh_logic_impl.cpp (real logic)
 void Mesh::broadcastToAllPeers(mesh_message) {}
 void Mesh::transmitCore(const adapter_types, const uint8_t[12], MeshMessageType, const mesh_message*) {}
 
