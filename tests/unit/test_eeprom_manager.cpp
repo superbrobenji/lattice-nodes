@@ -237,28 +237,21 @@ TEST_F(EEPROMMgrTest, TxPower_SaveAndLoad) {
 // Node ID
 // -----------------------------------------------------------------------
 
-TEST(EEPROM_Manager, NodeId_DefaultIsZero) {
-  EEPROM.reset();
-  auto& em = planetopia::utils::EEPROM_Manager::getInstance();
-  em.init();
-  EXPECT_EQ(em.loadNodeId(), 0u);
+TEST_F(EEPROMMgrTest, NodeId_DefaultIsZero) {
+  EXPECT_EQ(EEPROM_Manager::getInstance().loadNodeId(), 0u);
 }
 
-TEST(EEPROM_Manager, NodeId_SaveAndLoad) {
-  EEPROM.reset();
-  auto& em = planetopia::utils::EEPROM_Manager::getInstance();
-  em.init();
-  em.saveNodeId(42);
-  em.forceFlush();
-  EXPECT_EQ(em.loadNodeId(), 42u);
+TEST_F(EEPROMMgrTest, NodeId_SaveAndLoad) {
+  auto& mgr = EEPROM_Manager::getInstance();
+  mgr.saveNodeId(42);
+  mgr.forceFlush();
+  EXPECT_EQ(mgr.loadNodeId(), 42u);
 }
 
-TEST(EEPROM_Manager, NodeId_SaveZeroRoundtrips) {
-  EEPROM.reset();
-  auto& em = planetopia::utils::EEPROM_Manager::getInstance();
-  em.init();
-  em.saveNodeId(7);
-  em.saveNodeId(0);
-  em.forceFlush();
-  EXPECT_EQ(em.loadNodeId(), 0u);
+TEST_F(EEPROMMgrTest, NodeId_SaveZeroRoundtrips) {
+  auto& mgr = EEPROM_Manager::getInstance();
+  mgr.saveNodeId(7);
+  mgr.saveNodeId(0);
+  mgr.forceFlush();
+  EXPECT_EQ(mgr.loadNodeId(), 0u);
 }

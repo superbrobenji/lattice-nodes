@@ -3,6 +3,7 @@
 #include "src/core/Logger.h"
 #include "src/error/Error.h"
 #include "src/Adapter/AdapterFactory.h"
+#include "src/Adapter/Serial_Adapter/Serial_Adapter.h"
 #include "src/persistence/EEPROM_Manager.h"
 #include <esp_wifi.h>
 #include <cstring>
@@ -68,8 +69,7 @@ void Adapter::onMeshData(const planetopia::mesh::mesh_message& message) {
                       LogLevel::LOG_DEBUG);
       }
     }
-    static constexpr uint8_t OP_NODE_ID_SET = 0xC0;
-    if (op == OP_NODE_ID_SET) {
+    if (op == Serial_Adapter::OP_NODE_ID_SET) {
       uint8_t ownMac[6];
       esp_wifi_get_mac(WIFI_IF_STA, ownMac);
       bool allFF = true;
