@@ -355,7 +355,8 @@ void Mesh::setEnrollmentRelayFn(EnrollmentRelayFn fn) {
 }
 
 void Mesh::drainPendingEnrollment() {
-  if (!_pendingEnrollmentRelay) return;
+  if (!_pendingEnrollmentRelay)
+    return;
   _pendingEnrollmentRelay = false;
   if (_enrollmentRelayFn) {
     _enrollmentRelayFn(_pendingEnrollmentMac, _pendingEnrollmentPubKey);
