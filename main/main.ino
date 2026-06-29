@@ -102,8 +102,7 @@ void setup() {
       em.saveRebootCount(count);
       Serial.printf("[BOOT] WDT reset #%d (reason: %d)\n", count, (int)reason);
       if (count >= 5) {
-        Serial.println("[BOOT] WDT loop detected — clearing EEPROM and halting");
-        em.clearAll();
+        Serial.println("[BOOT] WDT loop detected — halting. Manual reset required.");
         while (true) { delay(1000); }
       }
     } else {

@@ -400,7 +400,7 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
                     LogLevel::LOG_INFO);
       planetopia::mesh::Mesh* meshInstance = planetopia::mesh::Mesh::getInstance();
       if (meshInstance) {
-        meshInstance->enrollPeer(msg.originMacAddress, msg.enrollmentPublicKey);
+        meshInstance->enrollPeer(msg.targetMacAddress, msg.enrollmentPublicKey);
       }
     } else {
       Logger::logln("Serial_Adapter", "Server rejected enrollment request", LogLevel::LOG_WARN);
