@@ -118,6 +118,98 @@ TEST_F(MeshLogicTest, BeaconRelay_NewerSeq_AllowsRelay) {
   EXPECT_TRUE(mesh.relayPending);
 }
 
+// --- Dual master mode ---
+
+TEST_F(MeshLogicTest, DualMaster_SecondBeaconFromNewMAC_LearnedAsSecondary) {
+  Mesh mesh;
+  mesh.setDualMasterMode(true);
+  const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+
+  // Learn primary via first beacon
+  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));
+  ASSERT_TRUE(mesh.hasMasterMac);
+
+  // Second beacon from different MAC — must be learned as secondary
+  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1));
+
+  EXPECT_TRUE(mesh.hasMasterMacSecondary);
+  EXPECT_EQ(memcmp(mesh.knownMasterMacSecondary, secondaryMac, 6), 0);
+  // Primary must still be unchanged
+  EXPECT_EQ(memcmp(mesh.knownMasterMac, primaryMac, 6), 0);
+}
+
+TEST_F(MeshLogicTest, DualMaster_BeaconFromPrimaryMAC_Accepted) {
+  Mesh mesh;
+  mesh.setDualMasterMode(true);
+  const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+
+  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));   // learn primary
+  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1)); // learn secondary
+
+  // Beacon from primary — must not be rejected and relayPending must fire
+  mesh.isMaster = false;
+  mesh.relayPending = false;
+  mesh.processMasterBeacon(makeBeacon(primaryMac, 2, 1));
+
+  EXPECT_TRUE(mesh.relayPending) << "Beacon from known primary must set relayPending";
+}
+
+TEST_F(MeshLogicTest, DualMaster_BeaconFromSecondaryMAC_Accepted) {
+  Mesh mesh;
+  mesh.setDualMasterMode(true);
+  const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+
+  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));   // learn primary
+  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1)); // learn secondary
+
+  // Beacon from secondary — must not be rejected and relayPending must fire
+  mesh.isMaster = false;
+  mesh.relayPending = false;
+  mesh.processMasterBeacon(makeBeacon(secondaryMac, 2, 1));
+
+  EXPECT_TRUE(mesh.relayPending) << "Beacon from known secondary must set relayPending";
+}
+
+TEST_F(MeshLogicTest, DualMaster_ImpostorMAC_Rejected_WhenBothMastersKnown) {
+  Mesh mesh;
+  mesh.setDualMasterMode(true);
+  const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  const uint8_t impostorMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x99};
+
+  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));   // learn primary
+  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1)); // learn secondary
+
+  // Third distinct MAC while both masters fresh — must be rejected
+  size_t sendsBefore = espNowSentPackets.size();
+  mesh.processMasterBeacon(makeBeacon(impostorMac, 1, 2));
+
+  // Neither primary nor secondary should have changed
+  EXPECT_EQ(memcmp(mesh.knownMasterMac, primaryMac, 6), 0);
+  EXPECT_EQ(memcmp(mesh.knownMasterMacSecondary, secondaryMac, 6), 0);
+  EXPECT_EQ(espNowSentPackets.size(), sendsBefore) << "Impostor beacon must not trigger relay";
+}
+
+TEST_F(MeshLogicTest, SingleMaster_SecondBeaconFromNewMAC_Rejected_WhenMasterAlive) {
+  Mesh mesh;
+  // _dualMasterMode defaults to false — no need to set
+  const uint8_t knownMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  const uint8_t unknownMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+
+  mesh.processMasterBeacon(makeBeacon(knownMac, 1, 1));
+
+  // Second distinct MAC while single master still fresh — must be rejected
+  size_t sendsBefore = espNowSentPackets.size();
+  mesh.processMasterBeacon(makeBeacon(unknownMac, 1, 2));
+
+  EXPECT_EQ(memcmp(mesh.knownMasterMac, knownMac, 6), 0) << "Known master MAC must not change";
+  EXPECT_FALSE(mesh.hasMasterMacSecondary);
+  EXPECT_EQ(espNowSentPackets.size(), sendsBefore);
+}
+
 // ─── relayDownlink ───────────────────────────────────────────────────────────
 
 class RelayDownlinkTest : public ::testing::Test {

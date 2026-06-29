@@ -28,7 +28,8 @@ namespace utils {
 // 494   SCHEMA_VERSION   (1 byte) — EEPROM layout version for migration gating
 // 495   TX_POWER_PRESET  (1 byte) — TxPowerPreset enum value (0=SHORT_RANGE 1=INDOOR 2=OUTDOOR)
 // 496   NODE_ID          (1 byte) — logical node ID assigned by server (0 = unset, 0xFF = erased)
-// Total used: 497 bytes — fits in 512
+// 497   KNOWN_MASTER_MAC_SECONDARY (6 bytes, ends 502) — TOFU secondary master MAC (0xFF×6 = unset)
+// Total used: 503 bytes — fits in 512
 namespace EEPROM_ADDRESSES {
 constexpr uint16_t MASTER_FLAG = 0;        // Master flag (1 byte)
 constexpr uint16_t DEV_FLAG = 1;           // Dev mode flag (1 byte)
@@ -48,6 +49,8 @@ constexpr uint16_t SCHEMA_VERSION = 494;   // 1 byte: EEPROM layout version for 
 constexpr uint16_t TX_POWER_PRESET =
     495;                          // 1 byte: TxPowerPreset (0=SHORT_RANGE 1=INDOOR 2=OUTDOOR)
 constexpr uint16_t NODE_ID = 496; // 1 byte: logical node ID assigned by server (0 = unset)
+constexpr uint16_t KNOWN_MASTER_MAC_SECONDARY =
+    497; // 6 bytes: TOFU secondary master MAC (0xFF×6 = unset, ends 502)
 
 // Old v1 addresses (used only during migration in EEPROM_Manager::init())
 constexpr uint16_t V1_REBOOT_REASON = 92;
@@ -67,7 +70,7 @@ constexpr uint8_t PEER_MAC_SIZE = 6;
 constexpr uint8_t PEER_PUBLIC_KEY_SIZE = 32;
 constexpr uint8_t PEER_RECORD_SIZE = PEER_MAC_SIZE + PEER_PUBLIC_KEY_SIZE; // 38 bytes
 constexpr uint16_t PEER_LIST_SIZE = MAX_PEERS * PEER_RECORD_SIZE;          // 380 bytes
-constexpr uint8_t CURRENT_SCHEMA_VERSION = 2; // Current EEPROM schema version
+constexpr uint8_t CURRENT_SCHEMA_VERSION = 3; // Current EEPROM schema version
 } // namespace EEPROM_SIZES
 
 class EEPROM_Manager {
@@ -145,6 +148,11 @@ public:
   bool loadKnownMasterMac(uint8_t mac[6]);
   void saveKnownMasterMac(const uint8_t mac[6]);
   void clearKnownMasterMac();
+
+  // TOFU secondary master MAC — persisted secondary master for dual-master mode
+  bool loadKnownMasterMacSecondary(uint8_t mac[6]);
+  void saveKnownMasterMacSecondary(const uint8_t mac[6]);
+  void clearKnownMasterMacSecondary();
 
   // TX power preset — deployment-specific, persisted across reboots
   planetopia::config::TxPowerPreset loadTxPowerPreset();

@@ -189,6 +189,9 @@ private:
   // TOFU master MAC — learned on first enrollment beacon, persisted across reboots
   uint8_t knownMasterMac[6];
   bool hasMasterMac;
+  uint8_t knownMasterMacSecondary[6];
+  bool hasMasterMacSecondary;
+  bool _dualMasterMode;
 
   // Pending enrollment relay (filled in ESP-NOW callback, drained in loop())
   volatile bool _pendingEnrollmentRelay = false;
@@ -235,6 +238,8 @@ public:
   // Node role config
   void setIsMaster(bool value) { isMaster = value; }
   bool getIsMaster() const { return isMaster; }
+  void setDualMasterMode(bool value) { _dualMasterMode = value; }
+  bool getDualMasterMode() const { return _dualMasterMode; }
 
   // Peer management API (optional, can be used in your app/UI)
   void addPeer(const uint8_t mac[6]);

@@ -29,6 +29,9 @@ constexpr planetopia::adapter::adapter_types DEFAULT_ADAPTER = planetopia::adapt
 constexpr unsigned long MASTER_BEACON_INTERVAL_MS = 3000;
 // Stale-master threshold: node clears master route after this many ms without a beacon (3× interval)
 constexpr uint32_t STALE_MASTER_THRESHOLD_MS = 9000;
+// Enable for deployments with two physically separate master nodes.
+// When false (production default), standard single-master TOFU enforcement applies.
+constexpr bool DUAL_MASTER_MODE = false;
 // Per-node relay jitter window (ms) — non-master nodes delay relay by [10, 10+RELAY_JITTER_MAX_MS) ms
 // to stagger transmissions and prevent collision bursts when all nodes relay simultaneously
 constexpr uint8_t RELAY_JITTER_MAX_MS = 64;

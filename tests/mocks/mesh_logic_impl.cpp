@@ -40,32 +40,48 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     return;
   }
 
-  // TOFU master MAC enforcement
-  if (hasMasterMac && memcmp(msg.originMacAddress, knownMasterMac, 6) != 0) {
-    // Beacon from a different MAC than the known master
-    if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
-      // Current master still fresh — reject the impostor
-      Logger::logln("MESH", "Beacon from unexpected MAC rejected (master still alive)",
-                    LogLevel::LOG_WARN);
-      return;
-    }
-    // Current master is stale — accept new master (master hotswap)
-    Logger::logln("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
-    memcpy(knownMasterMac, msg.originMacAddress, 6);
-    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
-  } else if (!hasMasterMac) {
+  // --- TOFU master MAC enforcement ---
+  bool fromPrimary = hasMasterMac && memcmp(msg.originMacAddress, knownMasterMac, 6) == 0;
+  bool fromSecondary = _dualMasterMode && hasMasterMacSecondary &&
+                       memcmp(msg.originMacAddress, knownMasterMacSecondary, 6) == 0;
+
+  if (!hasMasterMac) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
     memcpy(knownMasterMac, msg.originMacAddress, 6);
     hasMasterMac = true;
     EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
     Logger::logln("MESH", "Master MAC learned from first beacon (TOFU fallback)",
                   LogLevel::LOG_INFO);
+  } else if (!fromPrimary && !fromSecondary) {
+    // Beacon from unrecognised MAC
+    if (_dualMasterMode && !hasMasterMacSecondary) {
+      // Second master TOFU — learn and save as secondary
+      memcpy(knownMasterMacSecondary, msg.originMacAddress, 6);
+      hasMasterMacSecondary = true;
+      EEPROM_Manager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
+      Logger::logln("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
+      // fall through to process this beacon as valid
+    } else if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
+      // Known master(s) still fresh — reject unknown MAC
+      Logger::logln("MESH", "Beacon from unexpected MAC rejected (master still alive)",
+                    LogLevel::LOG_WARN);
+      return;
+    } else {
+      // All known masters stale — accept as new primary (hotswap)
+      Logger::logln("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
+      memcpy(knownMasterMac, msg.originMacAddress, 6);
+      EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+    }
   }
 
   if (planetopia::utils::MacAddress(lastSeenMasterMac) !=
           planetopia::utils::MacAddress(msg.originMacAddress) &&
       lastSeenMasterMac[0] != 0) {
-    Logger::logln("MESH", "WARNING: Multiple masters detected!", LogLevel::LOG_WARN);
+    if (_dualMasterMode) {
+      Logger::logln("MESH", "Two masters active (dual master mode)", LogLevel::LOG_DEBUG);
+    } else {
+      Logger::logln("MESH", "WARNING: Multiple masters detected!", LogLevel::LOG_WARN);
+    }
   }
   memcpy(lastSeenMasterMac, msg.originMacAddress, 6);
   lastMasterBeaconReceivedMs = millis();
@@ -307,6 +323,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // Local delivery
   bool isConfigOpcode =
       (msg.dataType == adapter_types::SERIAL_ADAPTER && msg.data[0] == OP_CONFIG_SET);
+  // TODO(dual-master): also allow secondary master MAC for CONFIG_SET
   if (isConfigOpcode && hasMasterMac && memcmp(msg.originMacAddress, knownMasterMac, 6) != 0) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;

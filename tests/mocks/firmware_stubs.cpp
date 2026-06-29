@@ -62,7 +62,8 @@ Mesh::Mesh()
       lastMasterBeaconReceivedMs(0), devicePrivateKey{}, devicePublicKey{}, bootEpoch(0),
       txSeqNum(0), replayCache{}, replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
       relayPendingMsg{}, relayPendingAt(0), relayPending(false), knownMasterMac{},
-      hasMasterMac(false), recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0) {}
+      hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
+      _dualMasterMode(false), recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0) {}
 
 bool Mesh::init() {
   return true;
