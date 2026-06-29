@@ -512,6 +512,22 @@ void EEPROM_Manager::saveTxPowerPreset(planetopia::config::TxPowerPreset preset)
   logOperation("TX power preset saved");
 }
 
+// Node ID operations
+void EEPROM_Manager::saveNodeId(uint8_t nodeId) {
+  if (!ensureInitialized())
+    return;
+  EEPROM.write(EEPROM_ADDRESSES::NODE_ID, nodeId);
+  markDirty();
+  logOperation("saveNodeId");
+}
+
+uint8_t EEPROM_Manager::loadNodeId() {
+  if (!ensureInitialized())
+    return 0;
+  uint8_t raw = EEPROM.read(EEPROM_ADDRESSES::NODE_ID);
+  return (raw == 0xFF) ? 0 : raw;
+}
+
 // Utility operations
 void EEPROM_Manager::clearAll() {
   if (!ensureInitialized())

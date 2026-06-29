@@ -178,5 +178,38 @@ void SevenSegDisplay::show(int value, bool leadingZeros) {
   setSegments(segs);
 }
 
+void SevenSegDisplay::showWithDP(int value, bool leadingZeros) {
+  bool negative = value < 0;
+  int v = negative ? -value : value;
+  if (v > 9999)
+    v = 9999;
+
+  int digits[4];
+  for (int i = 3; i >= 0; --i) {
+    digits[i] = v % 10;
+    v /= 10;
+  }
+
+  if (negative) {
+    // show minus on leftmost non-zero digit position
+    for (int i = 0; i < 4; ++i) {
+      if (digits[i] != 0 || i == 3) { // last digit
+        digits[i] = -1;               // minus
+        break;
+      }
+    }
+  }
+
+  uint8_t segs[4];
+  for (int i = 0; i < 4; ++i) {
+    if (!leadingZeros && digits[i] == 0 && i < 3 && !negative)
+      segs[i] = 0x00;
+    else
+      segs[i] = encodeDigit(digits[i]);
+  }
+  segs[3] |= 0x80; // DP bit on last digit
+  setSegments(segs);
+}
+
 } // namespace hardware
 } // namespace planetopia

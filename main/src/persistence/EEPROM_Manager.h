@@ -27,7 +27,8 @@ namespace utils {
 // 488   KNOWN_MASTER_MAC (6 bytes, ends 493) — TOFU master MAC (0xFF×6 = unset)
 // 494   SCHEMA_VERSION   (1 byte) — EEPROM layout version for migration gating
 // 495   TX_POWER_PRESET  (1 byte) — TxPowerPreset enum value (0=SHORT_RANGE 1=INDOOR 2=OUTDOOR)
-// Total used: 496 bytes — fits in 512
+// 496   NODE_ID          (1 byte) — logical node ID assigned by server (0 = unset, 0xFF = erased)
+// Total used: 497 bytes — fits in 512
 namespace EEPROM_ADDRESSES {
 constexpr uint16_t MASTER_FLAG = 0;        // Master flag (1 byte)
 constexpr uint16_t DEV_FLAG = 1;           // Dev mode flag (1 byte)
@@ -45,7 +46,8 @@ constexpr uint16_t BOOT_EPOCH = 484;       // 4 bytes: boot count for replay pro
 constexpr uint16_t KNOWN_MASTER_MAC = 488; // 6 bytes: TOFU master MAC (0xFF×6 = unset, ends 493)
 constexpr uint16_t SCHEMA_VERSION = 494;   // 1 byte: EEPROM layout version for migration gating
 constexpr uint16_t TX_POWER_PRESET =
-    495; // 1 byte: TxPowerPreset (0=SHORT_RANGE 1=INDOOR 2=OUTDOOR)
+    495;                          // 1 byte: TxPowerPreset (0=SHORT_RANGE 1=INDOOR 2=OUTDOOR)
+constexpr uint16_t NODE_ID = 496; // 1 byte: logical node ID assigned by server (0 = unset)
 
 // Old v1 addresses (used only during migration in EEPROM_Manager::init())
 constexpr uint16_t V1_REBOOT_REASON = 92;
@@ -147,6 +149,10 @@ public:
   // TX power preset — deployment-specific, persisted across reboots
   planetopia::config::TxPowerPreset loadTxPowerPreset();
   void saveTxPowerPreset(planetopia::config::TxPowerPreset preset);
+
+  // Node ID — logical node ID assigned by server (0 = unset)
+  uint8_t loadNodeId();
+  void saveNodeId(uint8_t nodeId);
 
   // Deferred flush API
   void flushIfDirty();

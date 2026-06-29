@@ -18,6 +18,9 @@ public:
   // Show a signed integer [-999, 9999]. If leadingZeros=false blank leading spaces.
   void show(int value, bool leadingZeros = true);
 
+  // Like show() but with a decimal point on the rightmost digit.
+  void showWithDP(int value, bool leadingZeros = false);
+
   // Low-level: write raw segment data (LSB=A, bit6=DP)
   void setSegments(const uint8_t segs[4]);
 

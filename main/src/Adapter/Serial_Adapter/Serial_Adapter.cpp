@@ -507,6 +507,22 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
           Logger::logln("Serial_Adapter", "TX power preset broadcast to mesh", LogLevel::LOG_INFO);
         }
       }
+    } else if (op == OP_NODE_ID_SET) {
+      Logger::logln("Serial_Adapter", "Received node ID set request", LogLevel::LOG_INFO);
+      uint8_t myMac[6];
+      readOwnMac(myMac);
+      bool allFF = true;
+      for (int i = 0; i < 6; ++i)
+        if (msg.data[1 + i] != 0xFF) {
+          allFF = false;
+          break;
+        }
+      bool isTarget = allFF || (memcmp(&msg.data[1], myMac, 6) == 0);
+      if (isTarget) {
+        uint8_t nodeId = msg.data[7];
+        planetopia::utils::EEPROM_Manager::getInstance().saveNodeId(nodeId);
+        Logger::logln("Serial_Adapter", "Node ID set: " + String(nodeId), LogLevel::LOG_INFO);
+      }
     } else {
       Logger::logln("Serial_Adapter", "Unknown SERIAL_ADAPTER opcode: 0x" + String(op, HEX),
                     LogLevel::LOG_WARN);

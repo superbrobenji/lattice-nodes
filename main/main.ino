@@ -307,6 +307,38 @@ void loop() {
 
   mesh.checkMasterTimeout();
 
+  // Display state machine: show node identity on 7-segment display
+  if (planetopia::config::ENABLE_SEVSEG_DISPLAY) {
+    static uint32_t lastDisplayToggleMs = 0;
+    static bool dashVisible = false;
+
+    bool enrolled = mesh.isEnrolled() || mesh.getIsMaster(); // master is always "enrolled"
+    uint8_t nodeId = planetopia::utils::EEPROM_Manager::getInstance().loadNodeId();
+
+    if (!enrolled) {
+      // Unenrolled: flash "----" at 500ms
+      if (millis() - lastDisplayToggleMs >= 500) {
+        lastDisplayToggleMs = static_cast<uint32_t>(millis());
+        dashVisible = !dashVisible;
+        if (dashVisible) {
+          static const uint8_t dashes[4] = {0x40, 0x40, 0x40, 0x40};
+          sevenSeg.setSegments(dashes);
+        } else {
+          sevenSeg.clear();
+        }
+      }
+    } else if (nodeId == 0) {
+      // Enrolled, no ID: "   0"
+      sevenSeg.show(0, false);
+    } else if (mesh.getIsMaster()) {
+      // Master with ID: right-aligned nodeId + DP on last digit
+      sevenSeg.showWithDP(static_cast<int>(nodeId), false);
+    } else {
+      // Sensor node with ID: right-aligned nodeId
+      sevenSeg.show(static_cast<int>(nodeId), false);
+    }
+  }
+
   // Enrollment state machine: non-master nodes that are not yet enrolled
   // broadcast their public key every 10 seconds and skip sensor data forwarding
   // until approved by the server and JOIN_ACK received.

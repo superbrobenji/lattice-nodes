@@ -6,6 +6,8 @@
 #include "esp_wifi_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
+#include "persistence/EEPROM_Manager.h"
+#include "Mesh/Mesh.h"
 
 using namespace planetopia::adapter;
 
@@ -24,6 +26,7 @@ class PIRHealthTest : public ::testing::Test {
 protected:
   void SetUp() override {
     EEPROM.reset();
+    planetopia::utils::EEPROM_Manager::getInstance().init();
     resetMillis();
     resetWifiMock();
     lastTxType = adapter_types::UNKNOWN_ADAPTER;
@@ -37,7 +40,7 @@ protected:
 static PIR_Adapter* makePir() {
   auto* pir = new PIR_Adapter(27);
   pir->setTransmitFn(captureTransmit);
-  pir->init();  // sets PIR_Adapter::instance = pir; also marks _initialized
+  pir->init(); // sets PIR_Adapter::instance = pir; also marks _initialized
   return pir;
 }
 
@@ -60,10 +63,9 @@ TEST_F(PIRHealthTest, SendsNodeHealthAfter30s) {
   const uint8_t expectedMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
   EXPECT_EQ(memcmp(&lastTxData[2], expectedMac, 6), 0);
   // data[8..11]: uptime in seconds (30001ms / 1000 = 30)
-  uint32_t uptime = static_cast<uint32_t>(lastTxData[8])
-                  | (static_cast<uint32_t>(lastTxData[9])  << 8)
-                  | (static_cast<uint32_t>(lastTxData[10]) << 16)
-                  | (static_cast<uint32_t>(lastTxData[11]) << 24);
+  uint32_t uptime =
+      static_cast<uint32_t>(lastTxData[8]) | (static_cast<uint32_t>(lastTxData[9]) << 8) |
+      (static_cast<uint32_t>(lastTxData[10]) << 16) | (static_cast<uint32_t>(lastTxData[11]) << 24);
   EXPECT_EQ(uptime, 30u);
 
   delete pir;
@@ -133,11 +135,63 @@ TEST_F(PIRHealthTest, UptimeReflectsActualMillis) {
   pir->loop();
 
   ASSERT_EQ(txCallCount, 1);
-  uint32_t uptime = static_cast<uint32_t>(lastTxData[8])
-                  | (static_cast<uint32_t>(lastTxData[9])  << 8)
-                  | (static_cast<uint32_t>(lastTxData[10]) << 16)
-                  | (static_cast<uint32_t>(lastTxData[11]) << 24);
+  uint32_t uptime =
+      static_cast<uint32_t>(lastTxData[8]) | (static_cast<uint32_t>(lastTxData[9]) << 8) |
+      (static_cast<uint32_t>(lastTxData[10]) << 16) | (static_cast<uint32_t>(lastTxData[11]) << 24);
   EXPECT_EQ(uptime, 120u);
 
+  delete pir;
+}
+
+// -----------------------------------------------------------------------
+// OP_NODE_ID_SET (0xC0) dispatch via Adapter::onMeshData
+// -----------------------------------------------------------------------
+
+TEST_F(PIRHealthTest, OpNodeIdSet_AssignsNodeId_WhenTargetMatchesMac) {
+  PIR_Adapter* pir = new PIR_Adapter(2);
+  pir->setTransmitFn([](adapter_types, const uint8_t[64]) {});
+
+  // Set mockDeviceMac to known value
+  mockDeviceMac[0] = 0x11;
+  mockDeviceMac[1] = 0x22;
+  mockDeviceMac[2] = 0x33;
+  mockDeviceMac[3] = 0x44;
+  mockDeviceMac[4] = 0x55;
+  mockDeviceMac[5] = 0x66;
+
+  planetopia::mesh::mesh_message msg{};
+  msg.dataType = adapter_types::SERIAL_ADAPTER;
+  msg.data[0] = 0xC0; // OP_NODE_ID_SET
+  // target MAC = mockDeviceMac
+  memcpy(&msg.data[1], mockDeviceMac, 6);
+  msg.data[7] = 99; // nodeId
+
+  pir->onMeshData(msg);
+
+  EXPECT_EQ(planetopia::utils::EEPROM_Manager::getInstance().loadNodeId(), 99u);
+  delete pir;
+}
+
+TEST_F(PIRHealthTest, OpNodeIdSet_IgnoresMessage_WhenTargetMismatch) {
+  PIR_Adapter* pir = new PIR_Adapter(2);
+  pir->setTransmitFn([](adapter_types, const uint8_t[64]) {});
+
+  mockDeviceMac[0] = 0xAA;
+  mockDeviceMac[1] = 0xBB;
+  mockDeviceMac[2] = 0xCC;
+  mockDeviceMac[3] = 0xDD;
+  mockDeviceMac[4] = 0xEE;
+  mockDeviceMac[5] = 0xFF;
+
+  planetopia::mesh::mesh_message msg{};
+  msg.dataType = adapter_types::SERIAL_ADAPTER;
+  msg.data[0] = 0xC0;
+  uint8_t differentMac[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+  memcpy(&msg.data[1], differentMac, 6);
+  msg.data[7] = 55;
+
+  pir->onMeshData(msg);
+
+  EXPECT_EQ(planetopia::utils::EEPROM_Manager::getInstance().loadNodeId(), 0u);
   delete pir;
 }

@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include "persistence/EEPROM_Manager.h"
-#include "Mesh/Mesh.h"  // for PeerInfo and PEER_RECORD_SIZE constants
+#include "Mesh/Mesh.h" // for PeerInfo and PEER_RECORD_SIZE constants
 
+using planetopia::mesh::PeerInfo;
 using planetopia::utils::EEPROM_Manager;
 using planetopia::utils::EEPROM_SIZES::PEER_RECORD_SIZE;
-using planetopia::mesh::PeerInfo;
 
 // -----------------------------------------------------------------------
 // Test fixture
@@ -32,9 +32,9 @@ protected:
     // clearAll() which fills 0xFF and commits, then reset the backing store
     // again to undo the schema-version byte left by init().
     auto& mgr = EEPROM_Manager::getInstance();
-    mgr.init();      // Ensure initialized (no-op after first test)
-    mgr.clearAll();  // Fill 0xFF + commit
-    EEPROM.reset();  // Wipe commit counter and restore blank backing store
+    mgr.init();     // Ensure initialized (no-op after first test)
+    mgr.clearAll(); // Fill 0xFF + commit
+    EEPROM.reset(); // Wipe commit counter and restore blank backing store
   }
 };
 
@@ -68,7 +68,7 @@ TEST_F(EEPROMMgrTest, PeerList_SaveAndLoad_EmptyList) {
   auto& mgr = EEPROM_Manager::getInstance();
 
   // Save zero peers (fills entire peer region with 0xFF)
-  uint8_t emptyBuf[1]{};  // Not accessed when numPeers=0
+  uint8_t emptyBuf[1]{}; // Not accessed when numPeers=0
   mgr.savePeerList(emptyBuf, 0);
 
   // Load zero peers back
@@ -82,10 +82,14 @@ TEST_F(EEPROMMgrTest, PeerList_SaveAndLoad_SinglePeer) {
 
   // Build a 38-byte peer record: 6-byte MAC + 32-byte public key
   uint8_t peerRecord[PEER_RECORD_SIZE]{};
-  peerRecord[0] = 0xAA; peerRecord[1] = 0xBB; peerRecord[2] = 0xCC;
-  peerRecord[3] = 0xDD; peerRecord[4] = 0xEE; peerRecord[5] = 0xFF;
-  peerRecord[6]  = 0x01;   // publicKey[0]
-  peerRecord[37] = 0x7F;   // publicKey[31]
+  peerRecord[0] = 0xAA;
+  peerRecord[1] = 0xBB;
+  peerRecord[2] = 0xCC;
+  peerRecord[3] = 0xDD;
+  peerRecord[4] = 0xEE;
+  peerRecord[5] = 0xFF;
+  peerRecord[6] = 0x01;  // publicKey[0]
+  peerRecord[37] = 0x7F; // publicKey[31]
 
   mgr.savePeerList(peerRecord, 1);
 
@@ -106,7 +110,7 @@ TEST_F(EEPROMMgrTest, PeerList_SaveAndLoad_MaxPeers) {
   constexpr size_t MAX = 10;
   uint8_t peers[MAX * PEER_RECORD_SIZE]{};
   for (size_t i = 0; i < MAX; ++i) {
-    peers[i * PEER_RECORD_SIZE] = static_cast<uint8_t>(i + 1);  // Unique first MAC byte
+    peers[i * PEER_RECORD_SIZE] = static_cast<uint8_t>(i + 1); // Unique first MAC byte
   }
 
   mgr.savePeerList(peers, MAX);
@@ -130,7 +134,7 @@ TEST_F(EEPROMMgrTest, Keypair_SaveAndLoad_ValidCRC) {
   uint8_t privKey[32]{}, pubKey[32]{};
   for (int i = 0; i < 32; ++i) {
     privKey[i] = static_cast<uint8_t>(i);
-    pubKey[i]  = static_cast<uint8_t>(i + 32);
+    pubKey[i] = static_cast<uint8_t>(i + 32);
   }
 
   mgr.saveKeypair(privKey, pubKey);
@@ -138,14 +142,16 @@ TEST_F(EEPROMMgrTest, Keypair_SaveAndLoad_ValidCRC) {
   uint8_t loadedPriv[32]{}, loadedPub[32]{};
   EXPECT_TRUE(mgr.loadKeypair(loadedPriv, loadedPub));
   EXPECT_EQ(memcmp(loadedPriv, privKey, 32), 0);
-  EXPECT_EQ(memcmp(loadedPub,  pubKey,  32), 0);
+  EXPECT_EQ(memcmp(loadedPub, pubKey, 32), 0);
 }
 
 TEST_F(EEPROMMgrTest, Keypair_Load_CorruptedData_ReturnsFalse) {
   auto& mgr = EEPROM_Manager::getInstance();
 
-  uint8_t priv[32]; memset(priv, 42, 32);
-  uint8_t pub[32];  memset(pub,  99, 32);
+  uint8_t priv[32];
+  memset(priv, 42, 32);
+  uint8_t pub[32];
+  memset(pub, 99, 32);
   mgr.saveKeypair(priv, pub);
 
   // Corrupt one byte in the private key region
@@ -179,12 +185,12 @@ TEST_F(EEPROMMgrTest, DirtyFlag_NoFlushBeforeInterval) {
   mgr.savePeerList(peers, 0);
 
   int commitsAfterSave = EEPROM._commitCount;
-  EXPECT_EQ(commitsAfterSave, commitsBefore);  // No commit on save
+  EXPECT_EQ(commitsAfterSave, commitsBefore); // No commit on save
 
   // Advance time less than flush interval (5000 ms)
   advanceMillis(4000);
   mgr.flushIfDirty();
-  EXPECT_EQ(EEPROM._commitCount, commitsAfterSave);  // Still no flush
+  EXPECT_EQ(EEPROM._commitCount, commitsAfterSave); // Still no flush
 }
 
 TEST_F(EEPROMMgrTest, DirtyFlag_FlushAfterInterval) {
@@ -194,7 +200,7 @@ TEST_F(EEPROMMgrTest, DirtyFlag_FlushAfterInterval) {
   mgr.savePeerList(peers, 0);
   int commitsBefore = EEPROM._commitCount;
 
-  advanceMillis(5001);  // Past the 5000 ms flush interval
+  advanceMillis(5001); // Past the 5000 ms flush interval
   mgr.flushIfDirty();
 
   EXPECT_GT(EEPROM._commitCount, commitsBefore);
@@ -207,7 +213,7 @@ TEST_F(EEPROMMgrTest, ForceFlush_CommitsImmediately) {
   mgr.savePeerList(peers, 0);
   int before = EEPROM._commitCount;
 
-  mgr.forceFlush();  // Must commit regardless of time elapsed
+  mgr.forceFlush(); // Must commit regardless of time elapsed
   EXPECT_GT(EEPROM._commitCount, before);
 }
 
@@ -225,4 +231,27 @@ TEST_F(EEPROMMgrTest, TxPower_SaveAndLoad) {
   auto& mgr = EEPROM_Manager::getInstance();
   mgr.saveTxPowerPreset(planetopia::config::TxPowerPreset::INDOOR);
   EXPECT_EQ(mgr.loadTxPowerPreset(), planetopia::config::TxPowerPreset::INDOOR);
+}
+
+// -----------------------------------------------------------------------
+// Node ID
+// -----------------------------------------------------------------------
+
+TEST_F(EEPROMMgrTest, NodeId_DefaultIsZero) {
+  EXPECT_EQ(EEPROM_Manager::getInstance().loadNodeId(), 0u);
+}
+
+TEST_F(EEPROMMgrTest, NodeId_SaveAndLoad) {
+  auto& mgr = EEPROM_Manager::getInstance();
+  mgr.saveNodeId(42);
+  mgr.forceFlush();
+  EXPECT_EQ(mgr.loadNodeId(), 42u);
+}
+
+TEST_F(EEPROMMgrTest, NodeId_SaveZeroRoundtrips) {
+  auto& mgr = EEPROM_Manager::getInstance();
+  mgr.saveNodeId(7);
+  mgr.saveNodeId(0);
+  mgr.forceFlush();
+  EXPECT_EQ(mgr.loadNodeId(), 0u);
 }

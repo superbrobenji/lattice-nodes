@@ -3,6 +3,8 @@
 #include "src/core/Logger.h"
 #include "src/error/Error.h"
 #include "src/Adapter/AdapterFactory.h"
+#include "src/Adapter/Serial_Adapter/Serial_Adapter.h"
+#include "src/persistence/EEPROM_Manager.h"
 #include <esp_wifi.h>
 #include <cstring>
 
@@ -65,6 +67,23 @@ void Adapter::onMeshData(const planetopia::mesh::mesh_message& message) {
       } else {
         Logger::logln("ADAPTER", "CONFIG_SET not targeted to this node, ignoring",
                       LogLevel::LOG_DEBUG);
+      }
+    }
+    if (op == Serial_Adapter::OP_NODE_ID_SET) {
+      uint8_t ownMac[6];
+      esp_wifi_get_mac(WIFI_IF_STA, ownMac);
+      bool allFF = true;
+      for (int i = 0; i < 6; ++i) {
+        if (message.data[1 + i] != 0xFF) {
+          allFF = false;
+          break;
+        }
+      }
+      bool isTarget = allFF || (memcmp(&message.data[1], ownMac, 6) == 0);
+      if (isTarget) {
+        uint8_t nodeId = message.data[7];
+        planetopia::utils::EEPROM_Manager::getInstance().saveNodeId(nodeId);
+        Logger::logln("ADAPTER", "Node ID assigned: " + String(nodeId), LogLevel::LOG_INFO);
       }
     }
     // Other SERIAL_ADAPTER opcodes (e.g. OP_HEALTH_REQ) are Serial-node-specific;
