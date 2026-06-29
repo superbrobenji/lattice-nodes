@@ -35,24 +35,24 @@ enum MeshMessageType : uint8_t {
       4, // server→device only; was 3, changed to avoid collision with SERIAL_CMD_BROADCAST
 };
 
-static constexpr uint8_t PROTO_VERSION = 1;
+static constexpr uint8_t PROTO_VERSION = 2;
 
 // --- Mesh message struct (packed: wire protocol, no padding) ---
 struct __attribute__((packed)) mesh_message {
-  uint8_t protoVersion; // Always PROTO_VERSION (1)
+  uint8_t protoVersion; // Always PROTO_VERSION (2)
   MeshMessageType messageType;
   adapter_types dataType;
   uint8_t originMacAddress[6];
   uint8_t targetMacAddress[6];
   uint8_t lastHopMacAddress[6];
-  uint8_t data[12];
+  uint8_t data[64];
   uint8_t hopCount;
   uint32_t epochNum;               // Boot count of origin node (replay protection)
   uint16_t seqNum;                 // Per-boot message counter (replay protection)
   uint8_t enrollmentPublicKey[32]; // Curve25519 key; zero for non-enrollment messages
 };
 // 1+1+4+6+6+6+12+1+4+2+32 = 75 bytes (adapter_types is int32_t = 4B, packed)
-static_assert(sizeof(mesh_message) == 75, "mesh_message size changed — update server proto");
+static_assert(sizeof(mesh_message) == 127, "mesh_message size changed — update server proto");
 
 // Peer info struct for RAM and EEPROM storage
 struct PeerInfo {
@@ -101,7 +101,7 @@ private:
   static void IRAM_ATTR dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data,
                                            int len);
 
-  mesh_message buildMessage(adapter_types type, const uint8_t data[12], MeshMessageType msgType);
+  mesh_message buildMessage(adapter_types type, const uint8_t data[64], MeshMessageType msgType);
 
   std::function<void(mesh_message)> externalRecvCallback;
 
@@ -129,7 +129,7 @@ private:
   void sendMessage(const uint8_t target[6], mesh_message msg);
   void broadcastToAllPeers(mesh_message msg);
 
-  void transmitCore(const adapter_types type, const uint8_t data[12],
+  void transmitCore(const adapter_types type, const uint8_t data[64],
                     MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA,
                     const mesh_message* msgOverride = nullptr);
 
@@ -213,7 +213,7 @@ public:
   bool init();
 
   // Static trampoline for Adapter usage
-  static void transmit(const adapter_types type, const uint8_t data[12]);
+  static void transmit(const adapter_types type, const uint8_t data[64]);
 
   void linkDataRecvCallback(std::function<void(mesh_message)> recvCallback);
 
@@ -237,10 +237,10 @@ public:
   size_t getPeerCount() const { return peerCount; }
 
   // Broadcast adapter data to all peers
-  void broadcastAdapterData(adapter_types type, const uint8_t data[12]);
+  void broadcastAdapterData(adapter_types type, const uint8_t data[64]);
 
   // Serial adapter helper (optional broadcast)
-  static void broadcastAdapterDataStatic(adapter_types type, const uint8_t data[12]);
+  static void broadcastAdapterDataStatic(adapter_types type, const uint8_t data[64]);
 
   // Debug helper
   void debugDumpRadio();

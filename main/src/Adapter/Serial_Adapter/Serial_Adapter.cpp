@@ -24,7 +24,7 @@ static void readOwnMac(uint8_t out[6]) {
 void Serial_Adapter::sendHealthReport() {
   Logger::logln("Serial_Adapter", "Sending health report", LogLevel::LOG_INFO);
 
-  uint8_t data[12] = {0};
+  uint8_t data[64] = {0};
   data[0] = OP_HEALTH_REPORT;
   data[1] = AdapterFactory::adapterTypeToEEPROM(adapter_types::SERIAL_ADAPTER);
 

@@ -28,7 +28,7 @@ class Adapter {
 protected:
   int _pin;                   // Hardware pin associated with the adapter
   adapter_types _adapterType; // Type identifier for the adapter
-  typedef void (*TransmitPtr)(adapter_types, const uint8_t[12]);
+  typedef void (*TransmitPtr)(adapter_types, const uint8_t[64]);
   TransmitPtr mesh_transmit_fn;
 
 public:
@@ -37,7 +37,7 @@ public:
 
   adapter_types getAdapterType() const; // Returns the adapter type
   void sendDataThroughMesh(const adapter_types type,
-                           const uint8_t data[12]); // sends data through mesh
+                           const uint8_t data[64]); // sends data through mesh
   void setTransmitFn(TransmitPtr fn);
 
   virtual bool init() = 0; // To be implemented by derived classes

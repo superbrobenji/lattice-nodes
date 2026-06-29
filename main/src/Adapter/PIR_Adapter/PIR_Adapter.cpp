@@ -45,7 +45,7 @@ void PIR_Adapter::detectMotionTrampoline() {
     instance->detectMotion();
 }
 
-void PIR_Adapter::sendDataTrampoline(adapter_types adapterType, uint8_t data[12]) {
+void PIR_Adapter::sendDataTrampoline(adapter_types adapterType, uint8_t data[64]) {
   if (instance)
     instance->sendDataThroughMesh(adapterType, data);
 }
@@ -74,7 +74,7 @@ void PIR_Adapter::loop() {
   if (_timerActive && !_motionSent) {
     Logger::logln("PIR_Adapter", "MOTION DETECTED!", LogLevel::LOG_INFO);
     _motionSent = true;
-    uint8_t data[12] = {1};
+    uint8_t data[64] = {1};
     PIR_Adapter::sendDataTrampoline(_adapterType, data);
   }
 
