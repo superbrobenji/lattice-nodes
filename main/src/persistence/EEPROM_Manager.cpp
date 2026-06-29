@@ -46,7 +46,7 @@ bool EEPROM_Manager::init() {
 
   if (storedVersion == 0xFF) {
     // Blank EEPROM — write current version and proceed
-    Logger::logln("EEPROM", "Fresh EEPROM — version 2 written", LogLevel::LOG_INFO);
+    Logger::logln("EEPROM", "Fresh EEPROM — version 3 written", LogLevel::LOG_INFO);
     EEPROM.write(EEPROM_ADDRESSES::SCHEMA_VERSION, EEPROM_SIZES::CURRENT_SCHEMA_VERSION);
     EEPROM.commit();
   } else if (storedVersion < EEPROM_SIZES::CURRENT_SCHEMA_VERSION) {
@@ -99,7 +99,13 @@ bool EEPROM_Manager::init() {
 
       Logger::logln("EEPROM", "v1→v2 migration complete", LogLevel::LOG_INFO);
     }
-    // Future: add migration handlers for v2→v3, v3→v4, etc. here
+    if (storedVersion <= 2) {
+      // v2→v3 migration: zero-fill the new secondary master MAC slot
+      Logger::logln("EEPROM", "v2→v3 migration: initialising secondary master MAC slot", LogLevel::LOG_INFO);
+      for (uint16_t i = 0; i < 6; ++i) {
+        EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC_SECONDARY + i, 0xFF);
+      }
+    }
 
     // Write updated version and commit
     EEPROM.write(EEPROM_ADDRESSES::SCHEMA_VERSION, EEPROM_SIZES::CURRENT_SCHEMA_VERSION);
@@ -492,6 +498,39 @@ void EEPROM_Manager::clearKnownMasterMac() {
     EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC + i, 0xFF);
   EEPROM.commit(); // Immediate commit — TOFU security anchor must survive power loss
   logOperation("Known master MAC cleared");
+}
+
+// TOFU secondary master MAC operations
+bool EEPROM_Manager::loadKnownMasterMacSecondary(uint8_t mac[6]) {
+  if (!ensureInitialized())
+    return false;
+  for (int i = 0; i < 6; ++i)
+    mac[i] = EEPROM.read(EEPROM_ADDRESSES::KNOWN_MASTER_MAC_SECONDARY + i);
+  bool allFF = true;
+  for (int i = 0; i < 6; ++i) {
+    if (mac[i] != 0xFF) {
+      allFF = false;
+      break;
+    }
+  }
+  return !allFF;
+}
+
+void EEPROM_Manager::saveKnownMasterMacSecondary(const uint8_t mac[6]) {
+  if (!ensureInitialized() || isDevMode)
+    return;
+  for (int i = 0; i < 6; ++i)
+    EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC_SECONDARY + i, mac[i]);
+  EEPROM.commit();
+  logOperation("Known secondary master MAC saved");
+}
+
+void EEPROM_Manager::clearKnownMasterMacSecondary() {
+  if (!ensureInitialized() || isDevMode)
+    return;
+  for (int i = 0; i < 6; ++i)
+    EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC_SECONDARY + i, 0xFF);
+  markDirty();
 }
 
 // TX power preset operations

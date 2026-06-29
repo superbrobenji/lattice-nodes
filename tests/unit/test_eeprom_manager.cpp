@@ -255,3 +255,40 @@ TEST_F(EEPROMMgrTest, NodeId_SaveZeroRoundtrips) {
   mgr.forceFlush();
   EXPECT_EQ(mgr.loadNodeId(), 0u);
 }
+
+// -----------------------------------------------------------------------
+// TOFU secondary master MAC (EEPROM layout v3)
+// -----------------------------------------------------------------------
+
+TEST_F(EEPROMMgrTest, KnownMasterMacSecondary_UnsetReturnsAlFalse) {
+  auto& mgr = EEPROM_Manager::getInstance();
+  mgr.init();
+  uint8_t mac[6] = {};
+  bool found = mgr.loadKnownMasterMacSecondary(mac);
+  EXPECT_FALSE(found) << "Blank EEPROM must report secondary master MAC as unset";
+}
+
+TEST_F(EEPROMMgrTest, KnownMasterMacSecondary_SaveAndLoad_RoundTrip) {
+  auto& mgr = EEPROM_Manager::getInstance();
+  mgr.init();
+  const uint8_t expected[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  mgr.saveKnownMasterMacSecondary(expected);
+
+  uint8_t loaded[6] = {};
+  bool found = mgr.loadKnownMasterMacSecondary(loaded);
+
+  EXPECT_TRUE(found);
+  EXPECT_EQ(memcmp(loaded, expected, 6), 0);
+}
+
+TEST_F(EEPROMMgrTest, KnownMasterMacSecondary_Clear_ResetsToUnset) {
+  auto& mgr = EEPROM_Manager::getInstance();
+  mgr.init();
+  const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  mgr.saveKnownMasterMacSecondary(mac);
+  mgr.clearKnownMasterMacSecondary();
+
+  uint8_t loaded[6] = {};
+  bool found = mgr.loadKnownMasterMacSecondary(loaded);
+  EXPECT_FALSE(found) << "After clear, secondary master MAC must report unset";
+}
