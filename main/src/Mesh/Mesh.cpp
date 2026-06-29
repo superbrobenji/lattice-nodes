@@ -361,7 +361,7 @@ PeerInfo* Mesh::findNextHopToMaster() {
   return nullptr;
 }
 
-mesh_message Mesh::buildMessage(adapter_types type, const uint8_t data[12],
+mesh_message Mesh::buildMessage(adapter_types type, const uint8_t data[64],
                                 MeshMessageType msgType) {
   mesh_message msg = {};
   msg.protoVersion = PROTO_VERSION;
@@ -649,7 +649,7 @@ void Mesh::broadcastToAllPeers(mesh_message msg) {
   }
 }
 
-void Mesh::transmitCore(const adapter_types type, const uint8_t data[12], MeshMessageType msgType,
+void Mesh::transmitCore(const adapter_types type, const uint8_t data[64], MeshMessageType msgType,
                         const mesh_message* msgOverride) {
   mesh_message msg;
   if (msgOverride) {
@@ -678,7 +678,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t data[12], MeshMe
   }
 }
 
-void Mesh::transmit(const adapter_types type, const uint8_t data[12]) {
+void Mesh::transmit(const adapter_types type, const uint8_t data[64]) {
   if (!instance) {
     Logger::logln("MESH", "transmit() called before init", LogLevel::LOG_WARN);
     return;
@@ -788,13 +788,13 @@ bool Mesh::meshKeyIsSet() const {
   return false;
 }
 
-void Mesh::broadcastAdapterData(adapter_types type, const uint8_t data[12]) {
+void Mesh::broadcastAdapterData(adapter_types type, const uint8_t data[64]) {
   mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
   memset(msg.targetMacAddress, 0xFF, 6); // broadcast indicator — relayed by intermediate nodes
   broadcastToAllPeers(msg);
 }
 
-void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t data[12]) {
+void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t data[64]) {
   if (instance)
     instance->broadcastAdapterData(type, data);
 }
@@ -986,98 +986,25 @@ void Mesh::sendEnrollmentRequest() {
   msg.messageType = MESH_TYPE_ENROLLMENT;
   msg.dataType = adapter_types::UNKNOWN_ADAPTER;
   memcpy(msg.originMacAddress, deviceMacAddress, 6);
-  memset(msg.targetMacAddress, 0xFF, 6); // broadcast
+  memset(msg.targetMacAddress, 0xFF, 6);
   memcpy(msg.lastHopMacAddress, deviceMacAddress, 6);
   msg.hopCount = 0;
+  memcpy(msg.enrollmentPublicKey, devicePublicKey, 32);
 
   static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-
-  // Chunk 0: data[0]=0x00 (chunk index), data[1..11] = pubkey[0..10]
-  msg.data[0] = 0x00;
-  memcpy(&msg.data[1], devicePublicKey, 11);
   esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
-  delay(10);
-
-  // Chunk 1: data[0]=0x01, data[1..11] = pubkey[11..21]
-  msg.data[0] = 0x01;
-  memcpy(&msg.data[1], devicePublicKey + 11, 11);
-  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
-  delay(10);
-
-  // Chunk 2: data[0]=0x02, data[1..10] = pubkey[22..31], data[11]=0x00 (padding)
-  msg.data[0] = 0x02;
-  memcpy(&msg.data[1], devicePublicKey + 22, 10);
-  msg.data[11] = 0x00;
-  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
-
-  Logger::logln("MESH", "Enrollment request sent (3 chunks)", LogLevel::LOG_INFO);
+  Logger::logln("MESH", "Enrollment request sent", LogLevel::LOG_INFO);
 }
 
 void Mesh::processEnrollmentRequest(const mesh_message& msg) {
   if (!isMaster) {
-    // Non-master nodes ignore enrollment requests (only master talks to server)
     return;
   }
-
-  // Accumulate chunks from this MAC
-  uint8_t chunkIdx = msg.data[0];
-  const uint8_t* sender = msg.originMacAddress;
-
-  // Static buffer: up to 4 concurrent enrolling nodes
-  static struct {
-    uint8_t mac[6];
-    uint8_t key[32];
-    uint8_t received;
-  } buf[4] = {};
-  int slot = -1;
-  for (int i = 0; i < 4; ++i) {
-    if (memcmp(buf[i].mac, sender, 6) == 0) {
-      slot = i;
-      break;
-    }
-  }
-  if (slot < 0) {
-    // Find an empty slot (received == 0 and mac is all-zero)
-    for (int i = 0; i < 4; ++i) {
-      bool empty = true;
-      for (int j = 0; j < 6; ++j) {
-        if (buf[i].mac[j] != 0) {
-          empty = false;
-          break;
-        }
-      }
-      if (empty) {
-        slot = i;
-        break;
-      }
-    }
-  }
-  if (slot < 0) {
-    Logger::logln("MESH", "Enrollment buffer full, dropping request", LogLevel::LOG_WARN);
-    return;
-  }
-  memcpy(buf[slot].mac, sender, 6);
-
-  if (chunkIdx == 0x00) {
-    memcpy(buf[slot].key, &msg.data[1], 11);
-    buf[slot].received |= 1;
-  } else if (chunkIdx == 0x01) {
-    memcpy(buf[slot].key + 11, &msg.data[1], 11);
-    buf[slot].received |= 2;
-  } else if (chunkIdx == 0x02) {
-    memcpy(buf[slot].key + 22, &msg.data[1], 10);
-    buf[slot].received |= 4;
-  }
-
-  if ((buf[slot].received & 0x07) == 0x07) {
-    // All 3 chunks received — defer relay to loop() to avoid Serial.write() from callback context
-    Logger::logln("MESH", "Enrollment request complete, deferring relay to loop()",
-                  LogLevel::LOG_INFO);
-    memcpy(_pendingEnrollmentMac, buf[slot].mac, 6);
-    memcpy(_pendingEnrollmentPubKey, buf[slot].key, 32);
-    _pendingEnrollmentRelay = true;
-    memset(&buf[slot], 0, sizeof(buf[slot])); // Clear buffer slot
-  }
+  memcpy(_pendingEnrollmentMac, msg.originMacAddress, 6);
+  memcpy(_pendingEnrollmentPubKey, msg.enrollmentPublicKey, 32);
+  _pendingEnrollmentRelay = true;
+  Logger::logln("MESH", "Enrollment request received, deferring relay to loop()",
+                LogLevel::LOG_INFO);
 }
 
 void Mesh::processJoinAck(const mesh_message& msg) {

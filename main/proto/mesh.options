@@ -1,5 +1,5 @@
 mesh.MeshMessage.originMacAddress  max_size:6  fixed_length:true
 mesh.MeshMessage.targetMacAddress  max_size:6  fixed_length:true
 mesh.MeshMessage.lastHopMacAddress max_size:6  fixed_length:true
-mesh.MeshMessage.data              max_size:12
+mesh.MeshMessage.data              max_size:64
 mesh.MeshMessage.public_key        max_size:32

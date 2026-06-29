@@ -21,8 +21,8 @@ struct mesh_message;
 class Mesh;
 Mesh* Mesh_instance_stub = nullptr;
 
-}  // namespace mesh
-}  // namespace planetopia
+} // namespace mesh
+} // namespace planetopia
 
 // Mesh::instance — defined as a static member in Mesh.h; we need the storage
 // We can't easily stub the class here without including Mesh.h (which drags in esp_now.h etc.)
@@ -42,11 +42,11 @@ namespace mesh {
 Mesh* Mesh::instance = nullptr;
 
 // transmit — static function pointer; defined as a static member
-void Mesh::transmit(const planetopia::adapter::adapter_types, const uint8_t[12]) {
+void Mesh::transmit(const planetopia::adapter::adapter_types, const uint8_t[64]) {
   // stub: no-op in tests
 }
 
-void Mesh::broadcastAdapterDataStatic(planetopia::adapter::adapter_types, const uint8_t[12]) {
+void Mesh::broadcastAdapterDataStatic(planetopia::adapter::adapter_types, const uint8_t[64]) {
   // stub: no-op in tests
 }
 
@@ -57,16 +57,16 @@ void Mesh::enrollPeer(const uint8_t*, const uint8_t*) {
 
 // All other Mesh methods required by the linker — minimal stubs
 Mesh::Mesh()
-  : meshKey{}, deviceMacAddress{}, lastSeenMasterMac{}, peerInfo{},
-    peerMacs{}, peerCount(0), externalRecvCallback(nullptr),
-    currentMaster{}, isMaster(false), lastBeaconMillis(0),
-    lastMasterBeaconReceivedMs(0), devicePrivateKey{}, devicePublicKey{},
-    bootEpoch(0), txSeqNum(0), replayCache{}, replayCacheIdx(0),
-    lastRelayedEpoch(0), lastRelayedSeqNum(0), relayPendingMsg{},
-    relayPendingAt(0), relayPending(false), knownMasterMac{},
-    hasMasterMac(false), recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0) {}
+    : meshKey{}, deviceMacAddress{}, lastSeenMasterMac{}, peerInfo{}, peerMacs{}, peerCount(0),
+      externalRecvCallback(nullptr), currentMaster{}, isMaster(false), lastBeaconMillis(0),
+      lastMasterBeaconReceivedMs(0), devicePrivateKey{}, devicePublicKey{}, bootEpoch(0),
+      txSeqNum(0), replayCache{}, replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
+      relayPendingMsg{}, relayPendingAt(0), relayPending(false), knownMasterMac{},
+      hasMasterMac(false), recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0) {}
 
-bool Mesh::init() { return true; }
+bool Mesh::init() {
+  return true;
+}
 
 // linkDataRecvCallback is implemented in Mesh.cpp (real logic)
 void Mesh::broadcastMasterBeacon() {}
@@ -76,8 +76,9 @@ void Mesh::loop() {}
 void Mesh::addPeer(const uint8_t*) {}
 void Mesh::removePeer(const uint8_t*) {}
 
-bool Mesh::isEnrolled() const { return false; }
-void Mesh::sendEnrollmentRequest() {}
+bool Mesh::isEnrolled() const {
+  return false;
+}
 void Mesh::debugDumpRadio() {}
 
 // Private methods needed for linking
@@ -89,7 +90,7 @@ void Mesh::onDataSentCallback(const wifi_tx_info_t*, esp_now_send_status_t) {}
 void Mesh::IRAM_ATTR dataRecvTrampoline(const esp_now_recv_info*, const uint8_t*, int) {}
 void Mesh::IRAM_ATTR onDataRecvCallback(const esp_now_recv_info*, const uint8_t*, int) {}
 
-mesh_message Mesh::buildMessage(adapter_types, const uint8_t[12], MeshMessageType) {
+mesh_message Mesh::buildMessage(adapter_types, const uint8_t[64], MeshMessageType) {
   return mesh_message{};
 }
 
@@ -108,24 +109,30 @@ void Mesh::removePeerFromEEPROM(const uint8_t*) {}
 void Mesh::loadMeshKeyFromEEPROM() {}
 void Mesh::saveMeshKeyToEEPROM(const uint8_t*) {}
 void Mesh::generateRandomMeshKey() {}
-bool Mesh::meshKeyIsSet() const { return false; }
+bool Mesh::meshKeyIsSet() const {
+  return false;
+}
 
 void Mesh::updatePeerLastSeen(const uint8_t*) {}
 // processMasterBeacon is implemented in mesh_logic_impl.cpp (real logic)
 // processAdapterData is implemented in mesh_logic_impl.cpp (real logic)
 
-bool Mesh::setupWiFi() { return true; }
-bool Mesh::setupEspNow() { return true; }
+bool Mesh::setupWiFi() {
+  return true;
+}
+bool Mesh::setupEspNow() {
+  return true;
+}
 void Mesh::loadPersistentState() {}
 
-void Mesh::processEnrollmentRequest(const mesh_message&) {}
-// processJoinAck is implemented in mesh_logic_impl.cpp (real logic)
+// sendEnrollmentRequest and processEnrollmentRequest are implemented in mesh_logic_impl.cpp (real
+// logic) processJoinAck is implemented in mesh_logic_impl.cpp (real logic)
 
 void Mesh::loadOrGenerateKeypair() {}
 // isReplay, processMasterBeacon, processAdapterData, processJoinAck, and
 // drainRecvQueue are implemented in mesh_logic_impl.cpp (real logic)
 
-}  // namespace mesh
-}  // namespace planetopia
+} // namespace mesh
+} // namespace planetopia
 
 // skipField is defined in ProtobufCodec.cpp with external linkage — no stub needed here.
