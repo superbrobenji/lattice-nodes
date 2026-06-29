@@ -95,6 +95,49 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   }
 }
 
+void Mesh::drainRecvQueue() {
+  while (recvQueueTail != recvQueueHead) {
+    RecvQueueEntry& entry = recvQueue[recvQueueTail];
+    recvQueueTail = (recvQueueTail + 1) % RECV_QUEUE_SIZE;
+
+    const mesh_message& msg = entry.msg;
+
+    // Proto version check
+    if (msg.protoVersion != 0 && msg.protoVersion != PROTO_VERSION) {
+      Logger::logln("MESH", "Unsupported proto version, dropping", LogLevel::LOG_WARN);
+      continue;
+    }
+
+    // Replay check
+    if (msg.protoVersion == PROTO_VERSION && msg.epochNum > 0) {
+      if (isReplay(msg)) {
+        Logger::logln("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
+        continue;
+      }
+    }
+
+    // Update last-seen for known peers only
+    updatePeerLastSeen(entry.srcMac);
+
+    switch (msg.messageType) {
+    case MESH_TYPE_ENROLLMENT:
+      processEnrollmentRequest(msg);
+      break;
+    case MESH_TYPE_JOIN_ACK:
+      processJoinAck(msg);
+      break;
+    case MESH_TYPE_MASTER_BEACON:
+      processMasterBeacon(msg);
+      break;
+    case MESH_TYPE_ADAPTER_DATA:
+      processAdapterData(msg);
+      break;
+    default:
+      Logger::logln("MESH", "Unknown message type, dropping", LogLevel::LOG_WARN);
+    }
+  }
+}
+
 bool Mesh::appendPeer(const PeerInfo& peer) {
   if (peerCount >= MAX_PEERS)
     return false;
@@ -116,7 +159,6 @@ void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
 }
 
 void Mesh::relayDownlink(const mesh_message& msg) {
-  if (isReplay(msg)) return;
   if (msg.hopCount >= planetopia::config::MAX_HOPS) return;
   mesh_message relay = msg;
   relay.hopCount++;
@@ -241,7 +283,6 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   if (!isMaster && !addressedToSelf && !isBroadcastTarget) {
     if (addressedToMaster) {
       // Uplink: relay toward master via routing table
-      if (isReplay(msg)) return;
       if (msg.hopCount >= planetopia::config::MAX_HOPS) return;
       mesh_message relay = msg;
       relay.hopCount++;
@@ -249,7 +290,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
       transmitCore(relay.dataType, relay.data, MESH_TYPE_ADAPTER_DATA, &relay);
       return;
     }
-    // Downlink to another node: relay outward (Tasks 3 fills this in)
+    // Downlink to another node: relay outward toward specific target
     relayDownlink(msg);
     return;
   }
@@ -261,6 +302,10 @@ void Mesh::processAdapterData(const mesh_message& msg) {
       memcmp(msg.originMacAddress, knownMasterMac, 6) != 0) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;
+  }
+  // Warn if master receives adapter data not addressed to itself — unexpected topology
+  if (isMaster && !addressedToSelf && !isBroadcastTarget) {
+    Logger::logln("MESH", "Master received ADAPTER_DATA not addressed to self", LogLevel::LOG_WARN);
   }
   if (externalRecvCallback)
     externalRecvCallback(msg);

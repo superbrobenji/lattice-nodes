@@ -174,19 +174,6 @@ TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
   }
 }
 
-TEST_F(RelayDownlinkTest, DropsReplay) {
-  Mesh mesh;
-  memcpy(mesh.deviceMacAddress, kMyMac, 6);
-  PeerInfo p1{}; memcpy(p1.mac, kPeer1Mac, 6); p1.lastSeenMillis = 0; mesh.appendPeer(p1);
-
-  auto msg = makeDataMsg(kOriginMac, kPeer1Mac, 1, 99);
-
-  mesh.isReplay(msg);  // Pre-record in replay cache
-  mesh.relayDownlink(msg);
-
-  EXPECT_EQ(espNowSentPackets.size(), 0u);
-}
-
 TEST_F(RelayDownlinkTest, DropsAtMaxHops) {
   Mesh mesh;
   memcpy(mesh.deviceMacAddress, kMyMac, 6);
@@ -278,17 +265,6 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysUplinkTowardMaster) {
       espNowSentPackets.back().data.data());
   EXPECT_EQ(sent.hopCount, 2u);                              // incremented
   EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0); // routed via nextHop
-}
-
-TEST_F(AdapterDataRelayTest, IntermediateNode_DropsUplinkReplay) {
-  Mesh mesh = makeIntermediateNode();
-  auto msg  = makeUplinkMsg(1, 7);
-
-  mesh.processAdapterData(msg);  // first — relayed
-  size_t after1 = espNowSentPackets.size();
-
-  mesh.processAdapterData(msg);  // same epoch+seq — replay, dropped
-  EXPECT_EQ(espNowSentPackets.size(), after1);
 }
 
 TEST_F(AdapterDataRelayTest, Master_DoesNotRelayUplink_DeliversLocally) {
@@ -459,13 +435,52 @@ TEST_F(JoinAckRelayTest, DoesNotRelayJoinAck_WhenAddressedToSelf) {
   EXPECT_EQ(espNowSentPackets.size(), before); // no relay
 }
 
-TEST_F(JoinAckRelayTest, DropsJoinAckRelay_WhenReplay) {
-  Mesh mesh = makeIntermediateNode();
+// ─── drainRecvQueue: replay protection ───────────────────────────────────────
+// Relay dedup is drainRecvQueue's responsibility; relay paths no longer call
+// isReplay directly. These tests verify that the production path (drainRecvQueue
+// → dispatch) correctly drops replayed messages before handlers are invoked.
 
-  auto msg = makeJoinAck(kDistantNode);
+class DrainRecvQueueTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    EEPROM.reset();
+    resetMillis();
+    resetEspNowMock();
+  }
 
-  mesh.processJoinAck(msg);          // first: relayed
-  size_t after1 = espNowSentPackets.size();
-  mesh.processJoinAck(msg);          // replay: dropped
-  EXPECT_EQ(espNowSentPackets.size(), after1);
+  static constexpr uint8_t kMyMac[6]     = {0x11,0x22,0x33,0x44,0x55,0x66};
+  static constexpr uint8_t kOriginMac[6] = {0x77,0x88,0x99,0xAA,0xBB,0xCC};
+
+  void injectAndDrain(Mesh& mesh, const mesh_message& msg) {
+    Mesh::RecvQueueEntry& slot = mesh.recvQueue[mesh.recvQueueHead];
+    memcpy(&slot.msg, &msg, sizeof(msg));
+    memcpy(slot.srcMac, msg.originMacAddress, 6);
+    mesh.recvQueueHead = (mesh.recvQueueHead + 1) % Mesh::RECV_QUEUE_SIZE;
+    mesh.drainRecvQueue();
+  }
+};
+
+constexpr uint8_t DrainRecvQueueTest::kMyMac[];
+constexpr uint8_t DrainRecvQueueTest::kOriginMac[];
+
+TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = true; // master: delivers locally, no relay — clean baseline
+  int deliveredCount = 0;
+  mesh.linkDataRecvCallback([&](mesh_message) { ++deliveredCount; });
+
+  mesh_message msg{};
+  msg.protoVersion = 1;
+  msg.messageType  = MESH_TYPE_ADAPTER_DATA;
+  msg.dataType     = adapter_types::PIR_ADAPTER;
+  memcpy(msg.originMacAddress, kOriginMac, 6);
+  memcpy(msg.targetMacAddress, kMyMac,     6);
+  msg.epochNum = 1; msg.seqNum = 42;
+
+  injectAndDrain(mesh, msg);  // first: not replay — delivered
+  EXPECT_EQ(deliveredCount, 1);
+
+  injectAndDrain(mesh, msg);  // replay: drainRecvQueue drops before dispatch
+  EXPECT_EQ(deliveredCount, 1); // callback not invoked again
 }

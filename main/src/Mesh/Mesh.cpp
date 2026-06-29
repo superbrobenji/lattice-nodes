@@ -930,7 +930,6 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   if (!isMaster && !addressedToSelf && !isBroadcastTarget) {
     if (addressedToMaster) {
       // Uplink: relay toward master via routing table
-      if (isReplay(msg)) return;
       if (msg.hopCount >= planetopia::config::MAX_HOPS) return;
       mesh_message relay = msg;
       relay.hopCount++;
@@ -938,7 +937,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
       transmitCore(relay.dataType, relay.data, MESH_TYPE_ADAPTER_DATA, &relay);
       return;
     }
-    // Downlink to another node: relay outward (Tasks 3 fills this in)
+    // Downlink to another node: relay outward toward specific target
     relayDownlink(msg);
     return;
   }
@@ -951,6 +950,10 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;
   }
+  // Warn if master receives adapter data not addressed to itself — unexpected topology
+  if (isMaster && !addressedToSelf && !isBroadcastTarget) {
+    Logger::logln("MESH", "Master received ADAPTER_DATA not addressed to self", LogLevel::LOG_WARN);
+  }
   if (externalRecvCallback)
     externalRecvCallback(msg);
 
@@ -961,7 +964,6 @@ void Mesh::processAdapterData(const mesh_message& msg) {
 }
 
 void Mesh::relayDownlink(const mesh_message& msg) {
-  if (isReplay(msg)) return;
   if (msg.hopCount >= planetopia::config::MAX_HOPS) return;
   mesh_message relay = msg;
   relay.hopCount++;

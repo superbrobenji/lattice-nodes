@@ -122,8 +122,8 @@ void Mesh::processEnrollmentRequest(const mesh_message&) {}
 // processJoinAck is implemented in mesh_logic_impl.cpp (real logic)
 
 void Mesh::loadOrGenerateKeypair() {}
-// isReplay and processMasterBeacon are implemented in mesh_logic_impl.cpp (real logic)
-void Mesh::drainRecvQueue() {}
+// isReplay, processMasterBeacon, processAdapterData, processJoinAck, and
+// drainRecvQueue are implemented in mesh_logic_impl.cpp (real logic)
 
 }  // namespace mesh
 }  // namespace planetopia
