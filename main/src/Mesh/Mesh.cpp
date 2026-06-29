@@ -173,9 +173,8 @@ Mesh::Mesh()
     : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0), bootEpoch(0),
       txSeqNum(0), replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
       hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
-      _dualMasterMode(planetopia::config::DUAL_MASTER_MODE),
-      peerCount(0), recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0),
-      relayPending(false), relayPendingAt(0) {
+      _dualMasterMode(planetopia::config::DUAL_MASTER_MODE), peerCount(0), recvQueueHead(0),
+      recvQueueTail(0), lastBeaconMs(0), relayPending(false), relayPendingAt(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;

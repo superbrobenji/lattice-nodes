@@ -49,7 +49,8 @@ constexpr uint16_t SCHEMA_VERSION = 494;   // 1 byte: EEPROM layout version for 
 constexpr uint16_t TX_POWER_PRESET =
     495;                          // 1 byte: TxPowerPreset (0=SHORT_RANGE 1=INDOOR 2=OUTDOOR)
 constexpr uint16_t NODE_ID = 496; // 1 byte: logical node ID assigned by server (0 = unset)
-constexpr uint16_t KNOWN_MASTER_MAC_SECONDARY = 497; // 6 bytes: TOFU secondary master MAC (0xFF×6 = unset, ends 502)
+constexpr uint16_t KNOWN_MASTER_MAC_SECONDARY =
+    497; // 6 bytes: TOFU secondary master MAC (0xFF×6 = unset, ends 502)
 
 // Old v1 addresses (used only during migration in EEPROM_Manager::init())
 constexpr uint16_t V1_REBOOT_REASON = 92;

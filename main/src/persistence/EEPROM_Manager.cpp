@@ -101,7 +101,8 @@ bool EEPROM_Manager::init() {
     }
     if (storedVersion <= 2) {
       // v2→v3 migration: initialise the new secondary master MAC slot to 0xFF (unset sentinel)
-      Logger::logln("EEPROM", "v2→v3 migration: initialising secondary master MAC slot", LogLevel::LOG_INFO);
+      Logger::logln("EEPROM", "v2→v3 migration: initialising secondary master MAC slot",
+                    LogLevel::LOG_INFO);
       for (uint16_t i = 0; i < 6; ++i) {
         EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC_SECONDARY + i, 0xFF);
       }
