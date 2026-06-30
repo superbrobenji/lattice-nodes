@@ -1,4 +1,5 @@
 #include "PIR_Adapter.h"
+#include "lib/planetopia-protocol/c/opcodes.h"
 #include <cstdint>
 #include <cstring>
 #include "src/core/Logger.h"
@@ -67,7 +68,7 @@ static void readOwnMac(uint8_t out[6]) {
 
 void PIR_Adapter::sendNodeHealth() {
   uint8_t data[64] = {0};
-  data[0] = 0xB2; // OP_NODE_HEALTH
+  data[0] = OP_NODE_HEALTH;
   data[1] = AdapterFactory::adapterTypeToEEPROM(adapter_types::PIR_ADAPTER);
   uint8_t mac[6];
   readOwnMac(mac);
