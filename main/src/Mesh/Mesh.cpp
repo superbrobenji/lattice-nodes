@@ -8,6 +8,7 @@
 #include <WiFi.h>
 #include <cstring>
 #include "../../project_config.h"
+#include "lib/planetopia-protocol/opcodes.h"
 #include <mbedtls/ecdh.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
@@ -944,7 +945,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 }
 
 void Mesh::processAdapterData(const mesh_message& msg) {
-  static constexpr uint8_t OP_CONFIG_SET = 0xA0;
+  // OP_CONFIG_SET = 0xC1 (from lib/planetopia-protocol/opcodes.h)
   static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
   bool addressedToSelf = (memcmp(msg.targetMacAddress, deviceMacAddress, 6) == 0);

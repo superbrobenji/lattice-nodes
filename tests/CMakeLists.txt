@@ -19,6 +19,7 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/mocks
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/src
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/lib
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/src/Mesh/serialization/nanopb
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/src/Mesh/serialization
 )

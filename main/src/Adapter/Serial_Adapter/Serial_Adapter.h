@@ -6,6 +6,10 @@
 #include "src/Mesh/serialization/nanopb/pb_encode.h"
 #include "src/Mesh/serialization/nanopb/pb_decode.h"
 #include "src/Mesh/serialization/mesh.pb.h"
+// Shared protocol constants — source of truth is planetopia-protocol repo
+#include "lib/planetopia-protocol/opcodes.h"
+// Wire-level adapter type identifiers (distinct from the C++ adapter_types enum in Adapter.h)
+#include "lib/planetopia-protocol/adapter_types.h"
 
 namespace planetopia {
 namespace adapter {
@@ -18,17 +22,27 @@ public:
   void loop() override;
   void onMeshDataImpl(const planetopia::mesh::mesh_message& message) override;
 
-  // Serial control opcodes (shared between serial and mesh paths)
-  static constexpr uint8_t OP_CONFIG_SET = 0xA0;    // [A0][6B targetMac][1B adapterType]
-  static constexpr uint8_t OP_TX_POWER_SET = 0xA1;  // [A1][1B preset: 0=short 1=indoor 2=outdoor]
-  static constexpr uint8_t OP_HEALTH_REQ = 0xB0;    // [B0]
+  // Opcodes from planetopia-protocol/opcodes.h (included above):
+  //   OP_NODE_ID_SET   0xC0  [C0][6B targetMAC][1B nodeId]
+  //   OP_CONFIG_SET    0xC1  [C1][6B targetMac][1B adapterType]
+  //   OP_TX_POWER_SET  0xC2  [C2][1B preset: 0=short 1=indoor 2=outdoor]
+  //   OP_LED_SOLID     0xD0  [D0][1B R][1B G][1B B]
+  //   OP_LED_OFF       0xD1
+  //   OP_LED_BLINK     0xD2
+  //   OP_RELAY_SET     0xD8
+  //   OP_COMMAND_ACK   0xE0  [E0][1B commandId]
+
+  // Health opcodes — Serial_Adapter internal only, not in shared protocol
+  static constexpr uint8_t OP_HEALTH_REQ    = 0xB0; // [B0]
   static constexpr uint8_t OP_HEALTH_REPORT = 0xB1; // [B1][1B adapterType][6B mac][4B uptime]
-  static constexpr uint8_t OP_NODE_ID_SET = 0xC0;   // [C0][6B targetMAC][1B nodeId]
+
   // Relay a completed enrollment public key to the server over serial
   static void relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]);
 
 #if SIMULATE_MODE
-  static constexpr uint8_t OP_SIM_PIR_TRIGGER = 0xD0; // Inject fake PIR event
+  // WARNING: SIMULATE_MODE opcodes 0xD0-0xD2 overlap with OP_LED_SOLID/OFF/BLINK from the
+  // shared protocol. SIMULATE_MODE must never be enabled alongside LED output handling.
+  static constexpr uint8_t OP_SIM_PIR_TRIGGER = 0xD0; // Inject fake PIR event (conflicts with OP_LED_SOLID when SIMULATE_MODE=1)
   static constexpr uint8_t OP_SIM_FAKE_BEACON =
       0xD1; // Inject fake master beacon [D1][6B mac][4B epoch][2B seq]
   static constexpr uint8_t OP_SIM_FAKE_PEER = 0xD2;  // Inject fake peer [D2][6B mac][32B pubkey]

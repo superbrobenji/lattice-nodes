@@ -11,6 +11,7 @@
 #include "src/core/Logger.h"
 #include "src/persistence/EEPROM_Manager.h"
 #include "../../main/project_config.h"
+#include "lib/planetopia-protocol/opcodes.h"
 #include <cstring>
 
 namespace planetopia {
@@ -296,7 +297,7 @@ void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) 
 }
 
 void Mesh::processAdapterData(const mesh_message& msg) {
-  static constexpr uint8_t OP_CONFIG_SET = 0xA0;
+  // OP_CONFIG_SET = 0xC1 (from main/lib/planetopia-protocol/opcodes.h)
   static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
   bool addressedToSelf = (memcmp(msg.targetMacAddress, deviceMacAddress, 6) == 0);

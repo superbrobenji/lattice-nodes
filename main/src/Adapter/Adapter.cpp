@@ -5,6 +5,7 @@
 #include "src/Adapter/AdapterFactory.h"
 #include "src/Adapter/Serial_Adapter/Serial_Adapter.h"
 #include "src/persistence/EEPROM_Manager.h"
+#include "lib/planetopia-protocol/opcodes.h"
 #include <esp_wifi.h>
 #include <cstring>
 
@@ -42,7 +43,7 @@ void Adapter::onMeshData(const planetopia::mesh::mesh_message& message) {
   // Handle OP_CONFIG_SET for ALL adapter types — server can reconfigure any node.
   // This must run in the base class so virtual dispatch to per-type no-ops cannot
   // swallow the opcode on PIR/LED/WiFi nodes.
-  static constexpr uint8_t OP_CONFIG_SET = 0xA0;
+  // OP_CONFIG_SET = 0xC1 (from lib/planetopia-protocol/opcodes.h)
   if (message.dataType == adapter_types::SERIAL_ADAPTER) {
     const uint8_t op = message.data[0];
     if (op == OP_CONFIG_SET) {
@@ -69,7 +70,7 @@ void Adapter::onMeshData(const planetopia::mesh::mesh_message& message) {
                       LogLevel::LOG_DEBUG);
       }
     }
-    if (op == Serial_Adapter::OP_NODE_ID_SET) {
+    if (op == OP_NODE_ID_SET) {
       uint8_t ownMac[6];
       esp_wifi_get_mac(WIFI_IF_STA, ownMac);
       bool allFF = true;
@@ -90,6 +91,43 @@ void Adapter::onMeshData(const planetopia::mesh::mesh_message& message) {
     // fall through to onMeshDataImpl so Serial_Adapter can handle them.
     if (_adapterType != adapter_types::SERIAL_ADAPTER)
       return;
+  }
+
+  // Handle LED output commands for LED_ADAPTER nodes.
+  // No RGB LED driver is currently implemented in firmware — these are logged stubs.
+  // TODO: When an LED adapter (e.g. NeoPixel/WS2812) is wired up, replace the Logger
+  // calls below with the appropriate driver calls (e.g. ledStrip.setPixelColor(r, g, b)).
+  if (message.dataType == adapter_types::LED_ADAPTER && _adapterType == adapter_types::LED_ADAPTER) {
+    const uint8_t op = message.data[0];
+    if (op == OP_LED_SOLID) {
+      uint8_t r = message.data[1];
+      uint8_t g = message.data[2];
+      uint8_t b = message.data[3];
+      Logger::logln("ADAPTER",
+                    String("OP_LED_SOLID: R=") + String(r) + " G=" + String(g) + " B=" + String(b) +
+                        " (stub — no RGB driver)",
+                    LogLevel::LOG_INFO);
+      // Send OP_COMMAND_ACK back through the mesh
+      uint8_t ackData[12] = {0};
+      ackData[0] = OP_COMMAND_ACK;
+      ackData[1] = op; // echo the handled opcode as the command ID
+      sendDataThroughMesh(adapter_types::SERIAL_ADAPTER, ackData);
+    } else if (op == OP_LED_OFF) {
+      Logger::logln("ADAPTER", "OP_LED_OFF (stub — no RGB driver)", LogLevel::LOG_INFO);
+      uint8_t ackData[12] = {0};
+      ackData[0] = OP_COMMAND_ACK;
+      ackData[1] = op;
+      sendDataThroughMesh(adapter_types::SERIAL_ADAPTER, ackData);
+    } else if (op == OP_LED_BLINK) {
+      Logger::logln("ADAPTER", "OP_LED_BLINK (stub — no RGB driver)", LogLevel::LOG_INFO);
+      uint8_t ackData[12] = {0};
+      ackData[0] = OP_COMMAND_ACK;
+      ackData[1] = op;
+      sendDataThroughMesh(adapter_types::SERIAL_ADAPTER, ackData);
+    } else if (op == OP_RELAY_SET) {
+      Logger::logln("ADAPTER", "OP_RELAY_SET received on LED_ADAPTER (unexpected)", LogLevel::LOG_WARN);
+    }
+    return;
   }
 
   // Normal per-adapter dispatch
