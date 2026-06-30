@@ -22,6 +22,9 @@ public:
   void onMeshDataImpl(const planetopia::mesh::mesh_message& message) override;
 
   // Opcodes from planetopia-protocol/opcodes.h (included above):
+  //   OP_HEALTH_REQ    0xB0  [B0]
+  //   OP_HEALTH_REPORT 0xB1  [B1][1B adapterType][6B mac][4B uptime]
+  //   OP_NODE_HEALTH   0xB2  [B2][1B adapterType][6B mac][4B uptime]
   //   OP_NODE_ID_SET   0xC0  [C0][6B targetMAC][1B nodeId]
   //   OP_CONFIG_SET    0xC1  [C1][6B targetMac][1B adapterType]
   //   OP_TX_POWER_SET  0xC2  [C2][1B preset: 0=short 1=indoor 2=outdoor]
@@ -30,10 +33,6 @@ public:
   //   OP_LED_BLINK     0xD2
   //   OP_RELAY_SET     0xD8
   //   OP_COMMAND_ACK   0xE0  [E0][1B commandId]
-
-  // Health opcodes — Serial_Adapter internal only, not in shared protocol
-  static constexpr uint8_t OP_HEALTH_REQ = 0xB0;    // [B0]
-  static constexpr uint8_t OP_HEALTH_REPORT = 0xB1; // [B1][1B adapterType][6B mac][4B uptime]
 
   // Relay a completed enrollment public key to the server over serial
   static void relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]);
