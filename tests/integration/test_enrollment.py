@@ -37,7 +37,7 @@ def test_node_prints_public_key_on_boot(node):
 
 
 @pytest.mark.integration
-def test_master_receives_enrollment_request(master, node):
+def test_master_receives_enrollment_request(master, _node):
     """Master should relay OP_ENROLLMENT_REQ to server (serial) within 15s."""
     enrolled = master.wait_for_log('Enrollment request complete, relaying to server', timeout=15.0)
     assert enrolled, "Master did not receive enrollment request from node"
@@ -49,11 +49,8 @@ def test_server_approval_triggers_join_ack(master, node):
     Approve enrollment via server HTTP API.
     Node should receive JOIN_ACK and log 'Enrollment approved'.
     """
-    pub_key = node.get_public_key(timeout=5.0)
-    assert pub_key is not None
-
     test_mac = bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01])
-    master.send_enrollment_approve(test_mac, pub_key, SERVER_URL, ADMIN_KEY)
+    master.send_enrollment_approve(test_mac, SERVER_URL, ADMIN_KEY)
 
     approved = node.wait_for_log('Enrollment approved', timeout=5.0)
     assert approved, "Node did not receive JOIN_ACK after server approval"
