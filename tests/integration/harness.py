@@ -89,8 +89,10 @@ class Node:
         hex_str = line.split('PLANETOPIA_PUBKEY:')[1].strip()
         return bytes.fromhex(hex_str) if len(hex_str) == 64 else None
 
-    def send_enrollment_approve(self, mac: bytes, pub_key: bytes) -> None:
-        # TODO: enrollment approval is now handled by the server HTTP API
-        # (POST /v1/enrollments/{mac}/approve). This raw-frame approach is stale.
-        # Update test_enrollment.py to use the HTTP API instead.
-        raise NotImplementedError("use the server HTTP API to approve enrollment")
+    def send_enrollment_approve(self, mac: bytes, pub_key: bytes, server_url: str, admin_key: str) -> None:
+        """Approve enrollment via server HTTP API (POST /api/v1/enrollments/{mac}/approve)."""
+        import requests
+        mac_str = ':'.join(f'{b:02X}' for b in mac)
+        url = f"{server_url}/api/v1/enrollments/{mac_str}/approve"
+        resp = requests.post(url, headers={"Authorization": f"Bearer {admin_key}"}, timeout=5.0)
+        resp.raise_for_status()

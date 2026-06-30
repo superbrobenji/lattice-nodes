@@ -1,6 +1,7 @@
 """
 Integration test: enrollment flow.
 Requires: master ESP32 on MASTER_PORT, node ESP32 on NODE_PORT.
+Requires: motionSensorServer running at SERVER_URL with ADMIN_KEY set.
 """
 import pytest
 import os
@@ -9,6 +10,8 @@ from harness import Node
 
 MASTER_PORT = os.getenv('MASTER_PORT', '/dev/ttyUSB0')
 NODE_PORT   = os.getenv('NODE_PORT',   '/dev/ttyUSB1')
+SERVER_URL  = os.getenv('SERVER_URL',  'http://localhost:8080')
+ADMIN_KEY   = os.getenv('ADMIN_KEY',   '')
 
 
 @pytest.fixture(scope='module')
@@ -34,9 +37,8 @@ def test_node_prints_public_key_on_boot(node):
 
 
 @pytest.mark.integration
-def test_master_receives_enrollment_request(master, _node):
+def test_master_receives_enrollment_request(master, node):
     """Master should relay OP_ENROLLMENT_REQ to server (serial) within 15s."""
-    # Master should log enrollment request after node broadcasts
     enrolled = master.wait_for_log('Enrollment request complete, relaying to server', timeout=15.0)
     assert enrolled, "Master did not receive enrollment request from node"
 
@@ -44,20 +46,15 @@ def test_master_receives_enrollment_request(master, _node):
 @pytest.mark.integration
 def test_server_approval_triggers_join_ack(master, node):
     """
-    Simulate server approval: send OP_ENROLLMENT_APPROVE to master.
+    Approve enrollment via server HTTP API.
     Node should receive JOIN_ACK and log 'Enrollment approved'.
     """
-    # Get node public key from its serial output
     pub_key = node.get_public_key(timeout=5.0)
     assert pub_key is not None
 
-    # Simulate node MAC (read from its log or use known test MAC)
     test_mac = bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01])
+    master.send_enrollment_approve(test_mac, pub_key, SERVER_URL, ADMIN_KEY)
 
-    # Send approval to master
-    master.send_enrollment_approve(test_mac, pub_key)
-
-    # Node should receive JOIN_ACK within 5s
     approved = node.wait_for_log('Enrollment approved', timeout=5.0)
     assert approved, "Node did not receive JOIN_ACK after server approval"
 
@@ -65,8 +62,6 @@ def test_server_approval_triggers_join_ack(master, node):
 @pytest.mark.integration
 def test_enrolled_node_stops_broadcasting_requests(node):
     """After enrollment, node should not re-broadcast enrollment requests."""
-    # Wait 12s (longer than 10s retry interval)
     time.sleep(12.0)
-    # No new enrollment log should appear
     new_request = node.wait_for_log('Enrollment request sent', timeout=2.0)
     assert not new_request, "Enrolled node is still broadcasting enrollment requests"
