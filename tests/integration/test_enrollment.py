@@ -37,7 +37,7 @@ def test_node_prints_public_key_on_boot(node):
 
 
 @pytest.mark.integration
-def test_master_receives_enrollment_request(master, _node):
+def test_master_receives_enrollment_request(master, node):
     """Master should relay OP_ENROLLMENT_REQ to server (serial) within 15s."""
     enrolled = master.wait_for_log('Enrollment request complete, relaying to server', timeout=15.0)
     assert enrolled, "Master did not receive enrollment request from node"
