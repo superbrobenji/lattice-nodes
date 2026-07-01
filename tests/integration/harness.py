@@ -10,7 +10,7 @@ from typing import Optional
 
 BAUD_RATE = 115200
 
-# Serial opcodes (must match planetopia-protocol/c/opcodes.h)
+# Serial opcodes (must match lattice-protocol/c/opcodes.h)
 OP_NODE_ID_SET        = 0xC0
 OP_CONFIG_SET         = 0xC1
 OP_TX_POWER_SET       = 0xC2
@@ -82,11 +82,11 @@ class Node:
         return False
 
     def get_public_key(self, timeout: float = 5.0) -> Optional[bytes]:
-        """Read PLANETOPIA_PUBKEY:... line from serial, return 32 bytes."""
-        line = wait_for_line(self.port, 'PLANETOPIA_PUBKEY:', timeout)
+        """Read LATTICE_PUBKEY:... line from serial, return 32 bytes."""
+        line = wait_for_line(self.port, 'LATTICE_PUBKEY:', timeout)
         if not line:
             return None
-        hex_str = line.split('PLANETOPIA_PUBKEY:')[1].strip()
+        hex_str = line.split('LATTICE_PUBKEY:')[1].strip()
         return bytes.fromhex(hex_str) if len(hex_str) == 64 else None
 
     def send_enrollment_approve(self, mac: bytes, server_url: str, admin_key: str) -> None:

@@ -32,7 +32,7 @@ def node():
 def test_node_prints_public_key_on_boot(node):
     """New node should print its public key to serial for provisioning."""
     pub_key = node.get_public_key(timeout=10.0)
-    assert pub_key is not None, "Node did not print PLANETOPIA_PUBKEY"
+    assert pub_key is not None, "Node did not print LATTICE_PUBKEY"
     assert len(pub_key) == 32
 
 

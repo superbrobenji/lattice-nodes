@@ -1,6 +1,6 @@
-# Planetopia — ESP-NOW Mesh Network Firmware
+# Lattice — ESP-NOW Mesh Network Firmware
 
-[![CI](https://github.com/superbrobenji/Planetopia-nodes/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/superbrobenji/Planetopia-nodes/actions/workflows/unit-tests.yml)
+[![CI](https://github.com/superbrobenji/Lattice-nodes/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/superbrobenji/Lattice-nodes/actions/workflows/unit-tests.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 Low-latency, encrypted, self-healing mesh network firmware for ESP32 devices.
@@ -48,7 +48,7 @@ main/
     ├── core/
     │   └── Logger.h / Logger.cpp   # Levelled logging (LOG_NONE suppresses all output)
     ├── error/
-    │   ├── Error.h                 # Public `planetopia::err::fail / fatal` helpers
+    │   ├── Error.h                 # Public `lattice::err::fail / fatal` helpers
     │   ├── ErrorCore.h / .cpp      # Blink patterns + TM1637 error codes
     │   └── ErrorCodes.h            # Numeric error registry
     ├── persistence/
@@ -104,8 +104,8 @@ Dependencies bundled in the repo (no library manager needed):
 ### 1. Clone
 
 ```bash
-git clone https://github.com/superbrobenji/Planetopia-nodes.git
-cd Planetopia-nodes
+git clone https://github.com/superbrobenji/Lattice-nodes.git
+cd Lattice-nodes
 ```
 
 ### 2. Configure
@@ -139,7 +139,7 @@ arduino-cli upload  --fqbn esp32:esp32:esp32da -p /dev/ttyUSB0 main
 
 On first boot, each unenrolled node prints its Curve25519 public key:
 ```
-PLANETOPIA_PUBKEY:3a7f2b...
+LATTICE_PUBKEY:3a7f2b...
 ```
 The host server must read this, approve the node, and send a `MESH_TYPE_JOIN_ACK`
 message (via the master's serial port) before the node begins forwarding sensor data.

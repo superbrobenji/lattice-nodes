@@ -1,7 +1,7 @@
 # Architecture Guide
 
 This document describes the design principles and module responsibilities of
-the Planetopia firmware. It replaces an earlier draft that described planned
+the Lattice firmware. It replaces an earlier draft that described planned
 (but never implemented) refactor utilities.
 
 ## Design Principles
@@ -54,7 +54,7 @@ Levelled logging (`LOG_DEBUG` → `LOG_NONE`). Set `DEFAULT_LOG_LEVEL = LOG_NONE
 when the serial port is used for host-server framing — any text output corrupts frames.
 
 ### `src/error/`
-- `Error.h`: public API — `planetopia::err::fail()` / `planetopia::err::fatal()`.
+- `Error.h`: public API — `lattice::err::fail()` / `lattice::err::fatal()`.
 - `ErrorCore`: drives the error LED blink pattern and TM1637 display.
 - `ErrorCodes.h`: numeric `T·M·S` code registry.
 

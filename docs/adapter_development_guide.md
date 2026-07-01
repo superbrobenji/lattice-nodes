@@ -1,6 +1,6 @@
 # Adapter Development Guide
 
-This guide explains how to add new adapters to the Planetopia system and how to change the default adapter for testing purposes.
+This guide explains how to add new adapters to the Lattice system and how to change the default adapter for testing purposes.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ Create a new header file in `main/src/Adapter/[AdapterName]_Adapter/[AdapterName
 
 #include "src/Adapter/Adapter.h"
 
-namespace planetopia {
+namespace lattice {
 namespace adapter {
 
 class [AdapterName]_Adapter : public Adapter {
@@ -31,7 +31,7 @@ public:
 
     // Required overrides
     void loop() override;
-    void onMeshDataImpl(const planetopia::mesh::mesh_message& message) override;
+    void onMeshDataImpl(const lattice::mesh::mesh_message& message) override;
 
 private:
     int _pin;
@@ -41,7 +41,7 @@ private:
 };
 
 } // namespace adapter
-} // namespace planetopia
+} // namespace lattice
 
 #endif // [ADAPTERNAME]_ADAPTER_H
 ```
@@ -53,7 +53,7 @@ private:
 
 #include "src/Adapter/Adapter.h"
 
-namespace planetopia {
+namespace lattice {
 namespace adapter {
 
 class Temp_Adapter : public Adapter {
@@ -62,7 +62,7 @@ public:
     ~Temp_Adapter() = default;
 
     void loop() override;
-    void onMeshDataImpl(const planetopia::mesh::mesh_message& message) override;
+    void onMeshDataImpl(const lattice::mesh::mesh_message& message) override;
 
 private:
     int _pin;
@@ -74,7 +74,7 @@ private:
 };
 
 } // namespace adapter
-} // namespace planetopia
+} // namespace lattice
 
 #endif // TEMP_ADAPTER_H
 ```
@@ -88,7 +88,7 @@ Create the corresponding `.cpp` file in `main/src/Adapter/[AdapterName]_Adapter/
 #include "src/Mesh/Mesh.h"
 #include "src/core/Logger.h"
 
-namespace planetopia {
+namespace lattice {
 namespace adapter {
 
 [AdapterName]_Adapter::[AdapterName]_Adapter(int pin) 
@@ -109,7 +109,7 @@ void [AdapterName]_Adapter::loop() {
     }
 }
 
-void [AdapterName]_Adapter::onMeshDataImpl(const planetopia::mesh::mesh_message& message) {
+void [AdapterName]_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
     // Handle incoming mesh messages specific to this adapter type
     // This method is only called for messages where dataType matches this adapter's type
     
@@ -130,7 +130,7 @@ void [AdapterName]_Adapter::onMeshDataImpl(const planetopia::mesh::mesh_message&
 // }
 
 } // namespace adapter
-} // namespace planetopia
+} // namespace lattice
 ```
 
 **Example Implementation:**
@@ -139,7 +139,7 @@ void [AdapterName]_Adapter::onMeshDataImpl(const planetopia::mesh::mesh_message&
 #include "src/Mesh/Mesh.h"
 #include "src/core/Logger.h"
 
-namespace planetopia {
+namespace lattice {
 namespace adapter {
 
 Temp_Adapter::Temp_Adapter(int pin) 
@@ -155,7 +155,7 @@ void Temp_Adapter::loop() {
     }
 }
 
-void Temp_Adapter::onMeshDataImpl(const planetopia::mesh::mesh_message& message) {
+void Temp_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
     if (message.dataType == TEMP_ADAPTER) {
         if (message.data[0] == 0x01) { // REQUEST_TEMP
             sendTemperatureData();
@@ -171,8 +171,8 @@ void Temp_Adapter::readTemperature() {
 
 void Temp_Adapter::sendTemperatureData() {
     if (mesh_transmit_fn) {
-        planetopia::mesh::mesh_message msg;
-        msg.messageType = planetopia::mesh::MESH_TYPE_ADAPTER_DATA;
+        lattice::mesh::mesh_message msg;
+        msg.messageType = lattice::mesh::MESH_TYPE_ADAPTER_DATA;
         msg.dataType = TEMP_ADAPTER;
         msg.data[0] = 0x02; // TEMP_DATA opcode
         msg.data[1] = (uint8_t)(_lastTemperature * 10); // Send temperature * 10 as integer
@@ -185,7 +185,7 @@ void Temp_Adapter::sendTemperatureData() {
 }
 
 } // namespace adapter
-} // namespace planetopia
+} // namespace lattice
 ```
 
 ### Step 3: Add the Adapter Type to the Enum
@@ -294,10 +294,10 @@ public:
     
     // Main interface methods
     virtual void loop() = 0;
-    virtual void onMeshDataImpl(const planetopia::mesh::mesh_message& message) = 0;
+    virtual void onMeshDataImpl(const lattice::mesh::mesh_message& message) = 0;
     
     // Mesh data handling (automatically filters by adapter type)
-    void onMeshData(const planetopia::mesh::mesh_message& message);
+    void onMeshData(const lattice::mesh::mesh_message& message);
     
     // Getter methods
     adapter_types getType() const { return _adapterType; }
@@ -407,10 +407,10 @@ Here's a complete example of a temperature sensor adapter:
 3. Send mesh message with `dataType = 4` to trigger temperature reading
 4. Verify temperature data is broadcast back to the mesh
 
-This guide should give you everything you need to add new adapters and test different configurations in the Planetopia system!
+This guide should give you everything you need to add new adapters and test different configurations in the Lattice system!
 
 ## 2025 Update – Build-time Defaults & GPIO Helpers
 
-* **DEFAULT_ADAPTER** – you no longer edit `main.ino` to pick a default adapter.  Instead change `planetopia::config::DEFAULT_ADAPTER` in `project_config.h`.
+* **DEFAULT_ADAPTER** – you no longer edit `main.ino` to pick a default adapter.  Instead change `lattice::config::DEFAULT_ADAPTER` in `project_config.h`.
 * **GPIO helpers** – validation and `_initialized` bookkeeping are handled by `GpioOutput` / `GpioInput`.  New adapter drivers can simply call `GpioOutput::isValidOutputPin(pin)` instead of duplicating pin tables.
 * **Seven-segment optional** – if your dev board lacks the TM1637 display set `ENABLE_SEVSEG_DISPLAY = false` in `project_config.h`; the ErrorCore will fall back to LED patterns.

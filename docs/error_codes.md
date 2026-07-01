@@ -62,7 +62,7 @@ Always use the helpers in `src/error/Error.h` – never call `ErrorCore` directl
 // Mesh peer-list overflow in Mesh module (sub-code 0x1)
 constexpr uint8_t MESH_PEER_OVERFLOW = 0x01;
 
-planetopia::err::fail(utils::ErrorType::MEMORY_ERROR,
+lattice::err::fail(utils::ErrorType::MEMORY_ERROR,
                       "Peer vector overflow");
 // Shows 0x431 (Memory / Mesh / 1) on the display and blinks the
 // error LED four times before performing a safe reboot (if configured).

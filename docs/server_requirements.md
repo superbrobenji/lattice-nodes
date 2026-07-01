@@ -1,4 +1,4 @@
-## Planetopia server requirements (serial + mesh)
+## Lattice server requirements (serial + mesh)
 
 This document describes everything the server must implement to communicate with the master node over USB serial and control/query all mesh nodes. It includes the wire protocol, message schema, control opcodes, and reference implementation notes (with Go in mind).
 
@@ -257,7 +257,7 @@ When a node boots for the first time (or after an EEPROM wipe) it is
 
 1. Prints its Curve25519 public key to serial (master node only relays):
    ```
-   PLANETOPIA_PUBKEY:3a7f2b...  (64 hex chars = 32 bytes)
+   LATTICE_PUBKEY:3a7f2b...  (64 hex chars = 32 bytes)
    ```
 2. Broadcasts `MESH_TYPE_ENROLLMENT` (type=2) messages every 10 seconds with
    `enrollmentPublicKey` populated.

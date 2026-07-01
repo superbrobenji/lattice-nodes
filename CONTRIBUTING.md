@@ -1,14 +1,14 @@
-# Contributing to Planetopia Firmware
+# Contributing to Lattice Firmware
 
-Planetopia follows Tiger-Style engineering principles: safety first, performance always, zero technical debt.  The CI pipeline enforces these rules automatically.  Every pull-request **must** pass all gates before merge.
+Lattice follows Tiger-Style engineering principles: safety first, performance always, zero technical debt.  The CI pipeline enforces these rules automatically.  Every pull-request **must** pass all gates before merge.
 
 ## 0. Quick checklist before opening a PR
 
 - [ ] `arduino-cli compile -e --fqbn esp32:esp32:esp32da main` builds with **no warnings** (run locally — not in CI).
 - [ ] `clang-format -style=file` applied; `git diff --check` shows no whitespace errors.
 - [ ] No `new`, `malloc`, or unbounded `std::vector` growth after setup.
-- [ ] All errors funnel through `src/error/Error.h` (`planetopia::err::*`).
-- [ ] MAC handling uses `planetopia::utils::MacAddress` helper.
+- [ ] All errors funnel through `src/error/Error.h` (`lattice::err::*`).
+- [ ] MAC handling uses `lattice::utils::MacAddress` helper.
 - [ ] Added/updated unit tests (if applicable).
 - [ ] Updated documentation (README / docs/) if behaviour changes.
 
@@ -31,7 +31,7 @@ refactor/<area>    # structural changes
 
 ## 4. Error handling
 ```cpp
-if (!planetopia::err::checkEsp(esp_now_init(), utils::ErrorType::COMMUNICATION_FAIL,
+if (!lattice::err::checkEsp(esp_now_init(), utils::ErrorType::COMMUNICATION_FAIL,
                                "esp_now_init failed"))
     return false;
 ```
@@ -56,4 +56,4 @@ PR merges are blocked until all three jobs are green.
 > locally before submitting a PR that touches firmware source.
 
 ---
-Thank you for keeping Planetopia rock-solid! 💪
+Thank you for keeping Lattice rock-solid! 💪
