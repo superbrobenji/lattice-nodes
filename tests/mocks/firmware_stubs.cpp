@@ -42,11 +42,11 @@ namespace mesh {
 Mesh* Mesh::instance = nullptr;
 
 // transmit — static function pointer; defined as a static member
-void Mesh::transmit(const lattice::adapter::adapter_types, const uint8_t[64]) {
+void Mesh::transmit(const lattice::adapter::adapter_types, const uint8_t*) {
   // stub: no-op in tests
 }
 
-void Mesh::broadcastAdapterDataStatic(lattice::adapter::adapter_types, const uint8_t[64]) {
+void Mesh::broadcastAdapterDataStatic(lattice::adapter::adapter_types, const uint8_t*) {
   // stub: no-op in tests
 }
 
@@ -91,7 +91,7 @@ void Mesh::onDataSentCallback(const wifi_tx_info_t*, esp_now_send_status_t) {}
 void Mesh::IRAM_ATTR dataRecvTrampoline(const esp_now_recv_info*, const uint8_t*, int) {}
 void Mesh::IRAM_ATTR onDataRecvCallback(const esp_now_recv_info*, const uint8_t*, int) {}
 
-mesh_message Mesh::buildMessage(adapter_types, const uint8_t[64], MeshMessageType) {
+mesh_message Mesh::buildMessage(adapter_types, const uint8_t*, MeshMessageType) {
   return mesh_message{};
 }
 

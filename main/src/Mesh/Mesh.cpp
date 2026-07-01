@@ -348,8 +348,7 @@ PeerInfo* Mesh::findNextHopToMaster() {
   return nullptr;
 }
 
-mesh_message Mesh::buildMessage(adapter_types type, const uint8_t data[64],
-                                MeshMessageType msgType) {
+mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType) {
   mesh_message msg = {};
   msg.protoVersion = PROTO_VERSION;
   msg.messageType = msgType;
@@ -637,7 +636,7 @@ void Mesh::broadcastToAllPeers(mesh_message msg) {
   }
 }
 
-void Mesh::transmitCore(const adapter_types type, const uint8_t data[64], MeshMessageType msgType,
+void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessageType msgType,
                         const mesh_message* msgOverride) {
   mesh_message msg;
   if (msgOverride) {
@@ -665,7 +664,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t data[64], MeshMe
   }
 }
 
-void Mesh::transmit(const adapter_types type, const uint8_t data[64]) {
+void Mesh::transmit(const adapter_types type, const uint8_t* data) {
   if (!instance) {
     Logger::logln("MESH", "transmit() called before init", LogLevel::LOG_WARN);
     return;
@@ -774,13 +773,13 @@ bool Mesh::meshKeyIsSet() const {
   return false;
 }
 
-void Mesh::broadcastAdapterData(adapter_types type, const uint8_t data[64]) {
+void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data) {
   mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
   memset(msg.targetMacAddress, 0xFF, 6); // broadcast indicator — relayed by intermediate nodes
   broadcastToAllPeers(msg);
 }
 
-void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t data[64]) {
+void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t* data) {
   if (instance)
     instance->broadcastAdapterData(type, data);
 }

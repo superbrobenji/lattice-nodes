@@ -491,7 +491,7 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
         lattice::mesh::Mesh* meshPtr = lattice::mesh::Mesh::getInstance();
         bool isMasterNode = meshPtr && meshPtr->getIsMaster();
         if (isMasterNode) {
-          uint8_t fwdData[12] = {};
+          uint8_t fwdData[64] = {};
           fwdData[0] = OP_TX_POWER_SET;
           fwdData[1] = presetByte;
           lattice::mesh::Mesh::broadcastAdapterDataStatic(adapter_types::SERIAL_ADAPTER, fwdData);

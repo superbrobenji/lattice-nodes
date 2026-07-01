@@ -149,7 +149,7 @@ TEST_F(PIRHealthTest, UptimeReflectsActualMillis) {
 
 TEST_F(PIRHealthTest, OpNodeIdSet_AssignsNodeId_WhenTargetMatchesMac) {
   PIR_Adapter* pir = new PIR_Adapter(2);
-  pir->setTransmitFn([](adapter_types, const uint8_t[64]) {});
+  pir->setTransmitFn([](adapter_types, const uint8_t*) {});
 
   // Set mockDeviceMac to known value
   mockDeviceMac[0] = 0x11;
@@ -174,7 +174,7 @@ TEST_F(PIRHealthTest, OpNodeIdSet_AssignsNodeId_WhenTargetMatchesMac) {
 
 TEST_F(PIRHealthTest, OpNodeIdSet_IgnoresMessage_WhenTargetMismatch) {
   PIR_Adapter* pir = new PIR_Adapter(2);
-  pir->setTransmitFn([](adapter_types, const uint8_t[64]) {});
+  pir->setTransmitFn([](adapter_types, const uint8_t*) {});
 
   mockDeviceMac[0] = 0xAA;
   mockDeviceMac[1] = 0xBB;

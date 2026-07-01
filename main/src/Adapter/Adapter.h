@@ -28,7 +28,7 @@ class Adapter {
 protected:
   int _pin;                   // Hardware pin associated with the adapter
   adapter_types _adapterType; // Type identifier for the adapter
-  typedef void (*TransmitPtr)(adapter_types, const uint8_t[64]);
+  typedef void (*TransmitPtr)(adapter_types, const uint8_t*);
   TransmitPtr mesh_transmit_fn;
 
 public:
