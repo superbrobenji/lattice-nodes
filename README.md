@@ -1,6 +1,6 @@
 # Lattice — ESP-NOW Mesh Network Firmware
 
-[![CI](https://github.com/superbrobenji/Lattice-nodes/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/superbrobenji/Lattice-nodes/actions/workflows/unit-tests.yml)
+[![CI](https://github.com/superbrobenji/lattice-nodes/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/superbrobenji/lattice-nodes/actions/workflows/unit-tests.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 Low-latency, encrypted, self-healing mesh network firmware for ESP32 devices.
@@ -104,7 +104,7 @@ Dependencies bundled in the repo (no library manager needed):
 ### 1. Clone
 
 ```bash
-git clone https://github.com/superbrobenji/Lattice-nodes.git
+git clone https://github.com/superbrobenji/lattice-nodes.git
 cd Lattice-nodes
 ```
 
