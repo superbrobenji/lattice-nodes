@@ -14,9 +14,6 @@
 namespace lattice {
 namespace mesh {
 
-// Forward declaration matching Mesh.h types
-struct mesh_message;
-
 // Mesh::instance static member
 class Mesh;
 Mesh* Mesh_instance_stub = nullptr;
@@ -63,7 +60,8 @@ Mesh::Mesh()
       txSeqNum(0), replayCache{}, replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
       relayPendingMsg{}, relayPendingAt(0), relayPending(false), knownMasterMac{},
       hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
-      _dualMasterMode(false), recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0) {}
+      _dualMasterMode(false), recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0),
+      lastRouteReportMs(0) {}
 
 bool Mesh::init() {
   return true;
@@ -73,6 +71,7 @@ bool Mesh::init() {
 void Mesh::broadcastMasterBeacon() {}
 void Mesh::checkMasterTimeout() {}
 void Mesh::loop() {}
+// sendRouteReport is implemented in mesh_logic_impl.cpp (real logic)
 
 void Mesh::addPeer(const uint8_t*) {}
 void Mesh::removePeer(const uint8_t*) {}

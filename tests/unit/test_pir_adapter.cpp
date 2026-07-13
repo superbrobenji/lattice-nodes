@@ -160,7 +160,7 @@ TEST_F(PIRHealthTest, OpNodeIdSet_AssignsNodeId_WhenTargetMatchesMac) {
   mockDeviceMac[5] = 0x66;
 
   lattice::mesh::mesh_message msg{};
-  msg.dataType = adapter_types::SERIAL_ADAPTER;
+  msg.data_type = adapter_types::SERIAL_ADAPTER;
   msg.data[0] = 0xC0; // OP_NODE_ID_SET
   // target MAC = mockDeviceMac
   memcpy(&msg.data[1], mockDeviceMac, 6);
@@ -184,7 +184,7 @@ TEST_F(PIRHealthTest, OpNodeIdSet_IgnoresMessage_WhenTargetMismatch) {
   mockDeviceMac[5] = 0xFF;
 
   lattice::mesh::mesh_message msg{};
-  msg.dataType = adapter_types::SERIAL_ADAPTER;
+  msg.data_type = adapter_types::SERIAL_ADAPTER;
   msg.data[0] = 0xC0;
   uint8_t differentMac[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
   memcpy(&msg.data[1], differentMac, 6);

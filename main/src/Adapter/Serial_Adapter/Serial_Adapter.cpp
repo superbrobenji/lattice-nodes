@@ -141,16 +141,17 @@ void Serial_Adapter::loop() {
 }
 
 void Serial_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
-  Logger::logln("Serial_Adapter",
-                "Processing incoming mesh message - Type: " + String((uint8_t)message.messageType) +
-                    " DataType: " + String(static_cast<int32_t>(message.dataType)) +
-                    " HopCount: " + String(message.hopCount),
-                LogLevel::LOG_DEBUG);
+  Logger::logln(
+      "Serial_Adapter",
+      "Processing incoming mesh message - Type: " + String((uint8_t)message.message_type) +
+          " DataType: " + String(static_cast<int32_t>(message.data_type)) +
+          " HopCount: " + String(message.hop_count),
+      LogLevel::LOG_DEBUG);
 
   // Handle control opcodes received via mesh.
   // NOTE: OP_CONFIG_SET is now handled in Adapter::onMeshData() (base class) so it reaches
   // ALL node types. Only Serial_Adapter-specific opcodes remain here.
-  if (message.dataType == adapter_types::SERIAL_ADAPTER) {
+  if (message.data_type == adapter_types::SERIAL_ADAPTER) {
     uint8_t op = message.data[0];
     if (op == OP_HEALTH_REQ) {
       Logger::logln("Serial_Adapter", "Received health request via mesh, sending health report",
@@ -203,21 +204,21 @@ void Serial_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) 
 size_t Serial_Adapter::encodeMeshMessage(const lattice::mesh::mesh_message& msg, uint8_t* out,
                                          size_t outCap) {
   Logger::logln("Serial_Adapter",
-                "Encoding mesh message - Type: " + String((uint8_t)msg.messageType) +
-                    " DataType: " + String(static_cast<int32_t>(msg.dataType)) +
-                    " HopCount: " + String(msg.hopCount),
+                "Encoding mesh message - Type: " + String((uint8_t)msg.message_type) +
+                    " DataType: " + String(static_cast<int32_t>(msg.data_type)) +
+                    " HopCount: " + String(msg.hop_count),
                 LogLevel::LOG_DEBUG);
 
   mesh_MeshMessage pbMsg = mesh_MeshMessage_init_zero;
-  pbMsg.messageType = static_cast<uint32_t>(msg.messageType);
-  pbMsg.dataType = static_cast<int32_t>(msg.dataType);
-  pbMsg.hopCount = msg.hopCount;
-  pbMsg.epochNum = msg.epochNum;
-  pbMsg.seqNum = static_cast<uint32_t>(msg.seqNum);
-  pbMsg.protoVersion = static_cast<uint32_t>(msg.protoVersion);
-  memcpy(pbMsg.originMacAddress, msg.originMacAddress, 6);
-  memcpy(pbMsg.targetMacAddress, msg.targetMacAddress, 6);
-  memcpy(pbMsg.lastHopMacAddress, msg.lastHopMacAddress, 6);
+  pbMsg.messageType = static_cast<uint32_t>(msg.message_type);
+  pbMsg.dataType = static_cast<int32_t>(msg.data_type);
+  pbMsg.hopCount = msg.hop_count;
+  pbMsg.epochNum = msg.epoch_num;
+  pbMsg.seqNum = static_cast<uint32_t>(msg.seq_num);
+  pbMsg.protoVersion = static_cast<uint32_t>(msg.proto_version);
+  memcpy(pbMsg.originMacAddress, msg.origin_mac_address, 6);
+  memcpy(pbMsg.targetMacAddress, msg.target_mac_address, 6);
+  memcpy(pbMsg.lastHopMacAddress, msg.last_hop_mac_address, 6);
 
   // data field: always present (12 bytes)
   pbMsg.has_data = true;
@@ -225,11 +226,10 @@ size_t Serial_Adapter::encodeMeshMessage(const lattice::mesh::mesh_message& msg,
   memcpy(pbMsg.data.bytes, msg.data, sizeof(msg.data));
 
   // public_key: only encode for enrollment-related message types when non-zero
-  if (msg.messageType == lattice::mesh::MeshMessageType::MESH_TYPE_ENROLLMENT ||
-      msg.messageType == lattice::mesh::MeshMessageType::MESH_TYPE_JOIN_ACK) {
+  if (msg.message_type == MESH_TYPE_ENROLLMENT || msg.message_type == MESH_TYPE_JOIN_ACK) {
     bool nonZero = false;
     for (int i = 0; i < 32; ++i) {
-      if (msg.enrollmentPublicKey[i]) {
+      if (msg.enrollment_public_key[i]) {
         nonZero = true;
         break;
       }
@@ -237,7 +237,7 @@ size_t Serial_Adapter::encodeMeshMessage(const lattice::mesh::mesh_message& msg,
     if (nonZero) {
       pbMsg.has_public_key = true;
       pbMsg.public_key.size = 32;
-      memcpy(pbMsg.public_key.bytes, msg.enrollmentPublicKey, 32);
+      memcpy(pbMsg.public_key.bytes, msg.enrollment_public_key, 32);
     }
   }
 
@@ -267,13 +267,13 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len,
     return false;
   }
 
-  outMsg.messageType = static_cast<lattice::mesh::MeshMessageType>(pbMsg.messageType);
-  outMsg.dataType = static_cast<lattice::adapter::adapter_types>(pbMsg.dataType);
-  outMsg.hopCount = static_cast<uint8_t>(pbMsg.hopCount);
-  outMsg.epochNum = pbMsg.epochNum;
-  outMsg.seqNum = static_cast<uint16_t>(pbMsg.seqNum);
-  outMsg.protoVersion = static_cast<uint8_t>(pbMsg.protoVersion);
-  memcpy(outMsg.targetMacAddress, pbMsg.targetMacAddress, 6);
+  outMsg.message_type = static_cast<lattice::mesh::MeshMessageType>(pbMsg.messageType);
+  outMsg.data_type = static_cast<lattice::adapter::adapter_types>(pbMsg.dataType);
+  outMsg.hop_count = static_cast<uint8_t>(pbMsg.hopCount);
+  outMsg.epoch_num = pbMsg.epochNum;
+  outMsg.seq_num = static_cast<uint16_t>(pbMsg.seqNum);
+  outMsg.proto_version = static_cast<uint8_t>(pbMsg.protoVersion);
+  memcpy(outMsg.target_mac_address, pbMsg.targetMacAddress, 6);
 
   if (pbMsg.has_data) {
     size_t dataToCopy = pbMsg.data.size < 12u ? pbMsg.data.size : 12u;
@@ -281,20 +281,20 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len,
   }
 
   if (pbMsg.has_public_key) {
-    memcpy(outMsg.enrollmentPublicKey, pbMsg.public_key.bytes, 32);
+    memcpy(outMsg.enrollment_public_key, pbMsg.public_key.bytes, 32);
   }
 
   // For server-to-device messages (JOIN_ACK, SERIAL_CMD_BROADCAST) the MAC
   // fields on the wire are meaningful and must not be overwritten.
   // For device-originated relays (ADAPTER_DATA, MASTER_BEACON) the server
   // leaves routing fields blank, so we fill them in with our own MAC.
-  if (outMsg.messageType != lattice::mesh::MESH_TYPE_JOIN_ACK &&
-      outMsg.messageType != lattice::mesh::MESH_TYPE_SERIAL_CMD_BROADCAST) {
-    readOwnMac(outMsg.originMacAddress);
-    readOwnMac(outMsg.lastHopMacAddress);
+  if (outMsg.message_type != MESH_TYPE_JOIN_ACK &&
+      outMsg.message_type != MESH_TYPE_SERIAL_CMD_BROADCAST) {
+    readOwnMac(outMsg.origin_mac_address);
+    readOwnMac(outMsg.last_hop_mac_address);
   } else {
-    memcpy(outMsg.originMacAddress, pbMsg.originMacAddress, 6);
-    memcpy(outMsg.lastHopMacAddress, pbMsg.lastHopMacAddress, 6);
+    memcpy(outMsg.origin_mac_address, pbMsg.originMacAddress, 6);
+    memcpy(outMsg.last_hop_mac_address, pbMsg.lastHopMacAddress, 6);
   }
 
   Logger::logln("Serial_Adapter", "Successfully decoded protobuf message", LogLevel::LOG_DEBUG);
@@ -303,10 +303,10 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len,
 
 void Serial_Adapter::relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]) {
   lattice::mesh::mesh_message msg = {};
-  msg.messageType = lattice::mesh::MeshMessageType::MESH_TYPE_ENROLLMENT;
-  msg.protoVersion = 1;
-  memcpy(msg.originMacAddress, mac, 6);
-  memcpy(msg.enrollmentPublicKey, pubKey, 32);
+  msg.message_type = MESH_TYPE_ENROLLMENT;
+  msg.proto_version = 1;
+  memcpy(msg.origin_mac_address, mac, 6);
+  memcpy(msg.enrollment_public_key, pubKey, 32);
 
   uint8_t encoded[128];
   size_t n = encodeMeshMessage(msg, encoded, sizeof(encoded));
@@ -339,14 +339,14 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
     } else if (op == OP_SIM_FAKE_BEACON && len >= 13) {
       Logger::logln("SIM", "Injecting fake master beacon", LogLevel::LOG_WARN);
       lattice::mesh::mesh_message fakeBeacon{};
-      fakeBeacon.protoVersion = lattice::mesh::PROTO_VERSION;
-      fakeBeacon.messageType = lattice::mesh::MESH_TYPE_MASTER_BEACON;
-      memcpy(fakeBeacon.originMacAddress, &data[1], 6);
-      memcpy(&fakeBeacon.epochNum, &data[7], 4);
-      memcpy(&fakeBeacon.seqNum, &data[11], 2);
+      fakeBeacon.proto_version = lattice::mesh::PROTO_VERSION;
+      fakeBeacon.message_type = MESH_TYPE_MASTER_BEACON;
+      memcpy(fakeBeacon.origin_mac_address, &data[1], 6);
+      memcpy(&fakeBeacon.epoch_num, &data[7], 4);
+      memcpy(&fakeBeacon.seq_num, &data[11], 2);
       lattice::mesh::Mesh* meshRef = lattice::mesh::Mesh::getInstance();
       if (meshRef)
-        meshRef->injectReceivedMessage(fakeBeacon.originMacAddress, fakeBeacon);
+        meshRef->injectReceivedMessage(fakeBeacon.origin_mac_address, fakeBeacon);
       return;
 
     } else if (op == OP_SIM_DUMP_STATE) {
@@ -375,15 +375,15 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
   }
 
   Logger::logln("Serial_Adapter",
-                "Decoded message - Type: " + String((uint8_t)msg.messageType) +
-                    " DataType: " + String(static_cast<int32_t>(msg.dataType)),
+                "Decoded message - Type: " + String((uint8_t)msg.message_type) +
+                    " DataType: " + String(static_cast<int32_t>(msg.data_type)),
                 LogLevel::LOG_INFO);
 
   // JOIN_ACK (type=4): server responded to an enrollment request
-  if (msg.messageType == lattice::mesh::MeshMessageType::MESH_TYPE_JOIN_ACK) {
+  if (msg.message_type == MESH_TYPE_JOIN_ACK) {
     bool hasKey = false;
     for (int i = 0; i < 32; ++i) {
-      if (msg.enrollmentPublicKey[i]) {
+      if (msg.enrollment_public_key[i]) {
         hasKey = true;
         break;
       }
@@ -393,7 +393,7 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
                     LogLevel::LOG_INFO);
       lattice::mesh::Mesh* meshInstance = lattice::mesh::Mesh::getInstance();
       if (meshInstance) {
-        meshInstance->enrollPeer(msg.targetMacAddress, msg.enrollmentPublicKey);
+        meshInstance->enrollPeer(msg.target_mac_address, msg.enrollment_public_key);
       }
     } else {
       Logger::logln("Serial_Adapter", "Server rejected enrollment request", LogLevel::LOG_WARN);
@@ -402,31 +402,32 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
   }
 
   // Only forward adapter data via mesh transmit function; routing fields are managed by Mesh
-  if (msg.messageType == lattice::mesh::MESH_TYPE_ADAPTER_DATA) {
+  if (msg.message_type == MESH_TYPE_ADAPTER_DATA) {
     Logger::logln("Serial_Adapter", "Forwarding adapter data via mesh transmit",
                   LogLevel::LOG_DEBUG);
 
     if (mesh_transmit_fn) {
       // Targeted send via normal mesh transmit path (to master, route onward)
-      mesh_transmit_fn(msg.dataType, msg.data);
+      mesh_transmit_fn(static_cast<adapter_types>(msg.data_type), msg.data);
       Logger::logln("Serial_Adapter", "Adapter data forwarded successfully", LogLevel::LOG_DEBUG);
     } else {
       Logger::logln("Serial_Adapter", "transmit function not set", LogLevel::LOG_ERROR);
       lattice::err::fail(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::ADAPTER,
                          6, "Serial_Adapter: transmit function not set");
     }
-  } else if (msg.messageType == lattice::mesh::MESH_TYPE_SERIAL_CMD_BROADCAST) {
+  } else if (msg.message_type == MESH_TYPE_SERIAL_CMD_BROADCAST) {
     Logger::logln("Serial_Adapter", "Broadcasting adapter data to all peers", LogLevel::LOG_DEBUG);
     // Broadcast adapter data to all peers
-    lattice::mesh::Mesh::broadcastAdapterDataStatic(msg.dataType, msg.data);
+    lattice::mesh::Mesh::broadcastAdapterDataStatic(static_cast<adapter_types>(msg.data_type),
+                                                    msg.data);
     Logger::logln("Serial_Adapter", "Broadcast sent successfully", LogLevel::LOG_DEBUG);
   } else {
-    Logger::logln("Serial_Adapter", "Unknown message type: " + String(msg.messageType),
+    Logger::logln("Serial_Adapter", "Unknown message type: " + String(msg.message_type),
                   LogLevel::LOG_WARN);
   }
 
   // Handle control opcodes: CONFIG_SET, HEALTH_REQ
-  if (msg.dataType == adapter_types::SERIAL_ADAPTER) {
+  if (msg.data_type == adapter_types::SERIAL_ADAPTER) {
     uint8_t op = msg.data[0];
     Logger::logln("Serial_Adapter",
                   "Processing SERIAL_ADAPTER control opcode: 0x" + String(op, HEX),
@@ -444,11 +445,11 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
       readOwnMac(myMac);
       bool allFF = true;
       for (int i = 0; i < 6; ++i)
-        if (msg.targetMacAddress[i] != 0xFF) {
+        if (msg.target_mac_address[i] != 0xFF) {
           allFF = false;
           break;
         }
-      bool isTarget = allFF || (memcmp(msg.targetMacAddress, myMac, 6) == 0);
+      bool isTarget = allFF || (memcmp(msg.target_mac_address, myMac, 6) == 0);
 
       if (isTarget) {
         adapter_types newType = AdapterFactory::adapterTypeFromEEPROM(msg.data[7]);

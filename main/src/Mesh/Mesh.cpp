@@ -164,7 +164,8 @@ Mesh::Mesh()
       txSeqNum(0), replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
       hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
       _dualMasterMode(lattice::config::DUAL_MASTER_MODE), peerCount(0), recvQueueHead(0),
-      recvQueueTail(0), lastBeaconMs(0), relayPending(false), relayPendingAt(0) {
+      recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0), relayPending(false),
+      relayPendingAt(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
@@ -205,17 +206,17 @@ void Mesh::printMeshMessage(const mesh_message& msg) {
   auto macToStr = [](const uint8_t mac[6]) { return lattice::utils::MacAddress(mac).toString(); };
 
   Logger::logln("MESH", "------ Mesh Message ------", LogLevel::LOG_DEBUG);
-  Logger::logln("MESH", "Origin:    " + macToStr(msg.originMacAddress), LogLevel::LOG_DEBUG);
-  Logger::logln("MESH", "Target:    " + macToStr(msg.targetMacAddress), LogLevel::LOG_DEBUG);
-  Logger::logln("MESH", "Last Hop:  " + macToStr(msg.lastHopMacAddress), LogLevel::LOG_DEBUG);
+  Logger::logln("MESH", "Origin:    " + macToStr(msg.origin_mac_address), LogLevel::LOG_DEBUG);
+  Logger::logln("MESH", "Target:    " + macToStr(msg.target_mac_address), LogLevel::LOG_DEBUG);
+  Logger::logln("MESH", "Last Hop:  " + macToStr(msg.last_hop_mac_address), LogLevel::LOG_DEBUG);
 
   Logger::logln(
       "MESH",
-      "MsgType:   " + String((uint8_t)msg.messageType) + " (" +
-          (msg.messageType == MESH_TYPE_MASTER_BEACON ? "MASTER_BEACON" : "ADAPTER_DATA") + ")",
+      "MsgType:   " + String((uint8_t)msg.message_type) + " (" +
+          (msg.message_type == MESH_TYPE_MASTER_BEACON ? "MASTER_BEACON" : "ADAPTER_DATA") + ")",
       LogLevel::LOG_DEBUG);
 
-  Logger::logln("MESH", "DataType:  " + String((uint8_t)msg.dataType), LogLevel::LOG_DEBUG);
+  Logger::logln("MESH", "DataType:  " + String((uint8_t)msg.data_type), LogLevel::LOG_DEBUG);
 
   String dataStr;
   for (int i = 0; i < 12; ++i) {
@@ -225,7 +226,7 @@ void Mesh::printMeshMessage(const mesh_message& msg) {
   }
   Logger::logln("MESH", "Data:      " + dataStr, LogLevel::LOG_DEBUG);
 
-  Logger::logln("MESH", "Hop Count: " + String(msg.hopCount), LogLevel::LOG_DEBUG);
+  Logger::logln("MESH", "Hop Count: " + String(msg.hop_count), LogLevel::LOG_DEBUG);
   Logger::logln("MESH", "-------------------------", LogLevel::LOG_DEBUG);
 }
 
@@ -350,21 +351,21 @@ PeerInfo* Mesh::findNextHopToMaster() {
 
 mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType) {
   mesh_message msg = {};
-  msg.protoVersion = PROTO_VERSION;
-  msg.messageType = msgType;
-  msg.dataType = type;
-  memcpy(msg.originMacAddress, deviceMacAddress, 6);
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = msgType;
+  msg.data_type = type;
+  memcpy(msg.origin_mac_address, deviceMacAddress, 6);
   if (msgType == MESH_TYPE_MASTER_BEACON) {
-    memset(msg.targetMacAddress, 0xFF, 6); // Not used
+    memset(msg.target_mac_address, 0xFF, 6); // Not used
   } else {
-    memcpy(msg.targetMacAddress, currentMaster.mac, 6);
+    memcpy(msg.target_mac_address, currentMaster.mac, 6);
   }
-  memcpy(msg.lastHopMacAddress, deviceMacAddress, 6);
+  memcpy(msg.last_hop_mac_address, deviceMacAddress, 6);
   if (data)
     memcpy(msg.data, data, sizeof(msg.data));
-  msg.hopCount = 0;
-  msg.epochNum = bootEpoch;
-  msg.seqNum = ++txSeqNum;
+  msg.hop_count = 0;
+  msg.epoch_num = bootEpoch;
+  msg.seq_num = ++txSeqNum;
   return msg;
 }
 
@@ -523,15 +524,15 @@ bool Mesh::setupEspNow() {
 
 bool Mesh::isReplay(const mesh_message& msg) {
   for (size_t i = 0; i < REPLAY_CACHE_SIZE; ++i) {
-    if (memcmp(replayCache[i].mac, msg.originMacAddress, 6) == 0 &&
-        replayCache[i].epoch == msg.epochNum && replayCache[i].seq == msg.seqNum) {
+    if (memcmp(replayCache[i].mac, msg.origin_mac_address, 6) == 0 &&
+        replayCache[i].epoch == msg.epoch_num && replayCache[i].seq == msg.seq_num) {
       return true;
     }
   }
   // Record this entry in the ring buffer
-  memcpy(replayCache[replayCacheIdx].mac, msg.originMacAddress, 6);
-  replayCache[replayCacheIdx].epoch = msg.epochNum;
-  replayCache[replayCacheIdx].seq = msg.seqNum;
+  memcpy(replayCache[replayCacheIdx].mac, msg.origin_mac_address, 6);
+  replayCache[replayCacheIdx].epoch = msg.epoch_num;
+  replayCache[replayCacheIdx].seq = msg.seq_num;
   replayCacheIdx = (replayCacheIdx + 1) % REPLAY_CACHE_SIZE;
   return false;
 }
@@ -568,13 +569,13 @@ void Mesh::drainRecvQueue() {
     const mesh_message& msg = entry.msg;
 
     // Proto version check
-    if (msg.protoVersion != 0 && msg.protoVersion != PROTO_VERSION) {
+    if (msg.proto_version != 0 && msg.proto_version != PROTO_VERSION) {
       Logger::logln("MESH", "Unsupported proto version, dropping", LogLevel::LOG_WARN);
       continue;
     }
 
     // Replay check
-    if (msg.protoVersion == PROTO_VERSION && msg.epochNum > 0) {
+    if (msg.proto_version == PROTO_VERSION && msg.epoch_num > 0) {
       if (isReplay(msg)) {
         Logger::logln("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
         continue;
@@ -584,7 +585,7 @@ void Mesh::drainRecvQueue() {
     // Update last-seen for known peers only (no EEPROM write — see Task 4)
     updatePeerLastSeen(entry.srcMac);
 
-    switch (msg.messageType) {
+    switch (msg.message_type) {
     case MESH_TYPE_ENROLLMENT:
       processEnrollmentRequest(msg);
       break;
@@ -596,6 +597,9 @@ void Mesh::drainRecvQueue() {
       break;
     case MESH_TYPE_ADAPTER_DATA:
       processAdapterData(msg);
+      break;
+    case MESH_TYPE_ROUTE_REPORT:
+      processRouteReport(msg);
       break;
     default:
       Logger::logln("MESH", "Unknown message type, dropping", LogLevel::LOG_WARN);
@@ -647,7 +651,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
 
   // Only for adapter data, set target as master
   if (msgType == MESH_TYPE_ADAPTER_DATA) {
-    memcpy(msg.targetMacAddress, currentMaster.mac,
+    memcpy(msg.target_mac_address, currentMaster.mac,
            6); // authoritative: overrides relay's original target
   }
 
@@ -676,7 +680,7 @@ void Mesh::transmit(const adapter_types type, const uint8_t* data) {
   instance->transmitCore(type, data, MESH_TYPE_ADAPTER_DATA, nullptr);
 }
 
-void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) {
+void Mesh::linkDataRecvCallback(std::function<void(const mesh_message&)> recvCallback) {
   externalRecvCallback = recvCallback;
 }
 
@@ -690,7 +694,7 @@ void Mesh::broadcastMasterBeacon() {
   mesh_message beacon =
       buildMessage(adapter_types::UNKNOWN_ADAPTER, nullptr, MESH_TYPE_MASTER_BEACON);
   beacon.data[0] = 1; // protocolVersion
-  beacon.hopCount = 0;
+  beacon.hop_count = 0;
 
   // Broadcast-only: send to the registered FF:FF:… broadcast peer so the frame
   // reaches all nodes — including those not yet individually registered.
@@ -775,7 +779,7 @@ bool Mesh::meshKeyIsSet() const {
 
 void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data) {
   mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
-  memset(msg.targetMacAddress, 0xFF, 6); // broadcast indicator — relayed by intermediate nodes
+  memset(msg.target_mac_address, 0xFF, 6); // broadcast indicator — relayed by intermediate nodes
   broadcastToAllPeers(msg);
 }
 
@@ -830,19 +834,19 @@ void Mesh::updatePeerLastSeen(const uint8_t mac[6]) {
 
 void Mesh::processMasterBeacon(const mesh_message& msg) {
   // Guard: drop beacon if hop count would overflow uint8_t or exceed limit
-  if (msg.hopCount >= lattice::config::MAX_HOPS) {
+  if (msg.hop_count >= lattice::config::MAX_HOPS) {
     Logger::logln("MESH", "Beacon hop count exceeded MAX_HOPS, dropping relay", LogLevel::LOG_WARN);
     return;
   }
 
   // --- TOFU master MAC enforcement ---
-  bool fromPrimary = hasMasterMac && memcmp(msg.originMacAddress, knownMasterMac, 6) == 0;
+  bool fromPrimary = hasMasterMac && memcmp(msg.origin_mac_address, knownMasterMac, 6) == 0;
   bool fromSecondary = _dualMasterMode && hasMasterMacSecondary &&
-                       memcmp(msg.originMacAddress, knownMasterMacSecondary, 6) == 0;
+                       memcmp(msg.origin_mac_address, knownMasterMacSecondary, 6) == 0;
 
   if (!hasMasterMac) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
-    memcpy(knownMasterMac, msg.originMacAddress, 6);
+    memcpy(knownMasterMac, msg.origin_mac_address, 6);
     hasMasterMac = true;
     EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
     Logger::logln("MESH", "Master MAC learned from first beacon (TOFU fallback)",
@@ -851,7 +855,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     // Beacon from unrecognised MAC
     if (_dualMasterMode && !hasMasterMacSecondary) {
       // Second master TOFU — learn and save as secondary
-      memcpy(knownMasterMacSecondary, msg.originMacAddress, 6);
+      memcpy(knownMasterMacSecondary, msg.origin_mac_address, 6);
       hasMasterMacSecondary = true;
       EEPROM_Manager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
       Logger::logln("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
@@ -864,13 +868,13 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     } else {
       // All known masters stale — accept as new primary (hotswap)
       Logger::logln("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
-      memcpy(knownMasterMac, msg.originMacAddress, 6);
+      memcpy(knownMasterMac, msg.origin_mac_address, 6);
       EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
     }
   }
 
   if (lattice::utils::MacAddress(lastSeenMasterMac) !=
-          lattice::utils::MacAddress(msg.originMacAddress) &&
+          lattice::utils::MacAddress(msg.origin_mac_address) &&
       lastSeenMasterMac[0] != 0) {
     if (_dualMasterMode) {
       Logger::logln("MESH", "Two masters active (dual master mode)", LogLevel::LOG_DEBUG);
@@ -881,31 +885,31 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
           "Multiple master nodes detected! Network split or misconfiguration likely.");
     }
   }
-  memcpy(lastSeenMasterMac, msg.originMacAddress, 6);
+  memcpy(lastSeenMasterMac, msg.origin_mac_address, 6);
   lastMasterBeaconReceivedMs = millis();
 
-  uint8_t newDistance = msg.hopCount + 1;
+  uint8_t newDistance = msg.hop_count + 1;
   if (currentMaster.distance == 0xFF ||
       lattice::utils::MacAddress(currentMaster.mac) !=
-          lattice::utils::MacAddress(msg.originMacAddress) ||
+          lattice::utils::MacAddress(msg.origin_mac_address) ||
       newDistance < currentMaster.distance) {
-    memcpy(currentMaster.mac, msg.originMacAddress, 6);
+    memcpy(currentMaster.mac, msg.origin_mac_address, 6);
     currentMaster.distance = newDistance;
-    memcpy(currentMaster.nextHop, msg.lastHopMacAddress, 6);
+    memcpy(currentMaster.nextHop, msg.last_hop_mac_address, 6);
     Logger::logln("MESH", "Updated route to master. Distance: " + String(newDistance),
                   LogLevel::LOG_INFO);
   }
 
   if (!isMaster) {
     // C10 fix: only relay if this beacon is newer than the last one we relayed
-    bool isNewer = (msg.epochNum > lastRelayedEpoch) ||
-                   (msg.epochNum == lastRelayedEpoch && msg.seqNum > lastRelayedSeqNum);
+    bool isNewer = (msg.epoch_num > lastRelayedEpoch) ||
+                   (msg.epoch_num == lastRelayedEpoch && msg.seq_num > lastRelayedSeqNum);
     if (!isNewer) {
       Logger::logln("MESH", "Duplicate beacon relay suppressed", LogLevel::LOG_DEBUG);
       return;
     }
-    lastRelayedEpoch = msg.epochNum;
-    lastRelayedSeqNum = msg.seqNum;
+    lastRelayedEpoch = msg.epoch_num;
+    lastRelayedSeqNum = msg.seq_num;
 
     // Defer relay with random jitter to stagger transmissions across all non-master
     // nodes and eliminate the collision burst that occurs when all nodes relay
@@ -913,8 +917,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     // Jitter window: 10–73 ms (10 + esp_random() % RELAY_JITTER_MAX_MS)
     uint8_t jitterMs = static_cast<uint8_t>(esp_random() % lattice::config::RELAY_JITTER_MAX_MS);
     relayPendingMsg = msg;
-    relayPendingMsg.hopCount = newDistance;
-    memcpy(relayPendingMsg.lastHopMacAddress, deviceMacAddress, 6);
+    relayPendingMsg.hop_count = newDistance;
+    memcpy(relayPendingMsg.last_hop_mac_address, deviceMacAddress, 6);
     relayPendingAt = millis() + 10 + jitterMs;
     relayPending = true;
   }
@@ -924,20 +928,21 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // OP_CONFIG_SET = 0xC1 (from lib/lattice-protocol/opcodes.h)
   static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-  bool addressedToSelf = (memcmp(msg.targetMacAddress, deviceMacAddress, 6) == 0);
-  bool isBroadcastTarget = (memcmp(msg.targetMacAddress, kBroadcastMac, 6) == 0);
+  bool addressedToSelf = (memcmp(msg.target_mac_address, deviceMacAddress, 6) == 0);
+  bool isBroadcastTarget = (memcmp(msg.target_mac_address, kBroadcastMac, 6) == 0);
   bool addressedToMaster =
-      hasMasterMac && (memcmp(msg.targetMacAddress, currentMaster.mac, 6) == 0);
+      hasMasterMac && (memcmp(msg.target_mac_address, currentMaster.mac, 6) == 0);
 
   if (!isMaster && !addressedToSelf && !isBroadcastTarget) {
     if (addressedToMaster) {
       // Uplink: relay toward master via routing table
-      if (msg.hopCount >= lattice::config::MAX_HOPS)
+      if (msg.hop_count >= lattice::config::MAX_HOPS)
         return;
       mesh_message relay = msg;
-      relay.hopCount++;
-      memcpy(relay.lastHopMacAddress, deviceMacAddress, 6);
-      transmitCore(relay.dataType, relay.data, MESH_TYPE_ADAPTER_DATA, &relay);
+      relay.hop_count++;
+      memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+      transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ADAPTER_DATA,
+                   &relay);
       return;
     }
     // Downlink to another node: relay outward toward specific target
@@ -947,9 +952,9 @@ void Mesh::processAdapterData(const mesh_message& msg) {
 
   // Local delivery
   bool isConfigOpcode =
-      (msg.dataType == adapter_types::SERIAL_ADAPTER && msg.data[0] == OP_CONFIG_SET);
+      (msg.data_type == adapter_types::SERIAL_ADAPTER && msg.data[0] == OP_CONFIG_SET);
   // TODO(dual-master): also allow secondary master MAC for CONFIG_SET
-  if (isConfigOpcode && hasMasterMac && memcmp(msg.originMacAddress, knownMasterMac, 6) != 0) {
+  if (isConfigOpcode && hasMasterMac && memcmp(msg.origin_mac_address, knownMasterMac, 6) != 0) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;
   }
@@ -967,11 +972,11 @@ void Mesh::processAdapterData(const mesh_message& msg) {
 }
 
 void Mesh::relayDownlink(const mesh_message& msg) {
-  if (msg.hopCount >= lattice::config::MAX_HOPS)
+  if (msg.hop_count >= lattice::config::MAX_HOPS)
     return;
   mesh_message relay = msg;
-  relay.hopCount++;
-  memcpy(relay.lastHopMacAddress, deviceMacAddress, 6);
+  relay.hop_count++;
+  memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
   for (size_t i = 0; i < peerCount; ++i) {
     if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0)
       continue;
@@ -985,13 +990,13 @@ bool Mesh::isEnrolled() const {
 
 void Mesh::sendEnrollmentRequest() {
   mesh_message msg = {};
-  msg.messageType = MESH_TYPE_ENROLLMENT;
-  msg.dataType = adapter_types::UNKNOWN_ADAPTER;
-  memcpy(msg.originMacAddress, deviceMacAddress, 6);
-  memset(msg.targetMacAddress, 0xFF, 6);
-  memcpy(msg.lastHopMacAddress, deviceMacAddress, 6);
-  msg.hopCount = 0;
-  memcpy(msg.enrollmentPublicKey, devicePublicKey, 32);
+  msg.message_type = MESH_TYPE_ENROLLMENT;
+  msg.data_type = adapter_types::UNKNOWN_ADAPTER;
+  memcpy(msg.origin_mac_address, deviceMacAddress, 6);
+  memset(msg.target_mac_address, 0xFF, 6);
+  memcpy(msg.last_hop_mac_address, deviceMacAddress, 6);
+  msg.hop_count = 0;
+  memcpy(msg.enrollment_public_key, devicePublicKey, 32);
 
   static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
@@ -1002,8 +1007,8 @@ void Mesh::processEnrollmentRequest(const mesh_message& msg) {
   if (!isMaster) {
     return;
   }
-  memcpy(_pendingEnrollmentMac, msg.originMacAddress, 6);
-  memcpy(_pendingEnrollmentPubKey, msg.enrollmentPublicKey, 32);
+  memcpy(_pendingEnrollmentMac, msg.origin_mac_address, 6);
+  memcpy(_pendingEnrollmentPubKey, msg.enrollment_public_key, 32);
   _pendingEnrollmentRelay = true;
   Logger::logln("MESH", "Enrollment request received, deferring relay to loop()",
                 LogLevel::LOG_INFO);
@@ -1011,7 +1016,7 @@ void Mesh::processEnrollmentRequest(const mesh_message& msg) {
 
 void Mesh::processJoinAck(const mesh_message& msg) {
   // Relay outward if not addressed to us (multi-hop enrollment)
-  if (memcmp(msg.targetMacAddress, deviceMacAddress, 6) != 0) {
+  if (memcmp(msg.target_mac_address, deviceMacAddress, 6) != 0) {
     relayDownlink(msg);
     return;
   }
@@ -1025,7 +1030,7 @@ void Mesh::processJoinAck(const mesh_message& msg) {
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
   if (!hasMasterMac) {
-    memcpy(knownMasterMac, msg.originMacAddress, 6);
+    memcpy(knownMasterMac, msg.origin_mac_address, 6);
     hasMasterMac = true;
     EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
     Logger::logln("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
@@ -1059,12 +1064,12 @@ void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
 
   // Send JOIN_ACK unicast to new node
   mesh_message ack = {};
-  ack.messageType = MESH_TYPE_JOIN_ACK;
-  ack.dataType = adapter_types::UNKNOWN_ADAPTER;
-  memcpy(ack.originMacAddress, deviceMacAddress, 6);
-  memcpy(ack.targetMacAddress, mac, 6);
-  memcpy(ack.lastHopMacAddress, deviceMacAddress, 6);
-  ack.hopCount = 0;
+  ack.message_type = MESH_TYPE_JOIN_ACK;
+  ack.data_type = adapter_types::UNKNOWN_ADAPTER;
+  memcpy(ack.origin_mac_address, deviceMacAddress, 6);
+  memcpy(ack.target_mac_address, mac, 6);
+  memcpy(ack.last_hop_mac_address, deviceMacAddress, 6);
+  ack.hop_count = 0;
   // Include first 4 bytes of approved node's pubkey as fingerprint
   memcpy(ack.data, publicKey32, 4);
   // Broadcast via the registered FF:FF:… peer so the new node receives the ACK
@@ -1088,6 +1093,54 @@ void Mesh::drainPendingEnrollment() {
   }
 }
 
+bool Mesh::sendRouteReport() {
+  if (isMaster)
+    return false;
+  if (!findNextHopToMaster())
+    return false;
+  uint8_t data[64] = {};
+  data[0] = OP_ROUTE_REPORT;
+  data[1] = 0; // path_len — incremented by each relay hop
+  transmitCore(adapter_types::UNKNOWN_ADAPTER, data, MESH_TYPE_ROUTE_REPORT);
+  return true;
+}
+
+void Mesh::processRouteReport(const mesh_message& msg) {
+  // Verify opcode
+  if (msg.data[0] != OP_ROUTE_REPORT) {
+    Logger::logln("MESH", "processRouteReport: bad opcode, dropping", LogLevel::LOG_WARN);
+    return;
+  }
+
+  if (isMaster) {
+    // Terminal endpoint — deliver to server via external callback
+    if (externalRecvCallback)
+      externalRecvCallback(msg);
+    return;
+  }
+
+  // Relay node: append own MAC to path and forward toward master
+  uint8_t path_len = msg.data[1];
+  if (path_len >= lattice::config::MAX_ROUTE_PATH_LEN) {
+    Logger::logln("MESH", "processRouteReport: path full, dropping", LogLevel::LOG_WARN);
+    return;
+  }
+
+  mesh_message relay = msg;
+  memcpy(&relay.data[2 + path_len * 6], deviceMacAddress, 6);
+  relay.data[1]++;
+  relay.hop_count++;
+  memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+
+  if (relay.hop_count >= lattice::config::MAX_HOPS) {
+    Logger::logln("MESH", "processRouteReport: hop limit reached, dropping", LogLevel::LOG_WARN);
+    return;
+  }
+
+  transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ROUTE_REPORT,
+               &relay);
+}
+
 void Mesh::loop() {
   drainRecvQueue();
   EEPROM_Manager::getInstance().flushIfDirty();
@@ -1096,12 +1149,20 @@ void Mesh::loop() {
   // Serial.write() must not be called from that callback — safe to do here in loop().
   drainPendingEnrollment();
 
+  {
+    uint32_t now = millis();
+    if (!isMaster && now - lastRouteReportMs >= lattice::config::ROUTE_REPORT_INTERVAL_MS) {
+      if (sendRouteReport())
+        lastRouteReportMs = now;
+    }
+  }
+
   // Deferred beacon relay with jitter: dispatch once the per-node jitter window expires.
   // This spreads relay transmissions across all non-master nodes to avoid collision bursts.
   if (relayPending && millis() >= relayPendingAt) {
     relayPending = false;
-    transmitCore(relayPendingMsg.dataType, relayPendingMsg.data, MESH_TYPE_MASTER_BEACON,
-                 &relayPendingMsg);
+    transmitCore(static_cast<adapter_types>(relayPendingMsg.data_type), relayPendingMsg.data,
+                 MESH_TYPE_MASTER_BEACON, &relayPendingMsg);
   }
 
   // Master beacon — broadcastMasterBeacon() guards timing internally via lastBeaconMillis

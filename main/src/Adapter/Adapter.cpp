@@ -43,7 +43,7 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
   // This must run in the base class so virtual dispatch to per-type no-ops cannot
   // swallow the opcode on PIR/LED/WiFi nodes.
   // OP_CONFIG_SET = 0xC1 (from lib/lattice-protocol/opcodes.h)
-  if (message.dataType == adapter_types::SERIAL_ADAPTER) {
+  if (message.data_type == adapter_types::SERIAL_ADAPTER) {
     const uint8_t op = message.data[0];
     if (op == OP_CONFIG_SET) {
       uint8_t ownMac[6];
@@ -96,7 +96,7 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
   // No RGB LED driver is currently implemented in firmware — these are logged stubs.
   // TODO: When an LED adapter (e.g. NeoPixel/WS2812) is wired up, replace the Logger
   // calls below with the appropriate driver calls (e.g. ledStrip.setPixelColor(r, g, b)).
-  if (message.dataType == adapter_types::LED_ADAPTER &&
+  if (message.data_type == adapter_types::LED_ADAPTER &&
       _adapterType == adapter_types::LED_ADAPTER) {
     const uint8_t op = message.data[0];
     if (op == OP_LED_SOLID) {
@@ -132,7 +132,7 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
   }
 
   // Normal per-adapter dispatch
-  if (message.dataType != _adapterType)
+  if (message.data_type != _adapterType)
     return;
   onMeshDataImpl(message);
 }

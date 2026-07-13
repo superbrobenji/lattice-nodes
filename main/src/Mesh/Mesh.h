@@ -11,6 +11,8 @@
 #include "src/Adapter/Adapter.h"
 #include "src/persistence/EEPROM_Manager.h"
 #include "../../project_config.h" // Added for global limits/config
+#include "../../lib/lattice-protocol/c/message_types.h"
+#include "../../lib/lattice-protocol/c/mesh_message.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -22,37 +24,12 @@ class MeshLogicTest;
 namespace lattice {
 namespace mesh {
 
+using ::mesh_message;
+using ::MeshMessageType;
 using lattice::adapter::adapter_types;
 using lattice::utils::EEPROM_SIZES::MAX_PEERS; // Use constant from EEPROM_Manager
 
-// --- Mesh protocol message type ---
-enum MeshMessageType : uint8_t {
-  MESH_TYPE_ADAPTER_DATA = 0,
-  MESH_TYPE_MASTER_BEACON = 1,
-  MESH_TYPE_ENROLLMENT = 2,
-  MESH_TYPE_SERIAL_CMD_BROADCAST = 3, // server→device only
-  MESH_TYPE_JOIN_ACK =
-      4, // server→device only; was 3, changed to avoid collision with SERIAL_CMD_BROADCAST
-};
-
 static constexpr uint8_t PROTO_VERSION = 2;
-
-// --- Mesh message struct (packed: wire protocol, no padding) ---
-struct __attribute__((packed)) mesh_message {
-  uint8_t protoVersion; // Always PROTO_VERSION (2)
-  MeshMessageType messageType;
-  adapter_types dataType;
-  uint8_t originMacAddress[6];
-  uint8_t targetMacAddress[6];
-  uint8_t lastHopMacAddress[6];
-  uint8_t data[64];
-  uint8_t hopCount;
-  uint32_t epochNum;               // Boot count of origin node (replay protection)
-  uint16_t seqNum;                 // Per-boot message counter (replay protection)
-  uint8_t enrollmentPublicKey[32]; // Curve25519 key; zero for non-enrollment messages
-};
-// 1+1+4+6+6+6+64+1+4+2+32 = 127 bytes (adapter_types is int32_t = 4B, packed)
-static_assert(sizeof(mesh_message) == 127, "mesh_message size changed — update server proto");
 
 // Peer info struct for RAM and EEPROM storage
 struct PeerInfo {
@@ -107,7 +84,7 @@ private:
 
   mesh_message buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType);
 
-  std::function<void(mesh_message)> externalRecvCallback;
+  std::function<void(const mesh_message&)> externalRecvCallback;
 
   MasterInfo currentMaster;
   bool isMaster;
@@ -212,9 +189,12 @@ private:
 
   void drainRecvQueue();
   void drainPendingEnrollment();
+  bool sendRouteReport();
+  void processRouteReport(const mesh_message& msg);
 
   // Beacon timer (moved from broadcastMasterBeacon for loop() integration)
   uint32_t lastBeaconMs;
+  uint32_t lastRouteReportMs;
 
 public:
   Mesh();
@@ -223,7 +203,7 @@ public:
   // Static trampoline for Adapter usage
   static void transmit(const adapter_types type, const uint8_t* data);
 
-  void linkDataRecvCallback(std::function<void(mesh_message)> recvCallback);
+  void linkDataRecvCallback(std::function<void(const mesh_message&)> recvCallback);
 
   // Master beacon: call in main loop if node is master; handles timing internally
   void broadcastMasterBeacon();
