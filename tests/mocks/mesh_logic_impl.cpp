@@ -292,10 +292,10 @@ void Mesh::broadcastAdapterData(adapter_types type, const uint8_t data[64]) {
   broadcastToAllPeers(msg);
 }
 
-void Mesh::sendRouteReport() {
-  if (isMaster) return;
+bool Mesh::sendRouteReport() {
+  if (isMaster) return false;
   PeerInfo* nextHop = findNextHopToMaster();
-  if (!nextHop) return;
+  if (!nextHop) return false;
 
   mesh_message msg = {};
   msg.message_type = MESH_TYPE_ROUTE_REPORT;
@@ -307,6 +307,7 @@ void Mesh::sendRouteReport() {
   msg.data[1] = 0; // path_len — incremented by each relay hop
 
   sendMessage(nextHop->mac, msg);
+  return true;
 }
 
 void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) {

@@ -1088,12 +1088,14 @@ void Mesh::drainPendingEnrollment() {
   }
 }
 
-void Mesh::sendRouteReport() {
-  if (isMaster) return;
+bool Mesh::sendRouteReport() {
+  if (isMaster) return false;
+  if (!findNextHopToMaster()) return false;
   uint8_t data[64] = {};
   data[0] = OP_ROUTE_REPORT;
   data[1] = 0; // path_len — incremented by each relay hop
   transmitCore(adapter_types::UNKNOWN_ADAPTER, data, MESH_TYPE_ROUTE_REPORT);
+  return true;
 }
 
 void Mesh::loop() {
@@ -1104,10 +1106,11 @@ void Mesh::loop() {
   // Serial.write() must not be called from that callback — safe to do here in loop().
   drainPendingEnrollment();
 
-  if (!isMaster &&
-      millis() - lastRouteReportMs >= lattice::config::ROUTE_REPORT_INTERVAL_MS) {
-    sendRouteReport();
-    lastRouteReportMs = millis();
+  {
+    uint32_t now = millis();
+    if (!isMaster && now - lastRouteReportMs >= lattice::config::ROUTE_REPORT_INTERVAL_MS) {
+      if (sendRouteReport()) lastRouteReportMs = now;
+    }
   }
 
   // Deferred beacon relay with jitter: dispatch once the per-node jitter window expires.
