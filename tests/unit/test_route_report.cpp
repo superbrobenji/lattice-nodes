@@ -122,7 +122,7 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
 
   bool callbackFired = false;
   mesh_message received{};
-  mesh.linkDataRecvCallback([&](mesh_message m) {
+  mesh.linkDataRecvCallback([&](const mesh_message& m) {
     callbackFired = true;
     received = m;
   });

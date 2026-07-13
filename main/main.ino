@@ -70,7 +70,7 @@ static inline void validateServerConfiguration() {
 
 // Keep main thin; adapter handles health/config
 
-void dataRecvCallback(lattice::mesh::mesh_message message) {
+void dataRecvCallback(const lattice::mesh::mesh_message& message) {
   Logger::logln("MESH", "Data received callback triggered", LogLevel::LOG_DEBUG);
   if (adapter) {
     adapter->onMeshData(message);

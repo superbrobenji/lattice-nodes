@@ -348,7 +348,7 @@ void Mesh::processRouteReport(const mesh_message& msg) {
                &relay);
 }
 
-void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) {
+void Mesh::linkDataRecvCallback(std::function<void(const mesh_message&)> recvCallback) {
   externalRecvCallback = recvCallback;
 }
 

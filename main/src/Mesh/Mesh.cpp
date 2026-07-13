@@ -164,7 +164,8 @@ Mesh::Mesh()
       txSeqNum(0), replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
       hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
       _dualMasterMode(lattice::config::DUAL_MASTER_MODE), peerCount(0), recvQueueHead(0),
-      recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0), relayPending(false), relayPendingAt(0) {
+      recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0), relayPending(false),
+      relayPendingAt(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
@@ -679,7 +680,7 @@ void Mesh::transmit(const adapter_types type, const uint8_t* data) {
   instance->transmitCore(type, data, MESH_TYPE_ADAPTER_DATA, nullptr);
 }
 
-void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) {
+void Mesh::linkDataRecvCallback(std::function<void(const mesh_message&)> recvCallback) {
   externalRecvCallback = recvCallback;
 }
 
@@ -940,7 +941,8 @@ void Mesh::processAdapterData(const mesh_message& msg) {
       mesh_message relay = msg;
       relay.hop_count++;
       memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-      transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ADAPTER_DATA, &relay);
+      transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ADAPTER_DATA,
+                   &relay);
       return;
     }
     // Downlink to another node: relay outward toward specific target
@@ -1092,8 +1094,10 @@ void Mesh::drainPendingEnrollment() {
 }
 
 bool Mesh::sendRouteReport() {
-  if (isMaster) return false;
-  if (!findNextHopToMaster()) return false;
+  if (isMaster)
+    return false;
+  if (!findNextHopToMaster())
+    return false;
   uint8_t data[64] = {};
   data[0] = OP_ROUTE_REPORT;
   data[1] = 0; // path_len — incremented by each relay hop
@@ -1110,7 +1114,8 @@ void Mesh::processRouteReport(const mesh_message& msg) {
 
   if (isMaster) {
     // Terminal endpoint — deliver to server via external callback
-    if (externalRecvCallback) externalRecvCallback(msg);
+    if (externalRecvCallback)
+      externalRecvCallback(msg);
     return;
   }
 
@@ -1147,7 +1152,8 @@ void Mesh::loop() {
   {
     uint32_t now = millis();
     if (!isMaster && now - lastRouteReportMs >= lattice::config::ROUTE_REPORT_INTERVAL_MS) {
-      if (sendRouteReport()) lastRouteReportMs = now;
+      if (sendRouteReport())
+        lastRouteReportMs = now;
     }
   }
 

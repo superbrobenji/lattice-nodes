@@ -141,11 +141,12 @@ void Serial_Adapter::loop() {
 }
 
 void Serial_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
-  Logger::logln("Serial_Adapter",
-                "Processing incoming mesh message - Type: " + String((uint8_t)message.message_type) +
-                    " DataType: " + String(static_cast<int32_t>(message.data_type)) +
-                    " HopCount: " + String(message.hop_count),
-                LogLevel::LOG_DEBUG);
+  Logger::logln(
+      "Serial_Adapter",
+      "Processing incoming mesh message - Type: " + String((uint8_t)message.message_type) +
+          " DataType: " + String(static_cast<int32_t>(message.data_type)) +
+          " HopCount: " + String(message.hop_count),
+      LogLevel::LOG_DEBUG);
 
   // Handle control opcodes received via mesh.
   // NOTE: OP_CONFIG_SET is now handled in Adapter::onMeshData() (base class) so it reaches
@@ -225,8 +226,7 @@ size_t Serial_Adapter::encodeMeshMessage(const lattice::mesh::mesh_message& msg,
   memcpy(pbMsg.data.bytes, msg.data, sizeof(msg.data));
 
   // public_key: only encode for enrollment-related message types when non-zero
-  if (msg.message_type == MESH_TYPE_ENROLLMENT ||
-      msg.message_type == MESH_TYPE_JOIN_ACK) {
+  if (msg.message_type == MESH_TYPE_ENROLLMENT || msg.message_type == MESH_TYPE_JOIN_ACK) {
     bool nonZero = false;
     for (int i = 0; i < 32; ++i) {
       if (msg.enrollment_public_key[i]) {
@@ -418,7 +418,8 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
   } else if (msg.message_type == MESH_TYPE_SERIAL_CMD_BROADCAST) {
     Logger::logln("Serial_Adapter", "Broadcasting adapter data to all peers", LogLevel::LOG_DEBUG);
     // Broadcast adapter data to all peers
-    lattice::mesh::Mesh::broadcastAdapterDataStatic(static_cast<adapter_types>(msg.data_type), msg.data);
+    lattice::mesh::Mesh::broadcastAdapterDataStatic(static_cast<adapter_types>(msg.data_type),
+                                                    msg.data);
     Logger::logln("Serial_Adapter", "Broadcast sent successfully", LogLevel::LOG_DEBUG);
   } else {
     Logger::logln("Serial_Adapter", "Unknown message type: " + String(msg.message_type),

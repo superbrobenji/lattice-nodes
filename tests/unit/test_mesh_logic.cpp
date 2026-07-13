@@ -380,7 +380,7 @@ TEST_F(AdapterDataRelayTest, Master_DoesNotRelayUplink_DeliversLocally) {
   mesh.isMaster = true;
 
   bool callbackFired = false;
-  mesh.linkDataRecvCallback([&](mesh_message) { callbackFired = true; });
+  mesh.linkDataRecvCallback([&](const mesh_message&) { callbackFired = true; });
 
   auto msg = makeUplinkMsg(1, 1);
   memcpy(msg.target_mac_address, mesh.deviceMacAddress, 6); // addressed to self (master)
@@ -434,7 +434,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_BroadcastTarget_DeliveredAndRelaye
   mesh.appendPeer(extra);
 
   bool callbackFired = false;
-  mesh.linkDataRecvCallback([&](mesh_message) { callbackFired = true; });
+  mesh.linkDataRecvCallback([&](const mesh_message&) { callbackFired = true; });
 
   static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   mesh_message msg{};
@@ -586,7 +586,7 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   memcpy(mesh.deviceMacAddress, kMyMac, 6);
   mesh.isMaster = true; // master: delivers locally, no relay — clean baseline
   int deliveredCount = 0;
-  mesh.linkDataRecvCallback([&](mesh_message) { ++deliveredCount; });
+  mesh.linkDataRecvCallback([&](const mesh_message&) { ++deliveredCount; });
 
   mesh_message msg{};
   msg.proto_version = 2;

@@ -24,10 +24,10 @@ class MeshLogicTest;
 namespace lattice {
 namespace mesh {
 
-using lattice::adapter::adapter_types;
-using lattice::utils::EEPROM_SIZES::MAX_PEERS; // Use constant from EEPROM_Manager
 using ::mesh_message;
 using ::MeshMessageType;
+using lattice::adapter::adapter_types;
+using lattice::utils::EEPROM_SIZES::MAX_PEERS; // Use constant from EEPROM_Manager
 
 static constexpr uint8_t PROTO_VERSION = 2;
 
@@ -84,7 +84,7 @@ private:
 
   mesh_message buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType);
 
-  std::function<void(mesh_message)> externalRecvCallback;
+  std::function<void(const mesh_message&)> externalRecvCallback;
 
   MasterInfo currentMaster;
   bool isMaster;
@@ -203,7 +203,7 @@ public:
   // Static trampoline for Adapter usage
   static void transmit(const adapter_types type, const uint8_t* data);
 
-  void linkDataRecvCallback(std::function<void(mesh_message)> recvCallback);
+  void linkDataRecvCallback(std::function<void(const mesh_message&)> recvCallback);
 
   // Master beacon: call in main loop if node is master; handles timing internally
   void broadcastMasterBeacon();
