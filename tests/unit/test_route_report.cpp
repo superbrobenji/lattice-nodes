@@ -82,3 +82,117 @@ TEST_F(RouteReportTest, SendRouteReport_NotSentByMaster) {
 
   EXPECT_EQ(espNowSentPackets.size(), before);
 }
+
+TEST_F(RouteReportTest, ProcessRouteReport_RelayAppendsMAC) {
+  const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  const uint8_t myMac[6]     = {0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x01};
+  Mesh mesh;
+  setupRelayNode(mesh, masterMac);
+  memcpy(mesh.deviceMacAddress, myMac, 6); // set after setupRelayNode (which overwrites it)
+
+  // Build a route report with path_len=1 (one relay MAC already written)
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ROUTE_REPORT;
+  msg.data_type = 0;
+  msg.hop_count = 1;
+  memcpy(msg.origin_mac_address, originMac, 6);
+  msg.data[0] = OP_ROUTE_REPORT;
+  msg.data[1] = 1; // one relay already written
+  // data[2..7] = some relay MAC
+  memset(&msg.data[2], 0xAB, 6);
+
+  size_t before = espNowSentPackets.size();
+  mesh.processRouteReport(msg);
+
+  ASSERT_EQ(espNowSentPackets.size(), before + 1);
+  mesh_message sent = lastSentMsg();
+  EXPECT_EQ(sent.message_type, MESH_TYPE_ROUTE_REPORT);
+  EXPECT_EQ(sent.data[1], 2); // path_len incremented to 2
+
+  // Our device MAC should be at data[8..13] (index 1 = second relay slot)
+  EXPECT_EQ(memcmp(&sent.data[8], myMac, 6), 0);
+  EXPECT_EQ(sent.hop_count, 2);
+}
+
+TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
+  Mesh mesh;
+  mesh.isMaster = true;
+
+  bool callbackFired = false;
+  mesh_message received{};
+  mesh.linkDataRecvCallback([&](mesh_message m) {
+    callbackFired = true;
+    received = m;
+  });
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ROUTE_REPORT;
+  msg.data[0] = OP_ROUTE_REPORT;
+  msg.data[1] = 1;
+
+  mesh.processRouteReport(msg);
+
+  EXPECT_TRUE(callbackFired);
+  EXPECT_EQ(received.data[0], OP_ROUTE_REPORT);
+}
+
+TEST_F(RouteReportTest, ProcessRouteReport_PathFullDropsMessage) {
+  const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  Mesh mesh;
+  setupRelayNode(mesh, masterMac);
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ROUTE_REPORT;
+  msg.data[0] = OP_ROUTE_REPORT;
+  msg.data[1] = 10; // path full — max 10 relay MACs
+
+  size_t before = espNowSentPackets.size();
+  mesh.processRouteReport(msg);
+
+  EXPECT_EQ(espNowSentPackets.size(), before); // no message sent
+}
+
+TEST_F(RouteReportTest, ProcessRouteReport_MalformedOpcodeDropsMessage) {
+  const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  Mesh mesh;
+  setupRelayNode(mesh, masterMac);
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ROUTE_REPORT;
+  msg.data[0] = 0xFF; // wrong opcode
+  msg.data[1] = 0;
+
+  size_t before = espNowSentPackets.size();
+  mesh.processRouteReport(msg);
+
+  EXPECT_EQ(espNowSentPackets.size(), before); // no message sent
+}
+
+TEST_F(RouteReportTest, DrainRecvQueue_DispatchesRouteReport) {
+  const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  Mesh mesh;
+  setupRelayNode(mesh, masterMac);
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ROUTE_REPORT;
+  msg.data[0] = OP_ROUTE_REPORT;
+  msg.data[1] = 0;
+
+  // Directly push to recv queue (UNIT_TEST exposes all members)
+  uint8_t srcMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  uint8_t nextHead = (mesh.recvQueueHead + 1) % Mesh::RECV_QUEUE_SIZE;
+  memcpy(mesh.recvQueue[mesh.recvQueueHead].srcMac, srcMac, 6);
+  mesh.recvQueue[mesh.recvQueueHead].msg = msg;
+  mesh.recvQueueHead = nextHead;
+
+  size_t before = espNowSentPackets.size();
+  mesh.drainRecvQueue();
+
+  EXPECT_GT(espNowSentPackets.size(), before); // relayed the message
+}

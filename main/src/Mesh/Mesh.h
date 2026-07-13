@@ -190,6 +190,7 @@ private:
   void drainRecvQueue();
   void drainPendingEnrollment();
   bool sendRouteReport();
+  void processRouteReport(const mesh_message& msg);
 
   // Beacon timer (moved from broadcastMasterBeacon for loop() integration)
   uint32_t lastBeaconMs;

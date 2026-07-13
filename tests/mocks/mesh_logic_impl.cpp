@@ -155,6 +155,9 @@ void Mesh::drainRecvQueue() {
     case MESH_TYPE_ADAPTER_DATA:
       processAdapterData(msg);
       break;
+    case MESH_TYPE_ROUTE_REPORT:
+      processRouteReport(msg);
+      break;
     default:
       Logger::logln("MESH", "Unknown message type, dropping", LogLevel::LOG_WARN);
     }
@@ -308,6 +311,35 @@ bool Mesh::sendRouteReport() {
 
   sendMessage(nextHop->mac, msg);
   return true;
+}
+
+void Mesh::processRouteReport(const mesh_message& msg) {
+  // Verify opcode
+  if (msg.data[0] != OP_ROUTE_REPORT) {
+    Logger::logln("MESH", "processRouteReport: bad opcode, dropping", LogLevel::LOG_WARN);
+    return;
+  }
+
+  if (isMaster) {
+    // Terminal endpoint — deliver to server via external callback
+    if (externalRecvCallback) externalRecvCallback(msg);
+    return;
+  }
+
+  // Relay node: append own MAC to path and forward toward master
+  uint8_t path_len = msg.data[1];
+  if (path_len >= 10) {
+    Logger::logln("MESH", "processRouteReport: path full, dropping", LogLevel::LOG_WARN);
+    return;
+  }
+
+  mesh_message relay = msg;
+  memcpy(&relay.data[2 + path_len * 6], deviceMacAddress, 6);
+  relay.data[1]++;
+  relay.hop_count++;
+  memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+  transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ROUTE_REPORT,
+               &relay);
 }
 
 void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) {
