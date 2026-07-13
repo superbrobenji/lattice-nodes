@@ -164,7 +164,7 @@ Mesh::Mesh()
       txSeqNum(0), replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
       hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
       _dualMasterMode(lattice::config::DUAL_MASTER_MODE), peerCount(0), recvQueueHead(0),
-      recvQueueTail(0), lastBeaconMs(0), relayPending(false), relayPendingAt(0) {
+      recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0), relayPending(false), relayPendingAt(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
@@ -1088,6 +1088,14 @@ void Mesh::drainPendingEnrollment() {
   }
 }
 
+void Mesh::sendRouteReport() {
+  if (isMaster) return;
+  uint8_t data[64] = {};
+  data[0] = OP_ROUTE_REPORT;
+  data[1] = 0; // path_len — incremented by each relay hop
+  transmitCore(adapter_types::UNKNOWN_ADAPTER, data, MESH_TYPE_ROUTE_REPORT);
+}
+
 void Mesh::loop() {
   drainRecvQueue();
   EEPROM_Manager::getInstance().flushIfDirty();
@@ -1095,6 +1103,12 @@ void Mesh::loop() {
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
   // Serial.write() must not be called from that callback — safe to do here in loop().
   drainPendingEnrollment();
+
+  if (!isMaster &&
+      millis() - lastRouteReportMs >= lattice::config::ROUTE_REPORT_INTERVAL_MS) {
+    sendRouteReport();
+    lastRouteReportMs = millis();
+  }
 
   // Deferred beacon relay with jitter: dispatch once the per-node jitter window expires.
   // This spreads relay transmissions across all non-master nodes to avoid collision bursts.

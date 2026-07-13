@@ -119,6 +119,8 @@ constexpr uint32_t STALE_PEER_THRESHOLD_MS = 8000UL;
 constexpr uint32_t ROUTING_TIMEOUT_MS = 5000UL;
 // Health report interval (ms) — periodic send every 30 seconds
 constexpr uint32_t HEALTH_REPORT_INTERVAL_MS = 30000;
+// Route report interval — 2× health report interval (60 seconds)
+constexpr uint32_t ROUTE_REPORT_INTERVAL_MS = HEALTH_REPORT_INTERVAL_MS * 2;
 // Future limits (message queue, buffer sizes, etc.) can be centralized here
 
 } // namespace config

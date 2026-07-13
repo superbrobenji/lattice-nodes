@@ -292,6 +292,23 @@ void Mesh::broadcastAdapterData(adapter_types type, const uint8_t data[64]) {
   broadcastToAllPeers(msg);
 }
 
+void Mesh::sendRouteReport() {
+  if (isMaster) return;
+  PeerInfo* nextHop = findNextHopToMaster();
+  if (!nextHop) return;
+
+  mesh_message msg = {};
+  msg.message_type = MESH_TYPE_ROUTE_REPORT;
+  msg.data_type = adapter_types::UNKNOWN_ADAPTER;
+  memcpy(msg.origin_mac_address, deviceMacAddress, 6);
+  memcpy(msg.target_mac_address, currentMaster.mac, 6);
+  memcpy(msg.last_hop_mac_address, deviceMacAddress, 6);
+  msg.data[0] = OP_ROUTE_REPORT;
+  msg.data[1] = 0; // path_len — incremented by each relay hop
+
+  sendMessage(nextHop->mac, msg);
+}
+
 void Mesh::linkDataRecvCallback(std::function<void(mesh_message)> recvCallback) {
   externalRecvCallback = recvCallback;
 }

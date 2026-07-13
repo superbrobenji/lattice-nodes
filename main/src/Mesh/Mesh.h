@@ -189,9 +189,11 @@ private:
 
   void drainRecvQueue();
   void drainPendingEnrollment();
+  void sendRouteReport();
 
   // Beacon timer (moved from broadcastMasterBeacon for loop() integration)
   uint32_t lastBeaconMs;
+  uint32_t lastRouteReportMs;
 
 public:
   Mesh();
