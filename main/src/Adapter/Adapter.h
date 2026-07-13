@@ -3,18 +3,23 @@
 
 #include <Arduino.h>
 
-// Forward declaration to avoid circular include with Mesh
+// Include generated mesh message type — no circular dependency since lattice-protocol
+// headers only include standard types and each other, not local firmware headers.
+#include "../../lib/lattice-protocol/c/mesh_message.h"
+
 namespace lattice {
 namespace mesh {
-struct mesh_message;
-}
+using ::mesh_message;
+} // namespace mesh
 } // namespace lattice
 
 namespace lattice {
 namespace adapter {
 
-// Enum for identifying adapter types
-enum class adapter_types : int32_t {
+// Enum for identifying adapter types.
+// Unscoped so that int32_t data_type (generated wire struct field) and adapter_types
+// can be compared/assigned without explicit casts in both directions.
+enum adapter_types : int32_t {
   UNKNOWN_ADAPTER = 0,
   SERIAL_ADAPTER = 1,
   PIR_ADAPTER = 2,

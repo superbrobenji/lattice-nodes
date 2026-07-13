@@ -19,10 +19,10 @@ protected:
 
   mesh_message makeMsg(const uint8_t mac[6], uint32_t epoch, uint16_t seq) {
     mesh_message m{};
-    m.protoVersion = 1;
-    m.epochNum = epoch;
-    m.seqNum   = seq;
-    memcpy(m.originMacAddress, mac, 6);
+    m.proto_version = 1;
+    m.epoch_num = epoch;
+    m.seq_num   = seq;
+    memcpy(m.origin_mac_address, mac, 6);
     return m;
   }
 };

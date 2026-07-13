@@ -16,11 +16,11 @@ protected:
 
   mesh_message makeBeacon(const uint8_t masterMac[6], uint32_t epoch, uint16_t seq) {
     mesh_message m{};
-    m.protoVersion = 1;
-    m.messageType = MESH_TYPE_MASTER_BEACON;
-    m.epochNum = epoch;
-    m.seqNum = seq;
-    memcpy(m.originMacAddress, masterMac, 6);
+    m.proto_version = 1;
+    m.message_type = MESH_TYPE_MASTER_BEACON;
+    m.epoch_num = epoch;
+    m.seq_num = seq;
+    memcpy(m.origin_mac_address, masterMac, 6);
     return m;
   }
 };
@@ -228,15 +228,15 @@ protected:
   mesh_message makeDataMsg(const uint8_t origin[6], const uint8_t target[6], uint32_t epoch,
                            uint16_t seq, uint8_t hopCount = 0) {
     mesh_message m{};
-    m.protoVersion = 1;
-    m.messageType = MESH_TYPE_ADAPTER_DATA;
-    m.dataType = adapter_types::PIR_ADAPTER;
-    memcpy(m.originMacAddress, origin, 6);
-    memcpy(m.targetMacAddress, target, 6);
-    memcpy(m.lastHopMacAddress, origin, 6);
-    m.hopCount = hopCount;
-    m.epochNum = epoch;
-    m.seqNum = seq;
+    m.proto_version = 1;
+    m.message_type = MESH_TYPE_ADAPTER_DATA;
+    m.data_type = adapter_types::PIR_ADAPTER;
+    memcpy(m.origin_mac_address, origin, 6);
+    memcpy(m.target_mac_address, target, 6);
+    memcpy(m.last_hop_mac_address, origin, 6);
+    m.hop_count = hopCount;
+    m.epoch_num = epoch;
+    m.seq_num = seq;
     return m;
   }
 };
@@ -266,9 +266,9 @@ TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
   EXPECT_EQ(espNowSentPackets.size(), 2u);
   for (const auto& pkt : espNowSentPackets) {
     const auto& sent = *reinterpret_cast<const mesh_message*>(pkt.data.data());
-    EXPECT_EQ(sent.hopCount, 2u);                              // incremented
-    EXPECT_EQ(memcmp(sent.targetMacAddress, kPeer2Mac, 6), 0); // target preserved
-    EXPECT_EQ(memcmp(sent.lastHopMacAddress, kMyMac, 6), 0);   // lastHop = my MAC
+    EXPECT_EQ(sent.hop_count, 2u);                              // incremented
+    EXPECT_EQ(memcmp(sent.target_mac_address, kPeer2Mac, 6), 0); // target preserved
+    EXPECT_EQ(memcmp(sent.last_hop_mac_address, kMyMac, 6), 0);   // lastHop = my MAC
   }
 }
 
@@ -344,15 +344,15 @@ protected:
 
   mesh_message makeUplinkMsg(uint32_t epoch, uint16_t seq, uint8_t hopCount = 1) {
     mesh_message m{};
-    m.protoVersion = 1;
-    m.messageType = MESH_TYPE_ADAPTER_DATA;
-    m.dataType = adapter_types::PIR_ADAPTER;
-    memcpy(m.originMacAddress, kSensorMac, 6);
-    memcpy(m.targetMacAddress, kMasterMac, 6); // addressed to master
-    memcpy(m.lastHopMacAddress, kSensorMac, 6);
-    m.hopCount = hopCount;
-    m.epochNum = epoch;
-    m.seqNum = seq;
+    m.proto_version = 1;
+    m.message_type = MESH_TYPE_ADAPTER_DATA;
+    m.data_type = adapter_types::PIR_ADAPTER;
+    memcpy(m.origin_mac_address, kSensorMac, 6);
+    memcpy(m.target_mac_address, kMasterMac, 6); // addressed to master
+    memcpy(m.last_hop_mac_address, kSensorMac, 6);
+    m.hop_count = hopCount;
+    m.epoch_num = epoch;
+    m.seq_num = seq;
     return m;
   }
 };
@@ -371,7 +371,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysUplinkTowardMaster) {
 
   EXPECT_EQ(espNowSentPackets.size(), before + 1);
   const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
-  EXPECT_EQ(sent.hopCount, 2u);                                       // incremented
+  EXPECT_EQ(sent.hop_count, 2u);                                       // incremented
   EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0); // routed via nextHop
 }
 
@@ -383,7 +383,7 @@ TEST_F(AdapterDataRelayTest, Master_DoesNotRelayUplink_DeliversLocally) {
   mesh.linkDataRecvCallback([&](mesh_message) { callbackFired = true; });
 
   auto msg = makeUplinkMsg(1, 1);
-  memcpy(msg.targetMacAddress, mesh.deviceMacAddress, 6); // addressed to self (master)
+  memcpy(msg.target_mac_address, mesh.deviceMacAddress, 6); // addressed to self (master)
 
   size_t before = espNowSentPackets.size();
   mesh.processAdapterData(msg);
@@ -404,14 +404,14 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysDownlinkToOtherTarget) {
   mesh.appendPeer(extra);
 
   mesh_message msg{};
-  msg.protoVersion = 1;
-  msg.messageType = MESH_TYPE_ADAPTER_DATA;
-  msg.dataType = adapter_types::PIR_ADAPTER;
-  memcpy(msg.originMacAddress, kMasterMac, 6);
-  memcpy(msg.targetMacAddress, kSensorMac, 6); // some other sensor, not me, not master
-  msg.hopCount = 1;
-  msg.epochNum = 2;
-  msg.seqNum = 1;
+  msg.proto_version = 1;
+  msg.message_type = MESH_TYPE_ADAPTER_DATA;
+  msg.data_type = adapter_types::PIR_ADAPTER;
+  memcpy(msg.origin_mac_address, kMasterMac, 6);
+  memcpy(msg.target_mac_address, kSensorMac, 6); // some other sensor, not me, not master
+  msg.hop_count = 1;
+  msg.epoch_num = 2;
+  msg.seq_num = 1;
 
   size_t before = espNowSentPackets.size();
   mesh.processAdapterData(msg);
@@ -421,8 +421,8 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysDownlinkToOtherTarget) {
   // Target preserved in every relayed copy
   for (size_t i = before; i < espNowSentPackets.size(); ++i) {
     const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets[i].data.data());
-    EXPECT_EQ(memcmp(sent.targetMacAddress, kSensorMac, 6), 0);
-    EXPECT_EQ(sent.hopCount, 2u);
+    EXPECT_EQ(memcmp(sent.target_mac_address, kSensorMac, 6), 0);
+    EXPECT_EQ(sent.hop_count, 2u);
   }
 }
 
@@ -438,14 +438,14 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_BroadcastTarget_DeliveredAndRelaye
 
   static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   mesh_message msg{};
-  msg.protoVersion = 1;
-  msg.messageType = MESH_TYPE_ADAPTER_DATA;
-  msg.dataType = adapter_types::PIR_ADAPTER;
-  memcpy(msg.originMacAddress, kMasterMac, 6);
-  memcpy(msg.targetMacAddress, kBroadcast, 6); // broadcast
-  msg.hopCount = 1;
-  msg.epochNum = 3;
-  msg.seqNum = 1;
+  msg.proto_version = 1;
+  msg.message_type = MESH_TYPE_ADAPTER_DATA;
+  msg.data_type = adapter_types::PIR_ADAPTER;
+  memcpy(msg.origin_mac_address, kMasterMac, 6);
+  memcpy(msg.target_mac_address, kBroadcast, 6); // broadcast
+  msg.hop_count = 1;
+  msg.epoch_num = 3;
+  msg.seq_num = 1;
 
   size_t before = espNowSentPackets.size();
   mesh.processAdapterData(msg);
@@ -473,7 +473,7 @@ TEST_F(AdapterDataRelayTest, BroadcastAdapterData_UsesBroadcastTargetMAC) {
   static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   for (size_t i = before; i < espNowSentPackets.size(); ++i) {
     const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets[i].data.data());
-    EXPECT_EQ(memcmp(sent.targetMacAddress, kBroadcast, 6), 0);
+    EXPECT_EQ(memcmp(sent.target_mac_address, kBroadcast, 6), 0);
   }
 }
 
@@ -505,15 +505,15 @@ protected:
 
   mesh_message makeJoinAck(const uint8_t target[6], uint8_t hopCount = 1) {
     mesh_message m{};
-    m.protoVersion = 1;
-    m.messageType = MESH_TYPE_JOIN_ACK;
-    m.dataType = adapter_types::UNKNOWN_ADAPTER;
-    memcpy(m.originMacAddress, kMasterMac, 6);
-    memcpy(m.targetMacAddress, target, 6);
-    memcpy(m.lastHopMacAddress, kMasterMac, 6);
-    m.hopCount = hopCount;
-    m.epochNum = 1;
-    m.seqNum = 1;
+    m.proto_version = 1;
+    m.message_type = MESH_TYPE_JOIN_ACK;
+    m.data_type = adapter_types::UNKNOWN_ADAPTER;
+    memcpy(m.origin_mac_address, kMasterMac, 6);
+    memcpy(m.target_mac_address, target, 6);
+    memcpy(m.last_hop_mac_address, kMasterMac, 6);
+    m.hop_count = hopCount;
+    m.epoch_num = 1;
+    m.seq_num = 1;
     return m;
   }
 };
@@ -534,8 +534,8 @@ TEST_F(JoinAckRelayTest, RelaysJoinAck_WhenNotAddressedToSelf) {
   EXPECT_GT(espNowSentPackets.size(), before); // relayed to kPeerMac
   EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kPeerMac, 6), 0);
   const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
-  EXPECT_EQ(sent.hopCount, 2u);
-  EXPECT_EQ(memcmp(sent.targetMacAddress, kDistantNode, 6), 0); // target preserved
+  EXPECT_EQ(sent.hop_count, 2u);
+  EXPECT_EQ(memcmp(sent.target_mac_address, kDistantNode, 6), 0); // target preserved
 }
 
 TEST_F(JoinAckRelayTest, DoesNotRelayJoinAck_WhenAddressedToSelf) {
@@ -572,7 +572,7 @@ protected:
   void injectAndDrain(Mesh& mesh, const mesh_message& msg) {
     Mesh::RecvQueueEntry& slot = mesh.recvQueue[mesh.recvQueueHead];
     memcpy(&slot.msg, &msg, sizeof(msg));
-    memcpy(slot.srcMac, msg.originMacAddress, 6);
+    memcpy(slot.srcMac, msg.origin_mac_address, 6);
     mesh.recvQueueHead = (mesh.recvQueueHead + 1) % Mesh::RECV_QUEUE_SIZE;
     mesh.drainRecvQueue();
   }
@@ -589,13 +589,13 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   mesh.linkDataRecvCallback([&](mesh_message) { ++deliveredCount; });
 
   mesh_message msg{};
-  msg.protoVersion = 2;
-  msg.messageType = MESH_TYPE_ADAPTER_DATA;
-  msg.dataType = adapter_types::PIR_ADAPTER;
-  memcpy(msg.originMacAddress, kOriginMac, 6);
-  memcpy(msg.targetMacAddress, kMyMac, 6);
-  msg.epochNum = 1;
-  msg.seqNum = 42;
+  msg.proto_version = 2;
+  msg.message_type = MESH_TYPE_ADAPTER_DATA;
+  msg.data_type = adapter_types::PIR_ADAPTER;
+  memcpy(msg.origin_mac_address, kOriginMac, 6);
+  memcpy(msg.target_mac_address, kMyMac, 6);
+  msg.epoch_num = 1;
+  msg.seq_num = 42;
 
   injectAndDrain(mesh, msg); // first: not replay — delivered
   EXPECT_EQ(deliveredCount, 1);
@@ -631,8 +631,8 @@ TEST_F(EnrollmentTest, SendsSingleEspNowMessage) {
   const auto& pkt = espNowSentPackets[0];
   ASSERT_GE(pkt.data.size(), sizeof(mesh_message));
   const mesh_message* sent = reinterpret_cast<const mesh_message*>(pkt.data.data());
-  EXPECT_EQ(sent->messageType, MESH_TYPE_ENROLLMENT);
-  EXPECT_EQ(memcmp(sent->enrollmentPublicKey, kPubKey, 32), 0)
+  EXPECT_EQ(sent->message_type, MESH_TYPE_ENROLLMENT);
+  EXPECT_EQ(memcmp(sent->enrollment_public_key, kPubKey, 32), 0)
       << "Full public key must be present in a single message";
 }
 
@@ -641,14 +641,14 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
   mesh.isMaster = true;
 
   mesh_message msg = {};
-  msg.messageType = MESH_TYPE_ENROLLMENT;
+  msg.message_type = MESH_TYPE_ENROLLMENT;
   static constexpr uint8_t kMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
   static constexpr uint8_t kKey[32] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
                                        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
                                        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
                                        0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
-  memcpy(msg.originMacAddress, kMac, 6);
-  memcpy(msg.enrollmentPublicKey, kKey, 32);
+  memcpy(msg.origin_mac_address, kMac, 6);
+  memcpy(msg.enrollment_public_key, kKey, 32);
 
   mesh.processEnrollmentRequest(msg);
 

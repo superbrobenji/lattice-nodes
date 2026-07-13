@@ -14,9 +14,6 @@
 namespace lattice {
 namespace mesh {
 
-// Forward declaration matching Mesh.h types
-struct mesh_message;
-
 // Mesh::instance static member
 class Mesh;
 Mesh* Mesh_instance_stub = nullptr;
