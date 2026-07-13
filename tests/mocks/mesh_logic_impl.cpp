@@ -328,7 +328,7 @@ void Mesh::processRouteReport(const mesh_message& msg) {
 
   // Relay node: append own MAC to path and forward toward master
   uint8_t path_len = msg.data[1];
-  if (path_len >= 10) {
+  if (path_len >= lattice::config::MAX_ROUTE_PATH_LEN) {
     Logger::logln("MESH", "processRouteReport: path full, dropping", LogLevel::LOG_WARN);
     return;
   }
@@ -338,6 +338,12 @@ void Mesh::processRouteReport(const mesh_message& msg) {
   relay.data[1]++;
   relay.hop_count++;
   memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+
+  if (relay.hop_count >= lattice::config::MAX_HOPS) {
+    Logger::logln("MESH", "processRouteReport: hop limit reached, dropping", LogLevel::LOG_WARN);
+    return;
+  }
+
   transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ROUTE_REPORT,
                &relay);
 }

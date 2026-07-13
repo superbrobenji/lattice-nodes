@@ -113,6 +113,8 @@ constexpr TxPowerPreset DEFAULT_TX_POWER_PRESET = TxPowerPreset::OUTDOOR;
 // =====================
 // Maximum allowed routing hops in the mesh network
 constexpr uint8_t MAX_HOPS = 10;
+// Maximum relay hops in a route report path; bounded by data[2..61] = 60 bytes / 6 bytes per MAC
+constexpr uint8_t MAX_ROUTE_PATH_LEN = (64 - 2) / 6;
 // Peer staleness threshold (ms) before being considered offline
 constexpr uint32_t STALE_PEER_THRESHOLD_MS = 8000UL;
 // Routing timeout used by MessageRouter (ms)
