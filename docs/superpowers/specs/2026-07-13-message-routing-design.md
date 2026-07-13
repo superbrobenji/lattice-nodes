@@ -132,7 +132,7 @@ message MeshMessage {
 
 `lib/lattice-protocol` is the existing submodule — no new dependency.
 
-`mesh.pb.h` continues to be generated from `proto/mesh.proto` via nanopb. Source of truth moves to `lattice-protocol/proto/mesh.proto`; the copy in `main/proto/mesh.proto` is replaced by the generated file from the submodule.
+`mesh.pb.h` continues to be generated from `proto/mesh.proto` via nanopb. Source of truth moves to `lattice-protocol/proto/mesh.proto`. The existing `main/proto/mesh.proto` is deleted; the PlatformIO/build system is updated to point nanopb at `lib/lattice-protocol/proto/mesh.proto` instead. `mesh.pb.h` is regenerated from the new path and committed.
 
 #### New config constant (`project_config.h`)
 
