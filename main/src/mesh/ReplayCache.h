@@ -35,8 +35,8 @@ struct ReplayCache {
 
   inline bool isReplay(const mesh_message& msg) {
     for (size_t i = 0; i < CACHE_SIZE; ++i) {
-      if (memcmp(cache[i].mac, msg.origin_mac_address, 6) == 0 &&
-          cache[i].epoch == msg.epoch_num && cache[i].seq == msg.seq_num) {
+      if (memcmp(cache[i].mac, msg.origin_mac_address, 6) == 0 && cache[i].epoch == msg.epoch_num &&
+          cache[i].seq == msg.seq_num) {
         return true;
       }
     }

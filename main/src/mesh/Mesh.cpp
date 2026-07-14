@@ -22,9 +22,8 @@ Mesh* Mesh::instance = nullptr;
 
 Mesh::Mesh()
     : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0),
-      _dualMasterMode(lattice::config::DUAL_MASTER_MODE), recvQueueHead(0),
-      recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0), relayPending(false),
-      relayPendingAt(0) {
+      _dualMasterMode(lattice::config::DUAL_MASTER_MODE), recvQueueHead(0), recvQueueTail(0),
+      lastBeaconMs(0), lastRouteReportMs(0), relayPending(false), relayPendingAt(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
@@ -471,8 +470,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   }
 
   // --- TOFU master MAC enforcement ---
-  bool fromPrimary = enrollment.hasMasterMac &&
-                     memcmp(msg.origin_mac_address, enrollment.knownMasterMac, 6) == 0;
+  bool fromPrimary =
+      enrollment.hasMasterMac && memcmp(msg.origin_mac_address, enrollment.knownMasterMac, 6) == 0;
   bool fromSecondary = _dualMasterMode && enrollment.hasMasterMacSecondary &&
                        memcmp(msg.origin_mac_address, enrollment.knownMasterMacSecondary, 6) == 0;
 
@@ -534,8 +533,9 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 
   if (!isMaster) {
     // C10 fix: only relay if this beacon is newer than the last one we relayed
-    bool isNewer = (msg.epoch_num > replay.lastRelayedEpoch) ||
-                   (msg.epoch_num == replay.lastRelayedEpoch && msg.seq_num > replay.lastRelayedSeqNum);
+    bool isNewer =
+        (msg.epoch_num > replay.lastRelayedEpoch) ||
+        (msg.epoch_num == replay.lastRelayedEpoch && msg.seq_num > replay.lastRelayedSeqNum);
     if (!isNewer) {
       Logger::logln("MESH", "Duplicate beacon relay suppressed", LogLevel::LOG_DEBUG);
       return;
@@ -630,11 +630,9 @@ void Mesh::addPeer(const uint8_t* mac) {
   size_t before = peers.peerCount;
   peers.addAndPersist(mac);
   if (peers.peerCount > before) {
-    lattice::mesh::crypto::registerPeerWithEspNow(
-      peers.peerMacs[peers.peerCount - 1].mac,
-      enrollment.getPrivateKey(),
-      peers.peerMacs[peers.peerCount - 1].publicKey
-    );
+    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[peers.peerCount - 1].mac,
+                                                  enrollment.getPrivateKey(),
+                                                  peers.peerMacs[peers.peerCount - 1].publicKey);
   }
 }
 

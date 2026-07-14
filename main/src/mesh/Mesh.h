@@ -183,8 +183,9 @@ public:
 
   // Enrollment protocol
   void sendEnrollmentRequest() {
-    enrollment.sendRequest(deviceMacAddress,
-      [this](const uint8_t* t, const mesh_message& m) { this->sendMessage(t, m); });
+    enrollment.sendRequest(deviceMacAddress, [this](const uint8_t* t, const mesh_message& m) {
+      this->sendMessage(t, m);
+    });
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
   void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);

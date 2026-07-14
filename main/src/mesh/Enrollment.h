@@ -20,7 +20,7 @@ public:
   uint8_t knownMasterMacSecondary[6]{};
 
   Enrollment();
-  void init();  // loads or generates keypair; loads enrolled flag + TOFU MACs from EEPROM
+  void init(); // loads or generates keypair; loads enrolled flag + TOFU MACs from EEPROM
 
   bool isEnrolled() const;
   const uint8_t* getPublicKey() const { return devicePublicKey; }
@@ -28,10 +28,9 @@ public:
 
   void sendRequest(const uint8_t* deviceMac, SendMessageFn sendFn);
   void processRequest(const mesh_message& msg);
-  void processJoinAck(const mesh_message& msg, const uint8_t* deviceMac,
-                      RegisterPeerFn registerFn);
-  void enrollPeer(const uint8_t* mac, const uint8_t* pubKey32,
-                  RegisterPeerFn registerFn, bool dualMasterMode);
+  void processJoinAck(const mesh_message& msg, const uint8_t* deviceMac, RegisterPeerFn registerFn);
+  void enrollPeer(const uint8_t* mac, const uint8_t* pubKey32, RegisterPeerFn registerFn,
+                  bool dualMasterMode);
 
   void setRelayFn(EnrollmentRelayFn fn);
   void setPendingRelay(const uint8_t* mac, const uint8_t* pubKey);

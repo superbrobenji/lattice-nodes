@@ -74,7 +74,7 @@ void Enrollment::processRequest(const mesh_message& msg) {
 }
 
 void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*deviceMac*/,
-                                 RegisterPeerFn /*registerFn*/) {
+                                RegisterPeerFn /*registerFn*/) {
   // Called only when msg.target_mac_address == deviceMacAddress (Mesh checks this before calling)
   if (memcmp(msg.data, devicePublicKey, 4) != 0) {
     Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
@@ -92,8 +92,8 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   }
 }
 
-void Enrollment::enrollPeer(const uint8_t* mac, const uint8_t* pubKey32,
-                             RegisterPeerFn registerFn, bool /*dualMasterMode*/) {
+void Enrollment::enrollPeer(const uint8_t* mac, const uint8_t* pubKey32, RegisterPeerFn registerFn,
+                            bool /*dualMasterMode*/) {
   if (esp_now_is_peer_exist(mac)) {
     esp_now_del_peer(mac);
   }

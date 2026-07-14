@@ -7,8 +7,8 @@ namespace lattice {
 namespace app {
 
 struct DisplayManager {
-  static void tick(lattice::hardware::SevenSegDisplay& display,
-                   bool enrolled, bool isMaster, uint8_t nodeId) {
+  static void tick(lattice::hardware::SevenSegDisplay& display, bool enrolled, bool isMaster,
+                   uint8_t nodeId) {
     static uint32_t lastToggleMs = 0;
     static bool dashVisible = false;
 

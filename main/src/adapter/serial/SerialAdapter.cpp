@@ -56,8 +56,7 @@ void SerialAdapter::sendHealthReport() {
   }
 }
 
-SerialAdapter::SerialAdapter(int pin)
-    : Adapter(pin), lastReportedHopCount(0) {
+SerialAdapter::SerialAdapter(int pin) : Adapter(pin), lastReportedHopCount(0) {
   _adapterType = adapter_types::SERIAL_ADAPTER;
 
   Logger::logln("Serial_Adapter", "Serial_Adapter constructed with pin " + String(pin),
@@ -155,7 +154,6 @@ void SerialAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
 
   Logger::logln("Serial_Adapter", "Mesh message sent to serial successfully", LogLevel::LOG_DEBUG);
 }
-
 
 void SerialAdapter::relayEnrollmentToServer(const uint8_t* mac, const uint8_t* pubKey) {
   lattice::mesh::mesh_message msg = {};

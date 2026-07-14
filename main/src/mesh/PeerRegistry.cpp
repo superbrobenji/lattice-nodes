@@ -128,8 +128,7 @@ void PeerRegistry::saveToEEPROM() {
 }
 
 void PeerRegistry::addAndPersist(const uint8_t* mac) {
-  if (find(mac) ||
-      lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(deviceMac))
+  if (find(mac) || lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(deviceMac))
     return;
 
   if (peerCount >= MAX_PEERS) {
