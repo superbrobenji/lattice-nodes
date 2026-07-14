@@ -28,6 +28,8 @@ SimNode::~SimNode() {
   // Destroy firmware objects while OUR globals are live so any dtor-side
   // effects land in this node's context, then capture.
   swapIn(ctx_);
+  lattice::mesh::Mesh::instance = nullptr;
+  lattice::adapter::PirAdapter::instance = nullptr;
   adapter_.reset();
   mesh_.reset();
   swapOut(ctx_);
@@ -35,43 +37,48 @@ SimNode::~SimNode() {
 
 void SimNode::boot() {
   swapIn(ctx_);
-  Serial.begin(115200);
-  lattice::utils::Logger::setLogLevel(lattice::utils::LogLevel::LOG_NONE);
+  try {
+    Serial.begin(115200);
+    lattice::utils::Logger::setLogLevel(lattice::utils::LogLevel::LOG_NONE);
 
-  auto& em = EepromManager::getInstance();
-  em.init();
-  lattice::app::BootManager::check(em);
-  em.setDevMode(false);
-  lattice::adapter::AdapterFactory::setDevMode(false);
+    auto& em = EepromManager::getInstance();
+    em.init();
+    lattice::app::BootManager::check(em);
+    em.setDevMode(false);
+    lattice::adapter::AdapterFactory::setDevMode(false);
 
-  greenLed_ = std::make_unique<lattice::hardware::Led>(lattice::config::GREEN_LED_PIN);
-  redLed_ = std::make_unique<lattice::hardware::Led>(lattice::config::RED_LED_PIN);
-  greenLed_->init();
-  redLed_->init();
-  lattice::hardware::Led::setSystemErrorLed(redLed_.get());
-  lattice::utils::ErrorCore::getInstance().init(redLed_.get(), nullptr);
+    greenLed_ = std::make_unique<lattice::hardware::Led>(lattice::config::GREEN_LED_PIN);
+    redLed_ = std::make_unique<lattice::hardware::Led>(lattice::config::RED_LED_PIN);
+    greenLed_->init();
+    redLed_->init();
+    lattice::hardware::Led::setSystemErrorLed(redLed_.get());
+    lattice::utils::ErrorCore::getInstance().init(redLed_.get(), nullptr);
 
-  if (!booted_) {
-    // First boot: seed role + adapter type (a provisioned device's EEPROM)
-    em.saveMasterFlag(cfg_.isMaster);
-    lattice::adapter::AdapterFactory::saveAdapterTypeToEEPROM(cfg_.adapterType);
-    em.forceFlush();
+    if (!booted_) {
+      // First boot: seed role + adapter type (a provisioned device's EEPROM)
+      em.saveMasterFlag(cfg_.isMaster);
+      lattice::adapter::AdapterFactory::saveAdapterTypeToEEPROM(cfg_.adapterType);
+      em.forceFlush();
+    }
+
+    lattice::adapter::AdapterFactory::initializeDefaultsIfUnset();
+    adapter_.reset(lattice::adapter::AdapterFactory::createFromEEPROM());
+    if (!adapter_ || !adapter_->init()) throw lattice::err::FatalError("SimNode: adapter init failed");
+
+    mesh_ = std::make_unique<lattice::mesh::Mesh>();
+    if (!mesh_->init()) throw lattice::err::FatalError("SimNode: mesh init failed");
+    mesh_->setEnrollmentRelayFn(lattice::adapter::SerialAdapter::relayEnrollmentToServer);
+    mesh_->setIsMaster(EepromManager::getInstance().loadMasterFlag());
+    adapter_->setTransmitFn(&lattice::mesh::Mesh::transmit);
+    mesh_->linkDataRecvCallback([this](const mesh_message& m) {
+      if (adapter_) adapter_->onMeshData(m);
+    });
+
+    booted_ = true;
+  } catch (...) {
+    swapOut(ctx_);
+    throw;
   }
-
-  lattice::adapter::AdapterFactory::initializeDefaultsIfUnset();
-  adapter_.reset(lattice::adapter::AdapterFactory::createFromEEPROM());
-  if (!adapter_ || !adapter_->init()) throw lattice::err::FatalError("SimNode: adapter init failed");
-
-  mesh_ = std::make_unique<lattice::mesh::Mesh>();
-  if (!mesh_->init()) throw lattice::err::FatalError("SimNode: mesh init failed");
-  mesh_->setEnrollmentRelayFn(lattice::adapter::SerialAdapter::relayEnrollmentToServer);
-  mesh_->setIsMaster(EepromManager::getInstance().loadMasterFlag());
-  adapter_->setTransmitFn(&lattice::mesh::Mesh::transmit);
-  mesh_->linkDataRecvCallback([this](const mesh_message& m) {
-    if (adapter_) adapter_->onMeshData(m);
-  });
-
-  booted_ = true;
   swapOut(ctx_);
 }
 
@@ -101,10 +108,10 @@ void SimNode::tick() {
 
 void SimNode::reboot() {
   swapIn(ctx_);
-  adapter_.reset();
-  mesh_.reset();
   lattice::mesh::Mesh::instance = nullptr;
   lattice::adapter::PirAdapter::instance = nullptr;
+  adapter_.reset();
+  mesh_.reset();
   ESP._restartRequested = false;
   // EEPROM image survives; everything volatile resets
   Serial.reset();
