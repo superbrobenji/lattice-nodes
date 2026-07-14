@@ -13,63 +13,56 @@ the Lattice firmware. It replaces an earlier draft that described planned
 ## Module Map
 
 ### `main/main.ino`
-Orchestration only: initialises hardware in dependency order, wires callbacks,
-runs the main loop. Does not contain business logic.
+Wiring only: initialises hardware in dependency order, wires callbacks, runs main loop.
+Delegates all logic to `src/app/` components.
 
 ### `main/project_config.h`
-Single source of truth for every compile-time constant. Edit this file only;
-never scatter magic numbers in source files.
+Single source of truth for every compile-time constant. Edit here only.
 
-### `src/Mesh/Mesh.h — Mesh.cpp`
-- Manages the ESP-NOW radio: WiFi init, peer registration, send/receive.
-- Hosts a fixed-size lock-free receive queue (SPSC ring buffer) drained in `loop()`.
-- Implements the enrollment protocol: Curve25519 keypair, `MESH_TYPE_ENROLLMENT`
-  broadcast, `MESH_TYPE_JOIN_ACK` processing.
-- Replay protection via per-boot epoch + sequence number.
-- Beacon relay with jitter to prevent collision bursts.
+### `src/app/`
+Application-level coordination extracted from `main.ino`. Header-only — no `.cpp` files.
+- `BootManager` — reset reason check, WDT loop detection, reboot counter.
+- `DisplayManager` — 7-seg enrolled/unenrolled/master state machine.
+- `ButtonHandler` — config role-toggle and double-confirm EEPROM-wipe state machines.
 
-### `src/Mesh/serialization/`
-- `mesh.proto` → generated via nanopb → `mesh.pb.c / mesh.pb.h`.
-- nanopb runtime (`pb_encode.c`, `pb_decode.c`) bundled here; no external library needed.
-- Used by `Serial_Adapter` to encode/decode messages sent to/from the host server.
+### `src/mesh/`
+- `Mesh` — thin orchestrator: ESP-NOW radio init, lock-free SPSC recv queue, routing dispatch, beacon relay, `loop()`.
+- `PeerRegistry` — peer list CRUD, EEPROM serialisation, staleness checks.
+- `Enrollment` — Curve25519 keypair load/generate, enrollment broadcast, JOIN_ACK processing, TOFU master MAC persistence.
+- `ReplayCache` — per-boot epoch + sequence-number replay protection (header-only struct).
+- `MeshCrypto` — ECDH shared-secret derivation, peer LMK, keypair generation, ESP-NOW peer registration (header-only inline functions).
+- `serialization/` — nanopb-generated `mesh.pb.c/.h` + nanopb runtime. Do not hand-edit.
 
-### `src/Adapter/`
-- `Adapter` (abstract base): owns `mesh_transmit_fn`, handles `OP_CONFIG_SET` for
-  **all** adapter types so any node can be reconfigured over the mesh.
-- `AdapterFactory`: creates adapters from EEPROM type byte; provides default pins.
-- `PIR_Adapter`: reads HC-SR501 motion events and broadcasts to master.
-- `Serial_Adapter`: framed Protobuf I/O to host server; forwards mesh messages
-  from server to mesh and mesh messages from nodes to server.
+### `src/adapter/`
+- `Adapter` — abstract base: owns `mesh_transmit_fn`, handles `OP_CONFIG_SET` for all adapter types.
+- `AdapterFactory` — creates adapters from EEPROM type byte; provides default pins.
+- `pir/PirAdapter` — HC-SR501 motion events → mesh broadcast.
+- `serial/SerialAdapter` — framed Protobuf I/O to host server; health reports.
+- `serial/SerialFraming` — 2-byte-length-prefixed protobuf encode/decode + byte-feed state machine. Testable without hardware.
 
 ### `src/hardware/`
-- `GpioOutput` / `GpioInput`: shared pin-validation and `_initialized` guard.
-  All single-pin peripherals inherit from one of these.
-- `Led`: blink patterns, error LED singleton.
-- `SevenSegDisplay`: TM1637 driver; raises error codes on ACK failure.
-- `Button`: debounced digital input.
-- `Pir`: HC-SR501 interrupt-driven input.
+- `GpioOutput` / `GpioInput` — pin-validation and `_initialized` guard. All single-pin peripherals inherit from one.
+- `Led`, `SevenSegDisplay`, `Button`, `Pir` — single-pin peripheral drivers.
 
-### `src/core/Logger.h — Logger.cpp`
-Levelled logging (`LOG_DEBUG` → `LOG_NONE`). Set `DEFAULT_LOG_LEVEL = LOG_NONE`
-when the serial port is used for host-server framing — any text output corrupts frames.
+### `src/logging/`
+Levelled logging (`LOG_DEBUG` → `LOG_NONE`). Set `DEFAULT_LOG_LEVEL = LOG_NONE` when the serial port is used for host-server framing.
 
 ### `src/error/`
-- `Error.h`: public API — `lattice::err::fail()` / `lattice::err::fatal()`.
-- `ErrorCore`: drives the error LED blink pattern and TM1637 display.
-- `ErrorCodes.h`: numeric `T·M·S` code registry.
+- `Error.h` — public API: `lattice::err::fail()` / `lattice::err::fatal()`.
+- `ErrorCore` — error LED blink pattern and TM1637 display.
+- `ErrorCodes.h` — numeric `T·M·S` code registry.
 
-### `src/persistence/EEPROM_Manager.h — EEPROM_Manager.cpp`
-All EEPROM reads and writes go through this singleton.
-In `DEV_MODE` all writes are no-ops.
-Centralises address constants (`EEPROM_ADDRESSES::*`).
+### `src/persistence/`
+`EepromManager` — all EEPROM reads/writes through singleton. `DEV_MODE` no-ops all writes. Centralises address constants in `EEPROM_ADDRESSES::*`.
 
-### `src/network/MacAddress.h`
-Utilities for MAC address comparison, formatting, and zero-checking.
+### `src/network/`
+`MacAddress` — MAC comparison, formatting, zero-checking utilities.
 
 ## Adding a Module
 
-1. Put it under the most relevant `src/<subsystem>/` directory.
-2. Give it a single responsibility — if it touches two concerns, split it.
+1. Place it under the most relevant `src/<subsystem>/` directory.
+2. Single responsibility — if it touches two concerns, split it.
 3. Route all errors through `src/error/Error.h`.
 4. Use `GpioOutput` / `GpioInput` for new single-pin hardware drivers.
-5. Reserve any dynamic containers at `setup()` time; never grow them in `loop()`.
+5. Reserve dynamic containers at `setup()` time; never grow them in `loop()`.
+6. Add new `.cpp` files to `tests/CMakeLists.txt` `FIRMWARE_SOURCES` if they are hardware-independent (no mbedtls). Add stubs to `tests/mocks/firmware_stubs.cpp` for any mbedtls-using methods.
