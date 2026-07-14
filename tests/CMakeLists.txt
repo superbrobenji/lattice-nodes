@@ -101,6 +101,7 @@ add_executable(lattice_e2e
   e2e/harness/SimNode.cpp
   e2e/harness/VirtualBus.cpp
   e2e/harness/SimWorld.cpp
+  e2e/harness/FakeHub.cpp
   ${FIRMWARE_SOURCES}
 )
 target_compile_definitions(lattice_e2e PRIVATE SIMULATE_MODE=1)
