@@ -1,5 +1,6 @@
-#include "src/Mesh/Mesh.h"
-#include "src/Adapter/AdapterFactory.h"
+#include "src/mesh/Mesh.h"
+#include "src/adapter/AdapterFactory.h"
+#include "src/adapter/serial/SerialAdapter.h"
 #include "src/logging/Logger.h"
 #include "src/hardware/output/Led.h"
 #include "src/hardware/output/SevenSegDisplay.h"
@@ -220,7 +221,7 @@ void setup() {
                           "MAIN: Mesh init failed — cannot operate without mesh");
   }
 
-  mesh.setEnrollmentRelayFn(Serial_Adapter::relayEnrollmentToServer);
+  mesh.setEnrollmentRelayFn(SerialAdapter::relayEnrollmentToServer);
 
   // Nodes must always receive — modem sleep drops ESP-NOW packets without AP sync
   esp_wifi_set_ps(WIFI_PS_NONE);
