@@ -111,7 +111,8 @@ inline String String_from(int v) { return String(v); }
 
 // ESP class stub
 struct ESPClass {
-  void restart() {}
+  bool _restartRequested = false;
+  void restart() { _restartRequested = true; }
   uint32_t getFreeHeap() { return 200000; }
 };
 extern ESPClass ESP;
