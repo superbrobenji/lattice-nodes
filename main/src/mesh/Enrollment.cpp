@@ -24,8 +24,7 @@ Enrollment::Enrollment() {
 }
 
 // NOTE: Enrollment::init() and Enrollment::enrollPeer() are mbedtls-heavy.
-// In test builds, these are STUBBED in firmware_stubs.cpp.
-// The remaining methods compile cleanly without mbedtls.
+// Host test builds compile them for real against a host-built mbedtls (see tests/CMakeLists.txt).
 
 void Enrollment::init() {
   auto& em = EepromManager::getInstance();
