@@ -4,7 +4,7 @@
 #include "../hardware/output/Led.h"
 #include "../hardware/output/SevenSegDisplay.h"
 #include "ErrorCodes.h"
-#include "../core/Logger.h"
+#include "../logging/Logger.h"
 #include <Arduino.h>
 namespace lattice {
 namespace utils {

@@ -1,6 +1,6 @@
 #include "src/Mesh/Mesh.h"
 #include "src/Adapter/AdapterFactory.h"
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "src/hardware/output/Led.h"
 #include "src/hardware/output/SevenSegDisplay.h"
 #include "src/hardware/input/Button.h"

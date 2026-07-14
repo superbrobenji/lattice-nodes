@@ -39,7 +39,7 @@ set(FIRMWARE_SOURCES
   ../main/src/Adapter/Adapter.cpp
   ../main/src/Adapter/Serial_Adapter/Serial_Adapter.cpp
   ../main/src/Adapter/PIR_Adapter/PIR_Adapter.cpp
-  ../main/src/core/Logger.cpp
+  ../main/src/logging/Logger.cpp
   ../main/src/error/ErrorCore.cpp
   ../main/src/hardware/output/GpioOutput.cpp
   ../main/src/hardware/output/Led.cpp

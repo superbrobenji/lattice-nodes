@@ -2,7 +2,7 @@
 #include "lib/lattice-protocol/c/opcodes.h"
 #include <cstdint>
 #include <cstring>
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/Mesh/Mesh.h"
 #include "src/Adapter/AdapterFactory.h"

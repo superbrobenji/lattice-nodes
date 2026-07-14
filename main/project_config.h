@@ -2,7 +2,7 @@
 #define PROJECT_CONFIG_H
 
 #include <Arduino.h>
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "src/Adapter/Adapter.h"
 
 namespace lattice {

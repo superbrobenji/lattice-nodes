@@ -1,5 +1,5 @@
 #include "ErrorCore.h"
-#include "../core/Logger.h"
+#include "../logging/Logger.h"
 #include <esp_system.h>
 using lattice::core::ErrorTypeDigit;
 using lattice::core::makeErrorCode;

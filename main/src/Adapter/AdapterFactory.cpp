@@ -1,5 +1,5 @@
 #include "AdapterFactory.h"
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/persistence/EEPROM_Manager.h"
 // Include all adapter headers

@@ -1,6 +1,6 @@
 #include "Mesh.h"
 #include "src/network/MacAddress.h"
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
 #include "src/persistence/EEPROM_Manager.h"
 // Error.h already provides ERROR_CHECK macros

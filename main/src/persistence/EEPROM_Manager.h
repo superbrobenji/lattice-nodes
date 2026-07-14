@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 #include <EEPROM.h>
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "../../project_config.h"
 
 namespace lattice {

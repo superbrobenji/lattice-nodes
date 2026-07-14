@@ -3,7 +3,7 @@
 
 #include "ErrorCodes.h"
 #include "ErrorCore.h"
-#include "../core/Logger.h"
+#include "../logging/Logger.h"
 #include <esp_err.h>
 #include <cstdint>
 

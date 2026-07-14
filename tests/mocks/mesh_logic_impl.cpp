@@ -8,7 +8,7 @@
 #include "WiFi.h"
 #include "Mesh/Mesh.h"
 #include "src/network/MacAddress.h"
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "src/persistence/EEPROM_Manager.h"
 #include "../../main/project_config.h"
 #include "lib/lattice-protocol/c/opcodes.h"
