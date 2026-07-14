@@ -9,6 +9,7 @@
 // Shared protocol constants — source of truth is lattice-protocol repo (git submodule)
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "lib/lattice-protocol/c/adapter_types.h"
+#include "SerialFraming.h"
 
 namespace lattice {
 namespace adapter {
@@ -49,18 +50,8 @@ public:
 #endif
 
 private:
-  // Protobuf-over-serial framing: 2-byte little-endian length prefix + protobuf payload
-  enum class FrameState : uint8_t { AwaitingLen1, AwaitingLen2, AwaitingPayload };
-  FrameState frameState;
-  uint16_t frameLength;
-  size_t frameIndex;
-  static constexpr size_t MAX_PAYLOAD = 256;
-  uint8_t payloadBuffer[MAX_PAYLOAD];
+  lattice::adapter::serial::SerialFraming _framing;
 
-  static size_t encodeMeshMessage(const lattice::mesh::mesh_message& msg, uint8_t* out,
-                                  size_t outCap);
-  static bool decodeMeshMessage(const uint8_t* data, size_t len,
-                                lattice::mesh::mesh_message& outMsg);
   void handleCompleteFrame(const uint8_t* data, size_t len);
   // Interpret messageType for Serial control (uses lattice::mesh::MeshMessageType):
   // MESH_TYPE_ADAPTER_DATA (0)         : targeted send via normal mesh transmit (to master)
@@ -71,17 +62,6 @@ private:
   static void sendHealthReport();
   static uint32_t lastHealthMillis;
   uint32_t lastReportedHopCount;
-
-#ifdef UNIT_TEST
-public:
-  // Feed one byte into the frame state machine.
-  // Returns true when a complete frame has been received and processed.
-  bool injectByte(uint8_t b);
-  uint8_t lastOpcode() const { return _lastCompletedOpcode; }
-
-private:
-  uint8_t _lastCompletedOpcode = 0;
-#endif
 };
 
 } // namespace adapter

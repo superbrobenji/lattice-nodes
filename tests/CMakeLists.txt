@@ -37,6 +37,7 @@ set(FIRMWARE_SOURCES
   ../main/src/persistence/EepromManager.cpp
   ../main/src/adapter/AdapterFactory.cpp
   ../main/src/adapter/Adapter.cpp
+  ../main/src/adapter/serial/SerialFraming.cpp
   ../main/src/adapter/serial/SerialAdapter.cpp
   ../main/src/adapter/pir/PirAdapter.cpp
   ../main/src/logging/Logger.cpp

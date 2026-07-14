@@ -3,6 +3,77 @@
 #include "mesh/serialization/mesh.pb.h"
 #include "mesh/serialization/nanopb/pb_encode.h"
 #include "mesh/serialization/nanopb/pb_decode.h"
+#include "adapter/serial/SerialFraming.h"
+
+using namespace lattice::adapter::serial;
+
+// === SerialFraming tests ===
+
+// Test encode → decode round-trip via SerialFraming high-level API
+TEST(SerialFramingTest, EncodeDecodeRoundTrip) {
+  lattice::mesh::mesh_message original{};
+  original.message_type = MESH_TYPE_ADAPTER_DATA;
+  memset(original.origin_mac_address, 0x11, 6);
+  original.data[0] = 0x42;
+
+  uint8_t buf[256];
+  size_t len = SerialFraming::encode(original, buf, sizeof(buf));
+  ASSERT_GT(len, 0u);
+
+  lattice::mesh::mesh_message decoded{};
+  EXPECT_TRUE(SerialFraming::decode(buf, len, decoded));
+  EXPECT_EQ(decoded.message_type, original.message_type);
+  EXPECT_EQ(decoded.data[0], original.data[0]);
+  // For ADAPTER_DATA the decode fills origin_mac_address with the device MAC (mock: AA:BB:CC:DD:EE:FF)
+  const uint8_t mockMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  EXPECT_EQ(memcmp(decoded.origin_mac_address, mockMac, 6), 0);
+}
+
+// Test injectByte state machine: feed length-prefixed framed bytes one at a time
+TEST(SerialFramingTest, InjectByteReassemblesFrame) {
+  lattice::mesh::mesh_message original{};
+  original.message_type = MESH_TYPE_MASTER_BEACON;
+
+  // Encode the payload
+  uint8_t payload[256];
+  size_t payloadLen = SerialFraming::encode(original, payload, sizeof(payload));
+  ASSERT_GT(payloadLen, 0u);
+
+  // Build the length-prefixed frame: [len_lo][len_hi][payload...]
+  uint8_t frame[258];
+  frame[0] = static_cast<uint8_t>(payloadLen & 0xFF);
+  frame[1] = static_cast<uint8_t>((payloadLen >> 8) & 0xFF);
+  memcpy(frame + 2, payload, payloadLen);
+
+  SerialFraming framing;
+  bool complete = false;
+  for (size_t i = 0; i < payloadLen + 2; ++i) {
+    complete = framing.injectByte(frame[i]);
+  }
+  EXPECT_TRUE(complete);
+  EXPECT_EQ(framing.frameLen(), payloadLen);
+
+  lattice::mesh::mesh_message decoded{};
+  EXPECT_TRUE(SerialFraming::decode(framing.frameBuffer(), framing.frameLen(), decoded));
+  EXPECT_EQ(decoded.message_type, original.message_type);
+}
+
+// Test that injectByte correctly rejects frames with invalid length and recovers
+TEST(SerialFramingTest, InjectByteRejectsInvalidLength) {
+  SerialFraming framing;
+  // Send length = 0 (invalid)
+  EXPECT_FALSE(framing.injectByte(0x00)); // len_lo = 0
+  EXPECT_FALSE(framing.injectByte(0x00)); // len_hi = 0 → invalid, resets to AwaitingLen1
+
+  // Now send a valid frame of 1 byte
+  EXPECT_FALSE(framing.injectByte(0x01)); // len_lo = 1
+  EXPECT_FALSE(framing.injectByte(0x00)); // len_hi = 0 → length = 1
+  EXPECT_TRUE(framing.injectByte(0xAB));  // payload byte → frame complete
+  EXPECT_EQ(framing.frameLen(), 1u);
+  EXPECT_EQ(framing.frameBuffer()[0], 0xAB);
+}
+
+// === Low-level nanopb codec tests (retained from original) ===
 
 // Helper: encode a mesh_MeshMessage to a buffer, return bytes written (0 = failure)
 static size_t encodeMsg(const mesh_MeshMessage& pbMsg, uint8_t* out, size_t outCap) {
