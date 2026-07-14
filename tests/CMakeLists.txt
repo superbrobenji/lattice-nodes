@@ -93,3 +93,14 @@ add_unit_test(test_mesh_logic         unit/test_mesh_logic.cpp)
 add_unit_test(test_pir_adapter        unit/test_pir_adapter.cpp)
 add_unit_test(test_route_report       unit/test_route_report.cpp)
 add_unit_test(test_mocks              unit/test_mocks.cpp)
+
+# ---- E2E simulation target — SIMULATE_MODE recompiles all firmware sources ----
+add_executable(lattice_e2e
+  e2e/scenarios/test_harness_smoke.cpp
+  e2e/harness/NodeContext.cpp
+  ${FIRMWARE_SOURCES}
+)
+target_compile_definitions(lattice_e2e PRIVATE SIMULATE_MODE=1)
+target_include_directories(lattice_e2e PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/e2e)
+target_link_libraries(lattice_e2e gtest_main gmock mbedcrypto)
+gtest_discover_tests(lattice_e2e PROPERTIES LABELS e2e)

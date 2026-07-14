@@ -6,7 +6,10 @@ std::vector<EspNowSend>          espNowSentPackets;
 std::vector<esp_now_peer_info_t> espNowRegisteredPeers;
 bool                             espNowSendFails = false;
 
-static void (*recvCallback)(const esp_now_recv_info*, const uint8_t*, int) = nullptr;
+static EspNowRecvCb recvCallback = nullptr;
+
+EspNowRecvCb getEspNowRecvCb() { return recvCallback; }
+void         setEspNowRecvCb(EspNowRecvCb cb) { recvCallback = cb; }
 
 void resetEspNowMock() {
   espNowSentPackets.clear();

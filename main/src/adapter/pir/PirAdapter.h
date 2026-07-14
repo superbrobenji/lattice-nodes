@@ -37,7 +37,14 @@ private:
   bool _initialized;
   uint32_t _lastHealthMillis;
 
+#ifdef UNIT_TEST
+public:
+#else
+private:
+#endif
   static PirAdapter* instance;
+
+private:
   void detectMotion();
   static void sendNodeHealth();
 };

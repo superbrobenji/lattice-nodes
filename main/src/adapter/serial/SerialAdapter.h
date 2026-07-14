@@ -60,7 +60,15 @@ private:
 
   // Health reporter
   static void sendHealthReport();
+
+#ifdef UNIT_TEST
+public:
+#else
+private:
+#endif
   static uint32_t lastHealthMillis;
+
+private:
   uint32_t lastReportedHopCount;
 };
 

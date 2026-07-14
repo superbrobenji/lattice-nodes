@@ -33,6 +33,12 @@ extern std::vector<EspNowSend>          espNowSentPackets;
 extern std::vector<esp_now_peer_info_t> espNowRegisteredPeers;
 extern bool                             espNowSendFails;
 
+// Registered esp_now recv callback — exposed so the e2e harness can swap it
+// per-node (each simulated node registers its own via esp_now_register_recv_cb).
+using EspNowRecvCb = void (*)(const esp_now_recv_info*, const uint8_t*, int);
+EspNowRecvCb getEspNowRecvCb();
+void         setEspNowRecvCb(EspNowRecvCb cb);
+
 // Reset between tests
 void resetEspNowMock();
 
