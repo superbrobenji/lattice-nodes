@@ -4,6 +4,7 @@
 #include "src/mesh/serialization/nanopb/pb_decode.h"
 #include "src/adapter/Adapter.h"
 #include "src/logging/Logger.h"
+#include "src/error/Error.h"
 #include <esp_wifi.h>
 #include <cstring>
 
@@ -116,6 +117,7 @@ bool SerialFraming::decode(const uint8_t* data, size_t len, lattice::mesh::mesh_
 }
 
 bool SerialFraming::injectByte(uint8_t byteIn) {
+  using namespace lattice::utils;
   switch (frameState) {
   case FrameState::AwaitingLen1:
     frameIndex = 0; // reset from any previously completed frame
@@ -126,6 +128,9 @@ bool SerialFraming::injectByte(uint8_t byteIn) {
   case FrameState::AwaitingLen2:
     frameLength |= static_cast<uint16_t>(byteIn) << 8;
     if (frameLength == 0 || frameLength > MAX_PAYLOAD) {
+      Logger::logln("SERIAL", "Frame parse error", LogLevel::LOG_WARN);
+      lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::ADAPTER,
+                         2, "Serial_Adapter: Invalid frame length");
       // Invalid length — reset
       frameState = FrameState::AwaitingLen1;
       frameLength = 0;
@@ -138,6 +143,9 @@ bool SerialFraming::injectByte(uint8_t byteIn) {
 
   case FrameState::AwaitingPayload:
     if (frameIndex >= MAX_PAYLOAD) {
+      Logger::logln("SERIAL", "Frame parse error", LogLevel::LOG_WARN);
+      lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::ADAPTER,
+                         3, "Serial_Adapter: Frame buffer overflow");
       frameState = FrameState::AwaitingLen1;
       frameLength = 0;
       frameIndex = 0;
