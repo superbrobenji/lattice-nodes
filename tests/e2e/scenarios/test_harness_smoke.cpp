@@ -2,9 +2,11 @@
 #include "harness/NodeContext.h"
 #include "harness/SimClock.h"
 #include "harness/SimNode.h"
+#include "harness/SimWorld.h"
 #include "EEPROM.h"
 #include "esp_wifi_mock.h"
 #include "src/persistence/EepromManager.h"
+#include "src/mesh/Mesh.h"
 #include "lib/lattice-protocol/c/message_types.h"
 #include "lib/lattice-protocol/c/mesh_message.h"
 
@@ -93,4 +95,25 @@ TEST(SimNodeTest, RebootPreservesEeprom) {
   EXPECT_TRUE(std::equal(imageBefore.begin() + 417, imageBefore.begin() + 483,
                          master.ctx().eepromData.begin() + 417));
   EXPECT_EQ(master.ctx().eepromData[0], imageBefore[0]);
+}
+
+TEST(VirtualBusTest, BeaconReachesLinkedNodeOnly) {
+  sim::SimWorld world;
+  auto* master = world.addNode({{0x02, 0, 0, 0, 0, 0x01}, true, lattice::adapter::SERIAL_ADAPTER});
+  auto* near = world.addNode({{0x02, 0, 0, 0, 0, 0x02}, false, lattice::adapter::PIR_ADAPTER});
+  auto* far = world.addNode({{0x02, 0, 0, 0, 0, 0x03}, false, lattice::adapter::PIR_ADAPTER});
+  world.bus.link(master, near);
+  // 'far' deliberately unlinked
+
+  world.run(4000); // > one beacon interval
+
+  // Linked node has processed a beacon: its mesh learned the master MAC
+  bool nearKnowsMaster = near->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    return memcmp(m.currentMaster.mac, master->mac(), 6) == 0;
+  });
+  bool farKnowsMaster = far->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    return memcmp(m.currentMaster.mac, master->mac(), 6) == 0;
+  });
+  EXPECT_TRUE(nearKnowsMaster);
+  EXPECT_FALSE(farKnowsMaster);
 }
