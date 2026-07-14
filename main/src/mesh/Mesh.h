@@ -15,6 +15,7 @@
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 #include "ReplayCache.h"
 #include "PeerRegistry.h"
+#include "Enrollment.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -31,10 +32,6 @@ using ::MeshMessageType;
 using lattice::adapter::adapter_types;
 
 static constexpr uint8_t PROTO_VERSION = 2;
-
-// Enrollment relay callback — registered by Serial_Adapter owner (main.ino).
-// Called from loop() when a pending enrollment is ready to relay to the server.
-typedef void (*EnrollmentRelayFn)(const uint8_t mac[6], const uint8_t pubKey[32]);
 
 class Mesh {
 #ifdef UNIT_TEST
@@ -103,14 +100,8 @@ private:
   bool setupEspNow();
   void loadPersistentState();
 
-  // Enrollment helpers
-  void processEnrollmentRequest(const mesh_message& msg);
+  // Enrollment helper (relay dispatch only — "addressed to us" branch is in Enrollment)
   void processJoinAck(const mesh_message& msg);
-
-  // Curve25519 keypair
-  uint8_t devicePrivateKey[32];
-  uint8_t devicePublicKey[32];
-  void loadOrGenerateKeypair();
 
   // Replay protection (composed)
   ReplayCache replay;
@@ -120,18 +111,7 @@ private:
   uint32_t relayPendingAt;
   bool relayPending;
 
-  // TOFU master MAC — learned on first enrollment beacon, persisted across reboots
-  uint8_t knownMasterMac[6];
-  bool hasMasterMac;
-  uint8_t knownMasterMacSecondary[6];
-  bool hasMasterMacSecondary;
   bool _dualMasterMode;
-
-  // Pending enrollment relay (filled in ESP-NOW callback, drained in loop())
-  volatile bool _pendingEnrollmentRelay = false;
-  uint8_t _pendingEnrollmentMac[6]{};
-  uint8_t _pendingEnrollmentPubKey[32]{};
-  EnrollmentRelayFn _enrollmentRelayFn = nullptr;
 
   // --- ESP-NOW receive ring buffer (lock-free SPSC) ---
   static constexpr size_t RECV_QUEUE_SIZE = 8;
@@ -146,13 +126,15 @@ private:
   uint8_t recvQueueTail;          // read by main task (loop)
 
   void drainRecvQueue();
-  void drainPendingEnrollment();
   bool sendRouteReport();
   void processRouteReport(const mesh_message& msg);
 
   // Beacon timer (moved from broadcastMasterBeacon for loop() integration)
   uint32_t lastBeaconMs;
   uint32_t lastRouteReportMs;
+
+  // Enrollment state (composed — mbedtls-heavy methods stubbed in test builds)
+  Enrollment enrollment;
 
 public:
   Mesh();
@@ -194,18 +176,21 @@ public:
   void debugDumpRadio();
 
   // Provisioning: public key accessor (private key never exposed)
-  const uint8_t* getDevicePublicKey() const { return devicePublicKey; }
+  const uint8_t* getDevicePublicKey() const { return enrollment.getPublicKey(); }
 
   // Singleton accessor (used by Serial_Adapter for enrollment callbacks)
   static Mesh* getInstance() { return instance; }
 
   // Enrollment protocol
-  void sendEnrollmentRequest();
-  bool isEnrolled() const;
+  void sendEnrollmentRequest() {
+    enrollment.sendRequest(deviceMacAddress,
+      [this](const uint8_t* t, mesh_message m) { this->sendMessage(t, m); });
+  }
+  bool isEnrolled() const { return enrollment.isEnrolled(); }
   void enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]);
 
   // Enrollment relay callback — set by Serial_Adapter owner (main.ino)
-  void setEnrollmentRelayFn(EnrollmentRelayFn fn);
+  void setEnrollmentRelayFn(EnrollmentRelayFn fn) { enrollment.setRelayFn(fn); }
 
   // Get current hop count to master (0 if this node is master)
   uint8_t getHopCount() const { return isMaster ? 0 : currentMaster.distance; }

@@ -1,12 +1,13 @@
-// mesh_logic_impl.cpp — real implementations of isReplay() and processMasterBeacon()
+// mesh_logic_impl.cpp — real implementations of Mesh and Enrollment methods
 // compiled into test executables alongside firmware_stubs.cpp.
 // UNIT_TEST is defined globally via add_compile_definitions(UNIT_TEST) in CMakeLists.txt.
-// All mbedtls-using methods remain in firmware_stubs.cpp as stubs.
+// All mbedtls-using methods (Enrollment::init, Enrollment::enrollPeer) are in firmware_stubs.cpp.
 
 #include "Arduino.h"
 #include "esp_now.h"
 #include "WiFi.h"
 #include "mesh/Mesh.h"
+#include "mesh/Enrollment.h"
 #include "src/network/MacAddress.h"
 #include "src/logging/Logger.h"
 #include "src/persistence/EepromManager.h"
@@ -19,6 +20,88 @@ namespace mesh {
 
 using namespace lattice::utils;
 
+// ============================================================
+// Enrollment:: implementations for test builds
+// (Enrollment.cpp is excluded from FIRMWARE_SOURCES — uses mbedtls)
+// ============================================================
+
+Enrollment::Enrollment() {
+  memset(devicePrivateKey, 0, 32);
+  memset(devicePublicKey, 0, 32);
+  memset(knownMasterMac, 0xFF, 6);
+  memset(knownMasterMacSecondary, 0xFF, 6);
+  memset(_pendingEnrollmentMac, 0, 6);
+  memset(_pendingEnrollmentPubKey, 0, 32);
+}
+
+bool Enrollment::isEnrolled() const {
+  return EepromManager::getInstance().loadEnrolledFlag();
+}
+
+void Enrollment::sendRequest(const uint8_t* deviceMac, SendMessageFn /*sendFn*/) {
+  mesh_message msg = {};
+  msg.message_type = MESH_TYPE_ENROLLMENT;
+  msg.data_type = adapter_types::UNKNOWN_ADAPTER;
+  memcpy(msg.origin_mac_address, deviceMac, 6);
+  memset(msg.target_mac_address, 0xFF, 6);
+  memcpy(msg.last_hop_mac_address, deviceMac, 6);
+  msg.hop_count = 0;
+  memcpy(msg.enrollment_public_key, devicePublicKey, 32);
+
+  static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  Logger::logln("MESH", "Enrollment request sent", LogLevel::LOG_INFO);
+}
+
+void Enrollment::processRequest(const mesh_message& msg) {
+  memcpy(_pendingEnrollmentMac, msg.origin_mac_address, 6);
+  memcpy(_pendingEnrollmentPubKey, msg.enrollment_public_key, 32);
+  _pendingEnrollmentRelay = true;
+  Logger::logln("MESH", "Enrollment request received, deferring relay to loop()",
+                LogLevel::LOG_INFO);
+}
+
+void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*deviceMac*/,
+                                 RegisterPeerFn /*registerFn*/) {
+  // Called only when msg.target_mac_address == deviceMacAddress (Mesh checks this before calling)
+  if (memcmp(msg.data, devicePublicKey, 4) != 0) {
+    Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
+    return;
+  }
+  Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
+  EepromManager::getInstance().saveEnrolledFlag(true);
+
+  if (!hasMasterMac) {
+    memcpy(knownMasterMac, msg.origin_mac_address, 6);
+    hasMasterMac = true;
+    EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
+    Logger::logln("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
+  }
+}
+
+void Enrollment::setRelayFn(EnrollmentRelayFn fn) {
+  _enrollmentRelayFn = fn;
+}
+
+void Enrollment::setPendingRelay(const uint8_t mac[6], const uint8_t pubKey[32]) {
+  memcpy(_pendingEnrollmentMac, mac, 6);
+  memcpy(_pendingEnrollmentPubKey, pubKey, 32);
+  _pendingEnrollmentRelay = true;
+}
+
+void Enrollment::drainPendingRelay() {
+  if (!_pendingEnrollmentRelay)
+    return;
+  _pendingEnrollmentRelay = false;
+  if (_enrollmentRelayFn) {
+    _enrollmentRelayFn(_pendingEnrollmentMac, _pendingEnrollmentPubKey);
+  }
+}
+
+// ============================================================
+// Mesh:: implementations for test builds
+// ============================================================
+
 void Mesh::processMasterBeacon(const mesh_message& msg) {
   // Guard: drop beacon if hop count would overflow uint8_t or exceed limit
   if (msg.hop_count >= lattice::config::MAX_HOPS) {
@@ -27,24 +110,25 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   }
 
   // --- TOFU master MAC enforcement ---
-  bool fromPrimary = hasMasterMac && memcmp(msg.origin_mac_address, knownMasterMac, 6) == 0;
-  bool fromSecondary = _dualMasterMode && hasMasterMacSecondary &&
-                       memcmp(msg.origin_mac_address, knownMasterMacSecondary, 6) == 0;
+  bool fromPrimary = enrollment.hasMasterMac &&
+                     memcmp(msg.origin_mac_address, enrollment.knownMasterMac, 6) == 0;
+  bool fromSecondary = _dualMasterMode && enrollment.hasMasterMacSecondary &&
+                       memcmp(msg.origin_mac_address, enrollment.knownMasterMacSecondary, 6) == 0;
 
-  if (!hasMasterMac) {
+  if (!enrollment.hasMasterMac) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
-    memcpy(knownMasterMac, msg.origin_mac_address, 6);
-    hasMasterMac = true;
-    EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
+    memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
+    enrollment.hasMasterMac = true;
+    EepromManager::getInstance().saveKnownMasterMac(enrollment.knownMasterMac);
     Logger::logln("MESH", "Master MAC learned from first beacon (TOFU fallback)",
                   LogLevel::LOG_INFO);
   } else if (!fromPrimary && !fromSecondary) {
     // Beacon from unrecognised MAC
-    if (_dualMasterMode && !hasMasterMacSecondary) {
+    if (_dualMasterMode && !enrollment.hasMasterMacSecondary) {
       // Second master TOFU — learn and save as secondary
-      memcpy(knownMasterMacSecondary, msg.origin_mac_address, 6);
-      hasMasterMacSecondary = true;
-      EepromManager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
+      memcpy(enrollment.knownMasterMacSecondary, msg.origin_mac_address, 6);
+      enrollment.hasMasterMacSecondary = true;
+      EepromManager::getInstance().saveKnownMasterMacSecondary(enrollment.knownMasterMacSecondary);
       Logger::logln("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
       // fall through to process this beacon as valid
     } else if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
@@ -55,8 +139,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     } else {
       // All known masters stale — accept as new primary (hotswap)
       Logger::logln("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
-      memcpy(knownMasterMac, msg.origin_mac_address, 6);
-      EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
+      memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
+      EepromManager::getInstance().saveKnownMasterMac(enrollment.knownMasterMac);
     }
   }
 
@@ -129,7 +213,8 @@ void Mesh::drainRecvQueue() {
 
     switch (msg.message_type) {
     case MESH_TYPE_ENROLLMENT:
-      processEnrollmentRequest(msg);
+      if (isMaster)
+        enrollment.processRequest(msg);
       break;
     case MESH_TYPE_JOIN_ACK:
       processJoinAck(msg);
@@ -181,21 +266,7 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     relayDownlink(msg);
     return;
   }
-  // Verify fingerprint matches our public key (first 4 bytes)
-  if (memcmp(msg.data, devicePublicKey, 4) != 0) {
-    Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
-    return;
-  }
-  Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
-  EepromManager::getInstance().saveEnrolledFlag(true);
-
-  // The node sending JOIN_ACK is the master — record its MAC (TOFU)
-  if (!hasMasterMac) {
-    memcpy(knownMasterMac, msg.origin_mac_address, 6);
-    hasMasterMac = true;
-    EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
-    Logger::logln("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
-  }
+  enrollment.processJoinAck(msg, deviceMacAddress, nullptr);
 }
 
 void Mesh::transmitCore(const adapter_types type, const uint8_t data[64], MeshMessageType msgType,
@@ -321,7 +392,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   bool addressedToSelf = (memcmp(msg.target_mac_address, deviceMacAddress, 6) == 0);
   bool isBroadcastTarget = (memcmp(msg.target_mac_address, kBroadcastMac, 6) == 0);
   bool addressedToMaster =
-      hasMasterMac && (memcmp(msg.target_mac_address, currentMaster.mac, 6) == 0);
+      enrollment.hasMasterMac && (memcmp(msg.target_mac_address, currentMaster.mac, 6) == 0);
 
   if (!isMaster && !addressedToSelf && !isBroadcastTarget) {
     if (addressedToMaster) {
@@ -343,7 +414,8 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   bool isConfigOpcode =
       (msg.data_type == adapter_types::SERIAL_ADAPTER && msg.data[0] == OP_CONFIG_SET);
   // TODO(dual-master): also allow secondary master MAC for CONFIG_SET
-  if (isConfigOpcode && hasMasterMac && memcmp(msg.origin_mac_address, knownMasterMac, 6) != 0) {
+  if (isConfigOpcode && enrollment.hasMasterMac &&
+      memcmp(msg.origin_mac_address, enrollment.knownMasterMac, 6) != 0) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;
   }
@@ -357,45 +429,6 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // Broadcast: also relay so multi-hop nodes receive it (Task 3 test covers this)
   if (isBroadcastTarget && !isMaster) {
     relayDownlink(msg);
-  }
-}
-
-void Mesh::sendEnrollmentRequest() {
-  mesh_message msg = {};
-  msg.message_type = MESH_TYPE_ENROLLMENT;
-  msg.data_type = adapter_types::UNKNOWN_ADAPTER;
-  memcpy(msg.origin_mac_address, deviceMacAddress, 6);
-  memset(msg.target_mac_address, 0xFF, 6);
-  memcpy(msg.last_hop_mac_address, deviceMacAddress, 6);
-  msg.hop_count = 0;
-  memcpy(msg.enrollment_public_key, devicePublicKey, 32);
-
-  static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
-  Logger::logln("MESH", "Enrollment request sent", LogLevel::LOG_INFO);
-}
-
-void Mesh::processEnrollmentRequest(const mesh_message& msg) {
-  if (!isMaster) {
-    return;
-  }
-  memcpy(_pendingEnrollmentMac, msg.origin_mac_address, 6);
-  memcpy(_pendingEnrollmentPubKey, msg.enrollment_public_key, 32);
-  _pendingEnrollmentRelay = true;
-  Logger::logln("MESH", "Enrollment request received, deferring relay to loop()",
-                LogLevel::LOG_INFO);
-}
-
-void Mesh::setEnrollmentRelayFn(EnrollmentRelayFn fn) {
-  _enrollmentRelayFn = fn;
-}
-
-void Mesh::drainPendingEnrollment() {
-  if (!_pendingEnrollmentRelay)
-    return;
-  _pendingEnrollmentRelay = false;
-  if (_enrollmentRelayFn) {
-    _enrollmentRelayFn(_pendingEnrollmentMac, _pendingEnrollmentPubKey);
   }
 }
 

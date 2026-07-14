@@ -35,8 +35,8 @@ TEST_F(MeshLogicTest, TOFU_FirstBeacon_LearnsMasterMAC) {
 
   mesh.processMasterBeacon(beacon);
 
-  EXPECT_TRUE(mesh.hasMasterMac);
-  EXPECT_EQ(memcmp(mesh.knownMasterMac, masterMac, 6), 0);
+  EXPECT_TRUE(mesh.enrollment.hasMasterMac);
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, masterMac, 6), 0);
 }
 
 TEST_F(MeshLogicTest, TOFU_SecondBeaconFromSameMAC_Accepted) {
@@ -49,7 +49,7 @@ TEST_F(MeshLogicTest, TOFU_SecondBeaconFromSameMAC_Accepted) {
   auto beacon2 = makeBeacon(masterMac, 1, 2);
   // No assertion — just verify no crash and relay fires
   mesh.processMasterBeacon(beacon2);
-  EXPECT_TRUE(mesh.hasMasterMac);
+  EXPECT_TRUE(mesh.enrollment.hasMasterMac);
 }
 
 TEST_F(MeshLogicTest, TOFU_BeaconFromImpostorMAC_Rejected_WhenMasterAlive) {
@@ -65,7 +65,7 @@ TEST_F(MeshLogicTest, TOFU_BeaconFromImpostorMAC_Rejected_WhenMasterAlive) {
   mesh.processMasterBeacon(makeBeacon(impostorMac, 1, 2));
 
   // Impostor should NOT be accepted as master
-  EXPECT_EQ(memcmp(mesh.knownMasterMac, realMaster, 6), 0);
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, realMaster, 6), 0);
   // Relay should NOT fire for impostor
   EXPECT_EQ(espNowSentPackets.size(), sendsBefore);
 }
@@ -81,7 +81,7 @@ TEST_F(MeshLogicTest, TOFU_NewMasterAccepted_AfterStaleTimeout) {
   advanceMillis(9001);
 
   mesh.processMasterBeacon(makeBeacon(newMaster, 2, 1));
-  EXPECT_EQ(memcmp(mesh.knownMasterMac, newMaster, 6), 0);
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, newMaster, 6), 0);
 }
 
 // --- Beacon relay dedup ---
@@ -128,15 +128,15 @@ TEST_F(MeshLogicTest, DualMaster_SecondBeaconFromNewMAC_LearnedAsSecondary) {
 
   // Learn primary via first beacon
   mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));
-  ASSERT_TRUE(mesh.hasMasterMac);
+  ASSERT_TRUE(mesh.enrollment.hasMasterMac);
 
   // Second beacon from different MAC — must be learned as secondary
   mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1));
 
-  EXPECT_TRUE(mesh.hasMasterMacSecondary);
-  EXPECT_EQ(memcmp(mesh.knownMasterMacSecondary, secondaryMac, 6), 0);
+  EXPECT_TRUE(mesh.enrollment.hasMasterMacSecondary);
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMacSecondary, secondaryMac, 6), 0);
   // Primary must still be unchanged
-  EXPECT_EQ(memcmp(mesh.knownMasterMac, primaryMac, 6), 0);
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, primaryMac, 6), 0);
 }
 
 TEST_F(MeshLogicTest, DualMaster_BeaconFromPrimaryMAC_Accepted) {
@@ -188,8 +188,8 @@ TEST_F(MeshLogicTest, DualMaster_ImpostorMAC_Rejected_WhenBothMastersKnown) {
   mesh.processMasterBeacon(makeBeacon(impostorMac, 1, 2));
 
   // Neither primary nor secondary should have changed
-  EXPECT_EQ(memcmp(mesh.knownMasterMac, primaryMac, 6), 0);
-  EXPECT_EQ(memcmp(mesh.knownMasterMacSecondary, secondaryMac, 6), 0);
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, primaryMac, 6), 0);
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMacSecondary, secondaryMac, 6), 0);
   EXPECT_EQ(espNowSentPackets.size(), sendsBefore) << "Impostor beacon must not trigger relay";
 }
 
@@ -205,8 +205,8 @@ TEST_F(MeshLogicTest, SingleMaster_SecondBeaconFromNewMAC_Rejected_WhenMasterAli
   size_t sendsBefore = espNowSentPackets.size();
   mesh.processMasterBeacon(makeBeacon(unknownMac, 1, 2));
 
-  EXPECT_EQ(memcmp(mesh.knownMasterMac, knownMac, 6), 0) << "Known master MAC must not change";
-  EXPECT_FALSE(mesh.hasMasterMacSecondary);
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, knownMac, 6), 0) << "Known master MAC must not change";
+  EXPECT_FALSE(mesh.enrollment.hasMasterMacSecondary);
   EXPECT_EQ(espNowSentPackets.size(), sendsBefore);
 }
 
@@ -332,8 +332,8 @@ protected:
     memcpy(mesh.currentMaster.mac, kMasterMac, 6);
     memcpy(mesh.currentMaster.nextHop, kMasterMac, 6);
     mesh.currentMaster.distance = 1;
-    mesh.hasMasterMac = true;
-    memcpy(mesh.knownMasterMac, kMasterMac, 6);
+    mesh.enrollment.hasMasterMac = true;
+    memcpy(mesh.enrollment.knownMasterMac, kMasterMac, 6);
     // Register master as enrolled peer (required for sendMessage + isPeerInRange)
     PeerInfo p{};
     memcpy(p.mac, kMasterMac, 6);
@@ -543,7 +543,7 @@ TEST_F(JoinAckRelayTest, DoesNotRelayJoinAck_WhenAddressedToSelf) {
   Mesh mesh = makeIntermediateNode();
 
   // Provide a fingerprint (first 4 bytes of devicePublicKey)
-  // devicePublicKey is zeroed in constructor — fingerprint = {0,0,0,0}
+  // enrollment.devicePublicKey is zeroed in constructor — fingerprint = {0,0,0,0}
   auto msg = makeJoinAck(kMyMac);
   memset(msg.data, 0, sizeof(msg.data)); // fingerprint matches zeroed pubkey
 
@@ -622,7 +622,7 @@ TEST_F(EnrollmentTest, SendsSingleEspNowMessage) {
                                           0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
                                           0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
                                           0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
-  memcpy(mesh.devicePublicKey, kPubKey, 32);
+  memcpy(mesh.enrollment.devicePublicKey, kPubKey, 32);
 
   mesh.sendEnrollmentRequest();
 
@@ -650,11 +650,11 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
   memcpy(msg.origin_mac_address, kMac, 6);
   memcpy(msg.enrollment_public_key, kKey, 32);
 
-  mesh.processEnrollmentRequest(msg);
+  mesh.enrollment.processRequest(msg);
 
-  EXPECT_TRUE(mesh._pendingEnrollmentRelay);
-  EXPECT_EQ(memcmp(mesh._pendingEnrollmentMac, kMac, 6), 0);
-  EXPECT_EQ(memcmp(mesh._pendingEnrollmentPubKey, kKey, 32), 0)
+  EXPECT_TRUE(mesh.enrollment._pendingEnrollmentRelay);
+  EXPECT_EQ(memcmp(mesh.enrollment._pendingEnrollmentMac, kMac, 6), 0);
+  EXPECT_EQ(memcmp(mesh.enrollment._pendingEnrollmentPubKey, kKey, 32), 0)
       << "Full 32-byte key must be copied without chunk reassembly";
 }
 
@@ -689,13 +689,13 @@ TEST_F(EnrollmentRelayCallbackTest, DrainCallsRegisteredCallback) {
       0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
       0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
-  memcpy(mesh._pendingEnrollmentMac, kMac, 6);
-  memcpy(mesh._pendingEnrollmentPubKey, kKey, 32);
-  mesh._pendingEnrollmentRelay = true;
+  memcpy(mesh.enrollment._pendingEnrollmentMac, kMac, 6);
+  memcpy(mesh.enrollment._pendingEnrollmentPubKey, kKey, 32);
+  mesh.enrollment._pendingEnrollmentRelay = true;
 
-  mesh.drainPendingEnrollment();
+  mesh.enrollment.drainPendingRelay();
 
-  EXPECT_FALSE(mesh._pendingEnrollmentRelay) << "flag must clear after drain";
+  EXPECT_FALSE(mesh.enrollment._pendingEnrollmentRelay) << "flag must clear after drain";
   ASSERT_NE(g_capturedMac, nullptr) << "callback was not called";
   EXPECT_EQ(memcmp(g_capturedMac, kMac, 6), 0) << "wrong MAC passed to callback";
   EXPECT_EQ(memcmp(g_capturedKey, kKey, 32), 0) << "wrong pubKey passed to callback";
@@ -706,9 +706,9 @@ TEST_F(EnrollmentRelayCallbackTest, DrainWithNoCallbackClearsFlag) {
   mesh.isMaster = true;
   // No callback registered.
 
-  mesh._pendingEnrollmentRelay = true;
-  mesh.drainPendingEnrollment();
+  mesh.enrollment._pendingEnrollmentRelay = true;
+  mesh.enrollment.drainPendingRelay();
 
-  EXPECT_FALSE(mesh._pendingEnrollmentRelay) << "flag must clear even with no callback";
+  EXPECT_FALSE(mesh.enrollment._pendingEnrollmentRelay) << "flag must clear even with no callback";
   EXPECT_EQ(g_capturedMac, nullptr) << "callback must not fire when unregistered";
 }

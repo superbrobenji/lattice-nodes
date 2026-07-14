@@ -61,9 +61,8 @@ void Mesh::enrollPeer(const uint8_t*, const uint8_t*) {
 Mesh::Mesh()
     : meshKey{}, deviceMacAddress{}, lastSeenMasterMac{}, peerInfo{},
       externalRecvCallback(nullptr), currentMaster{}, isMaster(false), lastBeaconMillis(0),
-      lastMasterBeaconReceivedMs(0), devicePrivateKey{}, devicePublicKey{},
-      relayPendingMsg{}, relayPendingAt(0), relayPending(false), knownMasterMac{},
-      hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
+      lastMasterBeaconReceivedMs(0),
+      relayPendingMsg{}, relayPendingAt(0), relayPending(false),
       _dualMasterMode(false), recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0),
       lastRouteReportMs(0) {}
 
@@ -71,15 +70,12 @@ bool Mesh::init() {
   return true;
 }
 
-// linkDataRecvCallback is implemented in Mesh.cpp (real logic)
+// linkDataRecvCallback is implemented in mesh_logic_impl.cpp (real logic)
 void Mesh::broadcastMasterBeacon() {}
 void Mesh::checkMasterTimeout() {}
 void Mesh::loop() {}
 // sendRouteReport is implemented in mesh_logic_impl.cpp (real logic)
 
-bool Mesh::isEnrolled() const {
-  return false;
-}
 void Mesh::debugDumpRadio() {}
 
 // Private methods needed for linking
@@ -117,12 +113,30 @@ bool Mesh::setupEspNow() {
 }
 void Mesh::loadPersistentState() {}
 
-// sendEnrollmentRequest and processEnrollmentRequest are implemented in mesh_logic_impl.cpp (real
-// logic) processJoinAck is implemented in mesh_logic_impl.cpp (real logic)
+// processJoinAck is implemented in mesh_logic_impl.cpp (real logic)
+// drainRecvQueue is implemented in mesh_logic_impl.cpp (real logic)
 
-void Mesh::loadOrGenerateKeypair() {}
-// isReplay, processMasterBeacon, processAdapterData, processJoinAck, and
-// drainRecvQueue are implemented in mesh_logic_impl.cpp (real logic)
+// ---- Enrollment stubs ----
+// Enrollment.cpp is not compiled on host (it uses mbedtls for init and enrollPeer).
+// Provide stubs for those two mbedtls-heavy methods.
+// All other Enrollment:: methods are provided in mesh_logic_impl.cpp.
+
+void Enrollment::init() {
+  // Stub: skip key generation (mbedtls not available on host).
+  // Tests that call sendEnrollmentRequest() must set devicePublicKey directly via
+  // the UNIT_TEST public access (mesh.enrollment.devicePublicKey[...] = ...).
+  auto& em = lattice::utils::EepromManager::getInstance();
+  if (em.loadKnownMasterMac(knownMasterMac)) hasMasterMac = true;
+  if (em.loadKnownMasterMacSecondary(knownMasterMacSecondary)) hasMasterMacSecondary = true;
+  // Keys: leave zeroed (tests set them directly if needed)
+}
+
+void Enrollment::enrollPeer(const uint8_t mac[6], const uint8_t pubKey32[32],
+                             RegisterPeerFn registerFn, bool /*dualMasterMode*/) {
+  // Stub: skip LMK derivation (mbedtls not available on host).
+  // Just invoke the callback if provided.
+  if (registerFn) registerFn(mac, pubKey32);
+}
 
 } // namespace mesh
 } // namespace lattice

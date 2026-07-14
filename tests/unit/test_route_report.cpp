@@ -20,8 +20,8 @@ protected:
     static const uint8_t myMac[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01};
     memcpy(mesh.deviceMacAddress, myMac, 6);
     mesh.isMaster = false;
-    mesh.hasMasterMac = true;
-    memcpy(mesh.knownMasterMac, masterMac, 6);
+    mesh.enrollment.hasMasterMac = true;
+    memcpy(mesh.enrollment.knownMasterMac, masterMac, 6);
     memcpy(mesh.currentMaster.mac, masterMac, 6);
     mesh.currentMaster.distance = 1;
     memcpy(mesh.currentMaster.nextHop, masterMac, 6);
