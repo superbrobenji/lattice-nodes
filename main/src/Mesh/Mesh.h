@@ -9,7 +9,7 @@
 #include <array>
 #include <cstdint>
 #include "src/Adapter/Adapter.h"
-#include "src/persistence/EEPROM_Manager.h"
+#include "src/persistence/EepromManager.h"
 #include "../../project_config.h" // Added for global limits/config
 #include "../../lib/lattice-protocol/c/message_types.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
@@ -27,7 +27,7 @@ namespace mesh {
 using ::mesh_message;
 using ::MeshMessageType;
 using lattice::adapter::adapter_types;
-using lattice::utils::EEPROM_SIZES::MAX_PEERS; // Use constant from EEPROM_Manager
+using lattice::utils::EEPROM_SIZES::MAX_PEERS; // Use constant from EepromManager
 
 static constexpr uint8_t PROTO_VERSION = 2;
 

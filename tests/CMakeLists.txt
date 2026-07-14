@@ -34,7 +34,7 @@ set(FIRMWARE_SOURCES
   ../main/src/Mesh/serialization/nanopb/pb_encode.c
   ../main/src/Mesh/serialization/nanopb/pb_decode.c
   ../main/src/Mesh/serialization/nanopb/pb_common.c
-  ../main/src/persistence/EEPROM_Manager.cpp
+  ../main/src/persistence/EepromManager.cpp
   ../main/src/Adapter/AdapterFactory.cpp
   ../main/src/Adapter/Adapter.cpp
   ../main/src/Adapter/Serial_Adapter/Serial_Adapter.cpp

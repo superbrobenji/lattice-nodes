@@ -6,7 +6,7 @@
 #include "src/hardware/input/Button.h"
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
-#include "src/persistence/EEPROM_Manager.h"
+#include "src/persistence/EepromManager.h"
 #include "project_config.h"
 #include <esp_wifi.h>
 #include <esp_bt.h>
@@ -53,7 +53,7 @@ constexpr int NUM_DEFAULT_PEERS = lattice::config::NUM_DEFAULT_PEERS;
 // Validate configuration for server communication
 static inline void validateServerConfiguration() {
   // Check if this is a master node intended for server communication
-  bool isMasterNode = isDevMode ? devMasterFlag : EEPROM_Manager::getInstance().loadMasterFlag();
+  bool isMasterNode = isDevMode ? devMasterFlag : EepromManager::getInstance().loadMasterFlag();
   bool hasSerialAdapter = (adapter && adapter->getAdapterType() == lattice::adapter::adapter_types::SERIAL_ADAPTER);
   bool loggingDisabled = (lattice::config::DEFAULT_LOG_LEVEL == lattice::utils::LogLevel::LOG_NONE);
   
@@ -92,7 +92,7 @@ void setup() {
   // Check and log reset reason; escalate if WDT looping
   {
     esp_reset_reason_t reason = esp_reset_reason();
-    EEPROM_Manager& em = EEPROM_Manager::getInstance();
+    EepromManager& em = EepromManager::getInstance();
     // Must init EEPROM before setDevMode() — saveRebootReason/saveRebootCount no-op in dev mode
     em.init();
     em.saveRebootReason(static_cast<uint8_t>(reason));
@@ -158,7 +158,7 @@ void setup() {
   }
 
   // Initialize EEPROM Manager
-  if (!EEPROM_Manager::getInstance().init()) {
+  if (!EepromManager::getInstance().init()) {
     Logger::logln("MAIN", "Failed to initialize EEPROM Manager", LogLevel::LOG_ERROR);
     lattice::err::fatal(lattice::core::ErrorTypeDigit::MEMORY,
                           lattice::core::ModuleDigit::CORE,
@@ -173,19 +173,19 @@ void setup() {
   isDevMode = DEV_MODE;
   if (!isDevMode) {
     // If not compile-time dev mode, check EEPROM
-    isDevMode = EEPROM_Manager::getInstance().loadDevFlag();
+    isDevMode = EepromManager::getInstance().loadDevFlag();
   }
 
   Logger::logln("MAIN", String("Running in ") + (isDevMode ? "DEV" : "PRODUCTION") + " mode", LogLevel::LOG_INFO);
 
   // Set dev mode in AdapterFactory and EEPROM Manager
   lattice::adapter::AdapterFactory::setDevMode(isDevMode);
-  EEPROM_Manager::getInstance().setDevMode(isDevMode);
+  EepromManager::getInstance().setDevMode(isDevMode);
 
   // Declare peers to EEPROM (only if not in dev mode and EEPROM is empty)
-  if (!isDevMode && !EEPROM_Manager::getInstance().hasPeers()) {
+  if (!isDevMode && !EepromManager::getInstance().hasPeers()) {
     // Write default peers to EEPROM
-    EEPROM_Manager::getInstance().savePeerList(
+    EepromManager::getInstance().savePeerList(
       reinterpret_cast<const uint8_t*>(defaultPeerList),
       NUM_DEFAULT_PEERS);
     Logger::logln("MAIN", "Wrote default peer MACs to EEPROM.", LogLevel::LOG_INFO);
@@ -264,7 +264,7 @@ void setup() {
     Logger::logln("MAIN", String("DEV mode: starting as ") + (isMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
   } else {
     // In production mode, load from EEPROM
-    isMaster = EEPROM_Manager::getInstance().loadMasterFlag();
+    isMaster = EepromManager::getInstance().loadMasterFlag();
   }
 
   // Master keeps 240MHz for serial USB reliability
@@ -315,7 +315,7 @@ void loop() {
     static bool dashVisible = false;
 
     bool enrolled = mesh.isEnrolled() || mesh.getIsMaster(); // master is always "enrolled"
-    uint8_t nodeId = lattice::utils::EEPROM_Manager::getInstance().loadNodeId();
+    uint8_t nodeId = lattice::utils::EepromManager::getInstance().loadNodeId();
 
     if (!enrolled) {
       // Unenrolled: flash "----" at 500ms
@@ -381,14 +381,14 @@ void loop() {
         Logger::logln("MAIN", String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
         greenLed.blink(newMaster ? 3 : 2, 150, 150);
       } else {
-        bool wasMaster = EEPROM_Manager::getInstance().loadMasterFlag();
+        bool wasMaster = EepromManager::getInstance().loadMasterFlag();
         bool newMaster = !wasMaster;
-        EEPROM_Manager::getInstance().saveMasterFlag(newMaster);
+        EepromManager::getInstance().saveMasterFlag(newMaster);
         Logger::logln("MAIN", String("Button held 5s: CONFIG TOGGLED. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
         Logger::logln("MAIN", "Restarting in 2 seconds for new role...", LogLevel::LOG_INFO);
         greenLed.blink(newMaster ? 3 : 2, 200, 200);
         delay(2000);
-        EEPROM_Manager::getInstance().forceFlush();
+        EepromManager::getInstance().forceFlush();
         ESP.restart();
       }
     }
@@ -413,11 +413,11 @@ void loop() {
       } else if (millis() < resetConfirmDeadline) {
         resetConfirmPending = false;
         Logger::logln("MAIN", "EEPROM wipe confirmed. Clearing all...", LogLevel::LOG_WARN);
-        EEPROM_Manager::getInstance().clearAll();
+        EepromManager::getInstance().clearAll();
         redLed.blink(5, 100, 100);
         greenLed.blink(5, 100, 100);
         delay(3000);
-        EEPROM_Manager::getInstance().forceFlush();
+        EepromManager::getInstance().forceFlush();
         ESP.restart();
       }
     }

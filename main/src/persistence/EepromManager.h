@@ -52,7 +52,7 @@ constexpr uint16_t NODE_ID = 496; // 1 byte: logical node ID assigned by server 
 constexpr uint16_t KNOWN_MASTER_MAC_SECONDARY =
     497; // 6 bytes: TOFU secondary master MAC (0xFF×6 = unset, ends 502)
 
-// Old v1 addresses (used only during migration in EEPROM_Manager::init())
+// Old v1 addresses (used only during migration in EepromManager::init())
 constexpr uint16_t V1_REBOOT_REASON = 92;
 constexpr uint16_t V1_REBOOT_COUNT = 93;
 constexpr uint16_t V1_PRIVATE_KEY = 97;
@@ -73,7 +73,7 @@ constexpr uint16_t PEER_LIST_SIZE = MAX_PEERS * PEER_RECORD_SIZE;          // 38
 constexpr uint8_t CURRENT_SCHEMA_VERSION = 3; // Current EEPROM schema version
 } // namespace EEPROM_SIZES
 
-class EEPROM_Manager {
+class EepromManager {
 private:
   bool isInitialized;
   bool isDevMode;
@@ -82,7 +82,7 @@ private:
   static constexpr uint32_t EEPROM_FLUSH_INTERVAL_MS = 5000;
 
   // Private constructor for singleton pattern
-  EEPROM_Manager();
+  EepromManager();
 
   // Helper methods
   bool ensureInitialized();
@@ -93,13 +93,13 @@ private:
 
 public:
   // Singleton pattern
-  static EEPROM_Manager& getInstance();
+  static EepromManager& getInstance();
 
   // Delete copy and move to enforce singleton
-  EEPROM_Manager(const EEPROM_Manager&) = delete;
-  EEPROM_Manager& operator=(const EEPROM_Manager&) = delete;
-  EEPROM_Manager(EEPROM_Manager&&) = delete;
-  EEPROM_Manager& operator=(EEPROM_Manager&&) = delete;
+  EepromManager(const EepromManager&) = delete;
+  EepromManager& operator=(const EepromManager&) = delete;
+  EepromManager(EepromManager&&) = delete;
+  EepromManager& operator=(EepromManager&&) = delete;
 
   // Initialization and configuration
   bool init();
@@ -176,7 +176,7 @@ public:
   void printAddress(uint16_t address, uint16_t length);
 
   // Destructor
-  ~EEPROM_Manager();
+  ~EepromManager();
 };
 
 } // namespace utils

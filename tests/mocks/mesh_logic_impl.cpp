@@ -9,7 +9,7 @@
 #include "Mesh/Mesh.h"
 #include "src/network/MacAddress.h"
 #include "src/logging/Logger.h"
-#include "src/persistence/EEPROM_Manager.h"
+#include "src/persistence/EepromManager.h"
 #include "../../main/project_config.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include <cstring>
@@ -50,7 +50,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
     memcpy(knownMasterMac, msg.origin_mac_address, 6);
     hasMasterMac = true;
-    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+    EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
     Logger::logln("MESH", "Master MAC learned from first beacon (TOFU fallback)",
                   LogLevel::LOG_INFO);
   } else if (!fromPrimary && !fromSecondary) {
@@ -59,7 +59,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       // Second master TOFU — learn and save as secondary
       memcpy(knownMasterMacSecondary, msg.origin_mac_address, 6);
       hasMasterMacSecondary = true;
-      EEPROM_Manager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
+      EepromManager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
       Logger::logln("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
       // fall through to process this beacon as valid
     } else if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
@@ -71,7 +71,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       // All known masters stale — accept as new primary (hotswap)
       Logger::logln("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
       memcpy(knownMasterMac, msg.origin_mac_address, 6);
-      EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+      EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
     }
   }
 
@@ -209,13 +209,13 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     return;
   }
   Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
-  EEPROM_Manager::getInstance().saveEnrolledFlag(true);
+  EepromManager::getInstance().saveEnrolledFlag(true);
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
   if (!hasMasterMac) {
     memcpy(knownMasterMac, msg.origin_mac_address, 6);
     hasMasterMac = true;
-    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+    EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
     Logger::logln("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
   }
 }

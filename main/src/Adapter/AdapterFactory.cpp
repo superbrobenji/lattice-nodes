@@ -1,7 +1,7 @@
 #include "AdapterFactory.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
-#include "src/persistence/EEPROM_Manager.h"
+#include "src/persistence/EepromManager.h"
 // Include all adapter headers
 #include "src/Adapter/PIR_Adapter/PIR_Adapter.h"
 #include "src/Adapter/Serial_Adapter/Serial_Adapter.h"
@@ -55,7 +55,7 @@ adapter_types AdapterFactory::loadAdapterTypeFromEEPROM() {
     return adapter_types::PIR_ADAPTER; // Always return default in dev mode
   }
 
-  uint8_t adapterType = EEPROM_Manager::getInstance().loadAdapterType();
+  uint8_t adapterType = EepromManager::getInstance().loadAdapterType();
   return adapterTypeFromEEPROM(adapterType);
 }
 
@@ -66,7 +66,7 @@ void AdapterFactory::saveAdapterTypeToEEPROM(adapter_types type) {
     return; // Don't save to EEPROM in dev mode
   }
 
-  EEPROM_Manager::getInstance().saveAdapterType(adapterTypeToEEPROM(type));
+  EepromManager::getInstance().saveAdapterType(adapterTypeToEEPROM(type));
 }
 
 Adapter* AdapterFactory::createFromEEPROM() {
@@ -82,9 +82,9 @@ void AdapterFactory::initializeDefaultsIfUnset() {
   }
 
   // Check if adapter type is unset (0xFF) and set default if needed
-  uint8_t currentType = EEPROM_Manager::getInstance().loadAdapterType();
+  uint8_t currentType = EepromManager::getInstance().loadAdapterType();
   if (currentType == 0xFF) {
-    EEPROM_Manager::getInstance().saveAdapterType(adapterTypeToEEPROM(adapter_types::PIR_ADAPTER));
+    EepromManager::getInstance().saveAdapterType(adapterTypeToEEPROM(adapter_types::PIR_ADAPTER));
   }
 }
 

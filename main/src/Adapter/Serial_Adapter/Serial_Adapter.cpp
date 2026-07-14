@@ -164,7 +164,7 @@ void Serial_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) 
                       LogLevel::LOG_WARN);
       } else {
         auto preset = static_cast<lattice::config::TxPowerPreset>(presetByte);
-        EEPROM_Manager::getInstance().saveTxPowerPreset(preset);
+        EepromManager::getInstance().saveTxPowerPreset(preset);
         esp_err_t txErr = esp_wifi_set_max_tx_power(
             static_cast<int8_t>(lattice::config::TX_POWER_VALUES[presetByte]));
         if (txErr != ESP_OK) {
@@ -478,7 +478,7 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
         Logger::logln("Serial_Adapter", "Invalid TX power preset, ignoring", LogLevel::LOG_WARN);
       } else {
         auto preset = static_cast<lattice::config::TxPowerPreset>(presetByte);
-        EEPROM_Manager::getInstance().saveTxPowerPreset(preset);
+        EepromManager::getInstance().saveTxPowerPreset(preset);
         esp_err_t txErr = esp_wifi_set_max_tx_power(
             static_cast<int8_t>(lattice::config::TX_POWER_VALUES[presetByte]));
         if (txErr != ESP_OK) {
@@ -512,7 +512,7 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
       bool isTarget = allFF || (memcmp(&msg.data[1], myMac, 6) == 0);
       if (isTarget) {
         uint8_t nodeId = msg.data[7];
-        lattice::utils::EEPROM_Manager::getInstance().saveNodeId(nodeId);
+        lattice::utils::EepromManager::getInstance().saveNodeId(nodeId);
         Logger::logln("Serial_Adapter", "Node ID set: " + String(nodeId), LogLevel::LOG_INFO);
       }
     } else {

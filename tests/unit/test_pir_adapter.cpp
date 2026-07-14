@@ -6,7 +6,7 @@
 #include "esp_wifi_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
-#include "persistence/EEPROM_Manager.h"
+#include "persistence/EepromManager.h"
 #include "Mesh/Mesh.h"
 
 using namespace lattice::adapter;
@@ -26,7 +26,7 @@ class PIRHealthTest : public ::testing::Test {
 protected:
   void SetUp() override {
     EEPROM.reset();
-    lattice::utils::EEPROM_Manager::getInstance().init();
+    lattice::utils::EepromManager::getInstance().init();
     resetMillis();
     resetWifiMock();
     lastTxType = adapter_types::UNKNOWN_ADAPTER;
@@ -168,7 +168,7 @@ TEST_F(PIRHealthTest, OpNodeIdSet_AssignsNodeId_WhenTargetMatchesMac) {
 
   pir->onMeshData(msg);
 
-  EXPECT_EQ(lattice::utils::EEPROM_Manager::getInstance().loadNodeId(), 99u);
+  EXPECT_EQ(lattice::utils::EepromManager::getInstance().loadNodeId(), 99u);
   delete pir;
 }
 
@@ -192,6 +192,6 @@ TEST_F(PIRHealthTest, OpNodeIdSet_IgnoresMessage_WhenTargetMismatch) {
 
   pir->onMeshData(msg);
 
-  EXPECT_EQ(lattice::utils::EEPROM_Manager::getInstance().loadNodeId(), 0u);
+  EXPECT_EQ(lattice::utils::EepromManager::getInstance().loadNodeId(), 0u);
   delete pir;
 }

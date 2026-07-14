@@ -2,7 +2,7 @@
 #include "src/network/MacAddress.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
-#include "src/persistence/EEPROM_Manager.h"
+#include "src/persistence/EepromManager.h"
 // Error.h already provides ERROR_CHECK macros
 #include <esp_now.h>
 #include <WiFi.h>
@@ -236,7 +236,7 @@ void Mesh::loadPeersFromEEPROM() {
 
   // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key
   uint8_t peerRecords[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_RECORD_SIZE];
-  bool eepromOk = EEPROM_Manager::getInstance().loadPeerList(peerRecords, EEPROM_SIZES::MAX_PEERS);
+  bool eepromOk = EepromManager::getInstance().loadPeerList(peerRecords, EEPROM_SIZES::MAX_PEERS);
 
   if (eepromOk) {
     for (int i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
@@ -283,7 +283,7 @@ void Mesh::savePeersToEEPROM() {
     memcpy(record + 6, peerMacs[i].publicKey, 32);
   }
 
-  EEPROM_Manager::getInstance().savePeerList(peerRecords, peerCount);
+  EepromManager::getInstance().savePeerList(peerRecords, peerCount);
 }
 
 void Mesh::addPeerToEEPROM(const uint8_t mac[6]) {
@@ -376,8 +376,8 @@ bool Mesh::init() {
   loadPersistentState();
 
   // 2. Increment and save boot epoch (replay protection)
-  bootEpoch = EEPROM_Manager::getInstance().loadBootEpoch() + 1;
-  EEPROM_Manager::getInstance().saveBootEpoch(bootEpoch);
+  bootEpoch = EepromManager::getInstance().loadBootEpoch() + 1;
+  EepromManager::getInstance().saveBootEpoch(bootEpoch);
   txSeqNum = 0;
   memset(replayCache, 0, sizeof(replayCache));
   Logger::logln("MESH", "Boot epoch: " + String(bootEpoch), LogLevel::LOG_INFO);
@@ -388,7 +388,7 @@ bool Mesh::init() {
 
   // 3a. Apply TX power preset from EEPROM (deployment-specific)
   {
-    lattice::config::TxPowerPreset preset = EEPROM_Manager::getInstance().loadTxPowerPreset();
+    lattice::config::TxPowerPreset preset = EepromManager::getInstance().loadTxPowerPreset();
     uint8_t txPowerVal = lattice::config::TX_POWER_VALUES[static_cast<uint8_t>(preset)];
     esp_err_t txErr = esp_wifi_set_max_tx_power(static_cast<int8_t>(txPowerVal));
     if (txErr != ESP_OK) {
@@ -419,13 +419,13 @@ void Mesh::loadPersistentState() {
   loadPeersFromEEPROM();
   loadMeshKeyFromEEPROM();
   loadOrGenerateKeypair();
-  hasMasterMac = EEPROM_Manager::getInstance().loadKnownMasterMac(knownMasterMac);
+  hasMasterMac = EepromManager::getInstance().loadKnownMasterMac(knownMasterMac);
   if (hasMasterMac) {
     Logger::logln("MESH", "Known master MAC loaded from EEPROM", LogLevel::LOG_INFO);
   }
   if (_dualMasterMode) {
     hasMasterMacSecondary =
-        EEPROM_Manager::getInstance().loadKnownMasterMacSecondary(knownMasterMacSecondary);
+        EepromManager::getInstance().loadKnownMasterMacSecondary(knownMasterMacSecondary);
     if (hasMasterMacSecondary) {
       Logger::logln("MESH", "Known secondary master MAC loaded from EEPROM", LogLevel::LOG_INFO);
     }
@@ -433,7 +433,7 @@ void Mesh::loadPersistentState() {
 }
 
 void Mesh::loadOrGenerateKeypair() {
-  if (EEPROM_Manager::getInstance().loadKeypair(devicePrivateKey, devicePublicKey)) {
+  if (EepromManager::getInstance().loadKeypair(devicePrivateKey, devicePublicKey)) {
     Logger::logln("MESH", "Device keypair loaded from EEPROM", LogLevel::LOG_INFO);
     return;
   }
@@ -486,7 +486,7 @@ void Mesh::loadOrGenerateKeypair() {
   mbedtls_ctr_drbg_free(&ctr_drbg);
   mbedtls_entropy_free(&entropy);
 
-  EEPROM_Manager::getInstance().saveKeypair(devicePrivateKey, devicePublicKey);
+  EepromManager::getInstance().saveKeypair(devicePrivateKey, devicePublicKey);
   Logger::logln("MESH", "New keypair generated and saved", LogLevel::LOG_INFO);
 }
 
@@ -731,7 +731,7 @@ void Mesh::removePeer(const uint8_t mac[6]) {
 
 void Mesh::loadMeshKeyFromEEPROM() {
   // Attempt to load mesh key from EEPROM
-  if (!EEPROM_Manager::getInstance().loadMeshKey(meshKey, MESH_KEY_SIZE)) {
+  if (!EepromManager::getInstance().loadMeshKey(meshKey, MESH_KEY_SIZE)) {
     Logger::logln("MESH", "EEPROM read failed, using default mesh key", LogLevel::LOG_WARN);
   }
 
@@ -759,7 +759,7 @@ void Mesh::loadMeshKeyFromEEPROM() {
 }
 
 void Mesh::saveMeshKeyToEEPROM(const uint8_t* key) {
-  EEPROM_Manager::getInstance().saveMeshKey(key, MESH_KEY_SIZE);
+  EepromManager::getInstance().saveMeshKey(key, MESH_KEY_SIZE);
 }
 
 // Generate a new random 16-byte mesh key
@@ -789,7 +789,7 @@ void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t* data) {
 }
 
 void Mesh::debugDumpRadio() {
-  if (!EEPROM_Manager::getInstance().getDevMode())
+  if (!EepromManager::getInstance().getDevMode())
     return;
   uint8_t ch;
   esp_wifi_get_channel(&ch, nullptr);
@@ -848,7 +848,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
     memcpy(knownMasterMac, msg.origin_mac_address, 6);
     hasMasterMac = true;
-    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+    EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
     Logger::logln("MESH", "Master MAC learned from first beacon (TOFU fallback)",
                   LogLevel::LOG_INFO);
   } else if (!fromPrimary && !fromSecondary) {
@@ -857,7 +857,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       // Second master TOFU — learn and save as secondary
       memcpy(knownMasterMacSecondary, msg.origin_mac_address, 6);
       hasMasterMacSecondary = true;
-      EEPROM_Manager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
+      EepromManager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
       Logger::logln("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
       // fall through to process this beacon as valid
     } else if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
@@ -869,7 +869,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       // All known masters stale — accept as new primary (hotswap)
       Logger::logln("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
       memcpy(knownMasterMac, msg.origin_mac_address, 6);
-      EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+      EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
     }
   }
 
@@ -985,7 +985,7 @@ void Mesh::relayDownlink(const mesh_message& msg) {
 }
 
 bool Mesh::isEnrolled() const {
-  return EEPROM_Manager::getInstance().loadEnrolledFlag();
+  return EepromManager::getInstance().loadEnrolledFlag();
 }
 
 void Mesh::sendEnrollmentRequest() {
@@ -1026,13 +1026,13 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     return;
   }
   Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
-  EEPROM_Manager::getInstance().saveEnrolledFlag(true);
+  EepromManager::getInstance().saveEnrolledFlag(true);
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
   if (!hasMasterMac) {
     memcpy(knownMasterMac, msg.origin_mac_address, 6);
     hasMasterMac = true;
-    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+    EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
     Logger::logln("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
   }
 }
@@ -1143,7 +1143,7 @@ void Mesh::processRouteReport(const mesh_message& msg) {
 
 void Mesh::loop() {
   drainRecvQueue();
-  EEPROM_Manager::getInstance().flushIfDirty();
+  EepromManager::getInstance().flushIfDirty();
 
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
   // Serial.write() must not be called from that callback — safe to do here in loop().
