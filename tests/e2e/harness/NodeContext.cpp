@@ -1,5 +1,6 @@
 #include "NodeContext.h"
 #include <cstring>
+#include <stdexcept>
 #include "Arduino.h"
 #include "esp_wifi_mock.h"
 #include "src/mesh/Mesh.h"
@@ -12,12 +13,48 @@ namespace sim {
 
 template <typename T>
 static void loadImage(T& obj, std::vector<uint8_t>& image) {
-  if (image.size() == sizeof(T)) memcpy(reinterpret_cast<void*>(&obj), image.data(), sizeof(T));
+  // A fresh NodeContext's image fields are seeded from the pristine snapshot in
+  // its constructor (see initPristineImages below), so by the time swapIn() runs
+  // the size should always match sizeof(T) exactly. Any mismatch — including an
+  // empty vector — means a context reached swapIn() without being constructed
+  // through NodeContext(), or a singleton's layout changed without updating this
+  // harness. Either way, silently skipping the restore would let one node's
+  // state leak into another's, defeating the isolation this harness exists for
+  // — so fail loudly instead.
+  if (image.size() != sizeof(T)) {
+    throw std::logic_error("NodeContext: singleton image size mismatch");
+  }
+  memcpy(reinterpret_cast<void*>(&obj), image.data(), sizeof(T));
 }
 template <typename T>
 static void saveImage(T& obj, std::vector<uint8_t>& image) {
   image.resize(sizeof(T));
   memcpy(image.data(), reinterpret_cast<void*>(&obj), sizeof(T));
+}
+
+// Capture the singletons' untouched state once, before any node ever runs, so a
+// fresh context's first swapIn() restores pristine state instead of silently
+// inheriting the previous node's. Assumes the first NodeContext is constructed
+// before any node boots — true for the harness's usage (contexts are
+// constructed up front, before boot() runs on any of them).
+static void initPristineImages(std::vector<uint8_t>& em, std::vector<uint8_t>& ec) {
+  static std::vector<uint8_t> pristineEm = [] {
+    std::vector<uint8_t> v;
+    saveImage(lattice::utils::EepromManager::getInstance(), v);
+    return v;
+  }();
+  static std::vector<uint8_t> pristineEc = [] {
+    std::vector<uint8_t> v;
+    saveImage(lattice::utils::ErrorCore::getInstance(), v);
+    return v;
+  }();
+  em = pristineEm;
+  ec = pristineEc;
+}
+
+NodeContext::NodeContext() {
+  eepromData.fill(0xFF);
+  initPristineImages(eepromManagerImage, errorCoreImage);
 }
 
 void swapIn(NodeContext& ctx) {

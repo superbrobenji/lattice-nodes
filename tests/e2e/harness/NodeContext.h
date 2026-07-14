@@ -44,7 +44,11 @@ struct NodeContext {
   std::vector<uint8_t> eepromManagerImage;
   std::vector<uint8_t> errorCoreImage;
 
-  NodeContext() { eepromData.fill(0xFF); }
+  // Defined in NodeContext.cpp: seeds eepromManagerImage/errorCoreImage from a
+  // one-time "pristine" snapshot of the singletons, taken before any node has
+  // touched them, so this context's first swapIn() restores untouched state
+  // instead of silently inheriting whatever a previous node left behind.
+  NodeContext();
 };
 
 void swapIn(NodeContext& ctx);
