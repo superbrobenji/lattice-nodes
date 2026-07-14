@@ -6,7 +6,7 @@
 #include "Arduino.h"
 #include "esp_now.h"
 #include "WiFi.h"
-#include "Mesh/Mesh.h"
+#include "mesh/Mesh.h"
 #include "src/network/MacAddress.h"
 #include "src/logging/Logger.h"
 #include "src/persistence/EepromManager.h"

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include "persistence/EepromManager.h"
-#include "Mesh/Mesh.h" // for PeerInfo and PEER_RECORD_SIZE constants
+#include "mesh/Mesh.h" // for PeerInfo and PEER_RECORD_SIZE constants
 
 using lattice::mesh::PeerInfo;
 using lattice::utils::EepromManager;

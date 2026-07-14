@@ -1,11 +1,11 @@
 #ifndef SERIAL_ADAPTER_H
 #define SERIAL_ADAPTER_H
 
-#include "src/Adapter/Adapter.h"
-#include "src/Mesh/serialization/nanopb/pb.h"
-#include "src/Mesh/serialization/nanopb/pb_encode.h"
-#include "src/Mesh/serialization/nanopb/pb_decode.h"
-#include "src/Mesh/serialization/mesh.pb.h"
+#include "src/adapter/Adapter.h"
+#include "src/mesh/serialization/nanopb/pb.h"
+#include "src/mesh/serialization/nanopb/pb_encode.h"
+#include "src/mesh/serialization/nanopb/pb_decode.h"
+#include "src/mesh/serialization/mesh.pb.h"
 // Shared protocol constants — source of truth is lattice-protocol repo (git submodule)
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "lib/lattice-protocol/c/adapter_types.h"
@@ -13,9 +13,9 @@
 namespace lattice {
 namespace adapter {
 
-class Serial_Adapter : public Adapter {
+class SerialAdapter : public Adapter {
 public:
-  explicit Serial_Adapter(int pin);
+  explicit SerialAdapter(int pin);
 
   bool init() override;
   void loop() override;

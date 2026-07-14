@@ -1,13 +1,13 @@
-#include "Serial_Adapter.h"
-#include "src/Adapter/AdapterFactory.h"
+#include "SerialAdapter.h"
+#include "src/adapter/AdapterFactory.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include <esp_wifi.h>
-#include "src/Mesh/Mesh.h"
+#include "src/mesh/Mesh.h"
 #include <cstring>
 #include <cstdio>
 #if SIMULATE_MODE
-#include "src/Adapter/PIR_Adapter/PIR_Adapter.h"
+#include "src/adapter/pir/PirAdapter.h"
 #endif
 
 namespace lattice {
@@ -15,13 +15,13 @@ namespace adapter {
 
 using namespace lattice::utils;
 
-uint32_t Serial_Adapter::lastHealthMillis = 0;
+uint32_t SerialAdapter::lastHealthMillis = 0;
 
 static void readOwnMac(uint8_t out[6]) {
   esp_wifi_get_mac(WIFI_IF_STA, out);
 }
 
-void Serial_Adapter::sendHealthReport() {
+void SerialAdapter::sendHealthReport() {
   Logger::logln("Serial_Adapter", "Sending health report", LogLevel::LOG_INFO);
 
   uint8_t data[64] = {0};
@@ -56,7 +56,7 @@ void Serial_Adapter::sendHealthReport() {
   }
 }
 
-Serial_Adapter::Serial_Adapter(int pin)
+SerialAdapter::SerialAdapter(int pin)
     : Adapter(pin), frameState(FrameState::AwaitingLen1), frameLength(0), frameIndex(0),
       lastReportedHopCount(0) {
   _adapterType = adapter_types::SERIAL_ADAPTER;
@@ -66,13 +66,13 @@ Serial_Adapter::Serial_Adapter(int pin)
                 LogLevel::LOG_INFO);
 }
 
-bool Serial_Adapter::init() {
+bool SerialAdapter::init() {
   // Serial already initialized in main. Nothing to do.
   Logger::logln("Serial_Adapter", "Serial_Adapter initialized successfully", LogLevel::LOG_INFO);
   return true;
 }
 
-void Serial_Adapter::loop() {
+void SerialAdapter::loop() {
   // Health report: send periodically every 30s, or immediately on hop count change
   lattice::mesh::Mesh* meshPtr = lattice::mesh::Mesh::getInstance();
   uint32_t currentHopCount = meshPtr ? meshPtr->getHopCount() : 0;
@@ -140,7 +140,7 @@ void Serial_Adapter::loop() {
   }
 }
 
-void Serial_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
+void SerialAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
   Logger::logln(
       "Serial_Adapter",
       "Processing incoming mesh message - Type: " + String((uint8_t)message.message_type) +
@@ -150,7 +150,7 @@ void Serial_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) 
 
   // Handle control opcodes received via mesh.
   // NOTE: OP_CONFIG_SET is now handled in Adapter::onMeshData() (base class) so it reaches
-  // ALL node types. Only Serial_Adapter-specific opcodes remain here.
+  // ALL node types. Only SerialAdapter-specific opcodes remain here.
   if (message.data_type == adapter_types::SERIAL_ADAPTER) {
     uint8_t op = message.data[0];
     if (op == OP_HEALTH_REQ) {
@@ -201,8 +201,8 @@ void Serial_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) 
   Logger::logln("Serial_Adapter", "Mesh message sent to serial successfully", LogLevel::LOG_DEBUG);
 }
 
-size_t Serial_Adapter::encodeMeshMessage(const lattice::mesh::mesh_message& msg, uint8_t* out,
-                                         size_t outCap) {
+size_t SerialAdapter::encodeMeshMessage(const lattice::mesh::mesh_message& msg, uint8_t* out,
+                                        size_t outCap) {
   Logger::logln("Serial_Adapter",
                 "Encoding mesh message - Type: " + String((uint8_t)msg.message_type) +
                     " DataType: " + String(static_cast<int32_t>(msg.data_type)) +
@@ -253,8 +253,8 @@ size_t Serial_Adapter::encodeMeshMessage(const lattice::mesh::mesh_message& msg,
   return stream.bytes_written;
 }
 
-bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len,
-                                       lattice::mesh::mesh_message& outMsg) {
+bool SerialAdapter::decodeMeshMessage(const uint8_t* data, size_t len,
+                                      lattice::mesh::mesh_message& outMsg) {
   Logger::logln("Serial_Adapter", "Decoding protobuf message of " + String(len) + " bytes",
                 LogLevel::LOG_DEBUG);
 
@@ -301,7 +301,7 @@ bool Serial_Adapter::decodeMeshMessage(const uint8_t* data, size_t len,
   return true;
 }
 
-void Serial_Adapter::relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]) {
+void SerialAdapter::relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]) {
   lattice::mesh::mesh_message msg = {};
   msg.message_type = MESH_TYPE_ENROLLMENT;
   msg.proto_version = 1;
@@ -322,7 +322,7 @@ void Serial_Adapter::relayEnrollmentToServer(const uint8_t mac[6], const uint8_t
   Logger::logln("Serial_Adapter", "Enrollment request relayed to server", LogLevel::LOG_INFO);
 }
 
-void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
+void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
   Logger::logln("Serial_Adapter", "Handling complete frame of " + String(len) + " bytes",
                 LogLevel::LOG_INFO);
 
@@ -331,7 +331,7 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
     uint8_t op = data[0];
     if (op == OP_SIM_PIR_TRIGGER) {
       Logger::logln("SIM", "Injecting fake PIR event", LogLevel::LOG_WARN);
-      lattice::adapter::PIR_Adapter* pirAdapter = lattice::adapter::PIR_Adapter::getInstance();
+      lattice::adapter::PirAdapter* pirAdapter = lattice::adapter::PirAdapter::getInstance();
       if (pirAdapter)
         pirAdapter->simulateMotion();
       return;
@@ -525,7 +525,7 @@ void Serial_Adapter::handleCompleteFrame(const uint8_t* data, size_t len) {
 }
 
 #ifdef UNIT_TEST
-bool Serial_Adapter::injectByte(uint8_t byteIn) {
+bool SerialAdapter::injectByte(uint8_t byteIn) {
   switch (frameState) {
   case FrameState::AwaitingLen1:
     frameLength = byteIn;

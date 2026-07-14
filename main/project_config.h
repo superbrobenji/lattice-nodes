@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 #include "src/logging/Logger.h"
-#include "src/Adapter/Adapter.h"
+#include "src/adapter/Adapter.h"
 
 namespace lattice {
 namespace config {

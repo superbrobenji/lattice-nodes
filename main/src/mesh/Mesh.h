@@ -8,7 +8,7 @@
 #include <esp_wifi.h>
 #include <array>
 #include <cstdint>
-#include "src/Adapter/Adapter.h"
+#include "src/adapter/Adapter.h"
 #include "src/persistence/EepromManager.h"
 #include "../../project_config.h" // Added for global limits/config
 #include "../../lib/lattice-protocol/c/message_types.h"

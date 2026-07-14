@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <cstring>
-#include "Mesh/serialization/mesh.pb.h"
-#include "Mesh/serialization/nanopb/pb_encode.h"
-#include "Mesh/serialization/nanopb/pb_decode.h"
+#include "mesh/serialization/mesh.pb.h"
+#include "mesh/serialization/nanopb/pb_encode.h"
+#include "mesh/serialization/nanopb/pb_decode.h"
 
 // Helper: encode a mesh_MeshMessage to a buffer, return bytes written (0 = failure)
 static size_t encodeMsg(const mesh_MeshMessage& pbMsg, uint8_t* out, size_t outCap) {

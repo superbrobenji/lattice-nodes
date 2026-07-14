@@ -30,7 +30,7 @@ Mesh* Mesh_instance_stub = nullptr;
 #include "WiFi.h"
 
 // Now include Mesh.h to get the class definition
-#include "src/Mesh/Mesh.h"
+#include "src/mesh/Mesh.h"
 
 namespace lattice {
 namespace mesh {

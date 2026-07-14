@@ -3,8 +3,8 @@
 #include "src/error/Error.h"
 #include "src/persistence/EepromManager.h"
 // Include all adapter headers
-#include "src/Adapter/PIR_Adapter/PIR_Adapter.h"
-#include "src/Adapter/Serial_Adapter/Serial_Adapter.h"
+#include "src/adapter/pir/PirAdapter.h"
+#include "src/adapter/serial/SerialAdapter.h"
 
 namespace lattice {
 namespace adapter {
@@ -23,12 +23,12 @@ void AdapterFactory::setDevMode(bool isDev) {
 Adapter* AdapterFactory::createAdapter(adapter_types type, int pin) {
   switch (type) {
   case adapter_types::PIR_ADAPTER:
-    Logger::logln("Factory", "Creating PIR_Adapter", LogLevel::LOG_INFO);
-    return new PIR_Adapter(pin);
+    Logger::logln("Factory", "Creating PirAdapter", LogLevel::LOG_INFO);
+    return new PirAdapter(pin);
 
   case adapter_types::SERIAL_ADAPTER:
-    Logger::logln("Factory", "Creating Serial_Adapter", LogLevel::LOG_INFO);
-    return new Serial_Adapter(pin);
+    Logger::logln("Factory", "Creating SerialAdapter", LogLevel::LOG_INFO);
+    return new SerialAdapter(pin);
 
   default:
     lattice::err::fail(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::ADAPTER,

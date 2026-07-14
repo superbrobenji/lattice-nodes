@@ -21,8 +21,8 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/src
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/lib
-  ${CMAKE_CURRENT_SOURCE_DIR}/../main/src/Mesh/serialization/nanopb
-  ${CMAKE_CURRENT_SOURCE_DIR}/../main/src/Mesh/serialization
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/src/mesh/serialization/nanopb
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/src/mesh/serialization
 )
 
 # UNIT_TEST enables friend declarations in Mesh.h for test fixture access
@@ -30,15 +30,15 @@ add_compile_definitions(UNIT_TEST)
 
 # Firmware source files compilable on host (hardware-independent or mockable)
 set(FIRMWARE_SOURCES
-  ../main/src/Mesh/serialization/mesh.pb.c
-  ../main/src/Mesh/serialization/nanopb/pb_encode.c
-  ../main/src/Mesh/serialization/nanopb/pb_decode.c
-  ../main/src/Mesh/serialization/nanopb/pb_common.c
+  ../main/src/mesh/serialization/mesh.pb.c
+  ../main/src/mesh/serialization/nanopb/pb_encode.c
+  ../main/src/mesh/serialization/nanopb/pb_decode.c
+  ../main/src/mesh/serialization/nanopb/pb_common.c
   ../main/src/persistence/EepromManager.cpp
-  ../main/src/Adapter/AdapterFactory.cpp
-  ../main/src/Adapter/Adapter.cpp
-  ../main/src/Adapter/Serial_Adapter/Serial_Adapter.cpp
-  ../main/src/Adapter/PIR_Adapter/PIR_Adapter.cpp
+  ../main/src/adapter/AdapterFactory.cpp
+  ../main/src/adapter/Adapter.cpp
+  ../main/src/adapter/serial/SerialAdapter.cpp
+  ../main/src/adapter/pir/PirAdapter.cpp
   ../main/src/logging/Logger.cpp
   ../main/src/error/ErrorCore.cpp
   ../main/src/hardware/output/GpioOutput.cpp

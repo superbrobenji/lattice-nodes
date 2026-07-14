@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "Mesh/Mesh.h"
+#include "mesh/Mesh.h"
 #include "esp_now_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"

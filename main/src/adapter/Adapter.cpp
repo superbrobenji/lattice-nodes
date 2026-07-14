@@ -1,9 +1,9 @@
 #include "Adapter.h"
-#include "src/Mesh/Mesh.h" // for full definition of mesh_message
+#include "src/mesh/Mesh.h" // for full definition of mesh_message
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
-#include "src/Adapter/AdapterFactory.h"
-#include "src/Adapter/Serial_Adapter/Serial_Adapter.h"
+#include "src/adapter/AdapterFactory.h"
+#include "src/adapter/serial/SerialAdapter.h"
 #include "src/persistence/EepromManager.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include <esp_wifi.h>

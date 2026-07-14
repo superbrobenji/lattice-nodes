@@ -1,11 +1,11 @@
-#include "PIR_Adapter.h"
+#include "PirAdapter.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include <cstdint>
 #include <cstring>
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
-#include "src/Mesh/Mesh.h"
-#include "src/Adapter/AdapterFactory.h"
+#include "src/mesh/Mesh.h"
+#include "src/adapter/AdapterFactory.h"
 #include <esp_wifi.h>
 
 namespace lattice {
@@ -13,15 +13,15 @@ namespace adapter {
 
 using namespace lattice::utils;
 
-PIR_Adapter* PIR_Adapter::instance = nullptr;
+PirAdapter* PirAdapter::instance = nullptr;
 
-PIR_Adapter::PIR_Adapter(int pin)
+PirAdapter::PirAdapter(int pin)
     : Adapter(pin), _pir(pin), _cooldownSeconds(3), _lastTrigger(0), _timerActive(false),
       _motionSent(false), _interruptEnabled(false), _initialized(false), _lastHealthMillis(0) {
   _adapterType = adapter_types::PIR_ADAPTER;
 }
 
-bool PIR_Adapter::init() {
+bool PirAdapter::init() {
   if (_initialized) {
     Logger::logln("PIR_Adapter", "Warning: Already initialized.", LogLevel::LOG_WARN);
     return true;
@@ -34,7 +34,7 @@ bool PIR_Adapter::init() {
   }
 
   instance = this;
-  _pir.attachInterrupt(PIR_Adapter::detectMotionTrampoline, RISING);
+  _pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING);
 
   _interruptEnabled = true;
   _initialized = true;
@@ -43,17 +43,17 @@ bool PIR_Adapter::init() {
   return true;
 }
 
-void PIR_Adapter::detectMotionTrampoline() {
+void PirAdapter::detectMotionTrampoline() {
   if (instance)
     instance->detectMotion();
 }
 
-void PIR_Adapter::sendDataTrampoline(adapter_types adapterType, uint8_t data[64]) {
+void PirAdapter::sendDataTrampoline(adapter_types adapterType, uint8_t data[64]) {
   if (instance)
     instance->sendDataThroughMesh(adapterType, data);
 }
 
-void PIR_Adapter::detectMotion() {
+void PirAdapter::detectMotion() {
   if (!_interruptEnabled)
     return;
   _pir.signalMotion();
@@ -65,7 +65,7 @@ static void readOwnMac(uint8_t out[6]) {
   esp_wifi_get_mac(WIFI_IF_STA, out);
 }
 
-void PIR_Adapter::sendNodeHealth() {
+void PirAdapter::sendNodeHealth() {
   uint8_t data[64] = {0};
   data[0] = OP_NODE_HEALTH;
   data[1] = AdapterFactory::adapterTypeToEEPROM(adapter_types::PIR_ADAPTER);
@@ -81,7 +81,7 @@ void PIR_Adapter::sendNodeHealth() {
     instance->sendDataThroughMesh(adapter_types::SERIAL_ADAPTER, data);
 }
 
-void PIR_Adapter::loop() {
+void PirAdapter::loop() {
   if (!_initialized)
     return;
 
@@ -98,7 +98,7 @@ void PIR_Adapter::loop() {
     Logger::logln("PIR_Adapter", "MOTION DETECTED!", LogLevel::LOG_INFO);
     _motionSent = true;
     uint8_t data[64] = {1};
-    PIR_Adapter::sendDataTrampoline(_adapterType, data);
+    PirAdapter::sendDataTrampoline(_adapterType, data);
   }
 
   if (_timerActive && (now - _lastTrigger > (_cooldownSeconds * 1000U))) {
@@ -106,7 +106,7 @@ void PIR_Adapter::loop() {
     _timerActive = false;
     _motionSent = false;
 
-    if (!_pir.attachInterrupt(PIR_Adapter::detectMotionTrampoline, RISING)) {
+    if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING)) {
       lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE,
                          lattice::core::ModuleDigit::ADAPTER, 2,
                          "PIR_Adapter: Could not re-attach interrupt (possible hardware error)");
@@ -121,12 +121,12 @@ void PIR_Adapter::loop() {
   }
 }
 
-void PIR_Adapter::onMeshDataImpl(const lattice::mesh::mesh_message& /*message*/) {
+void PirAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& /*message*/) {
   // No-op for PIR: currently nothing to do on inbound messages of this type
 }
 
 #if SIMULATE_MODE
-void PIR_Adapter::simulateMotion() {
+void PirAdapter::simulateMotion() {
   // Directly signal motion without requiring hardware interrupt
   Logger::logln("PIR_Adapter", "SIM: Injecting fake PIR motion event", LogLevel::LOG_WARN);
   _pir.signalMotion();
