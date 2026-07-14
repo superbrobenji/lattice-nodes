@@ -8,6 +8,8 @@
 #include "esp_wifi_mock.h"
 #include "src/persistence/EepromManager.h"
 #include "src/mesh/Mesh.h"
+#include "src/adapter/AdapterFactory.h"
+#include "src/adapter/serial/SerialFraming.h"
 #include "lib/lattice-protocol/c/message_types.h"
 #include "lib/lattice-protocol/c/mesh_message.h"
 #include "lib/lattice-protocol/c/opcodes.h"
@@ -169,16 +171,8 @@ TEST(FakeHubTest, ReceivesHealthReportAndAnswersHealthReq) {
   world.bus.link(master, node);
   sim::FakeHub hub(master);
 
-  // Neutralize the DEFAULT_PEERS placeholder-MAC artifact (see comment above) on
-  // both nodes so broadcastToAllPeers() reflects real peers.peerCount, not stale
-  // config placeholders that don't exist in this simulated world.
-  auto stripDefaultPeers = [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
-    for (int i = 0; i < lattice::config::NUM_DEFAULT_PEERS; ++i)
-      m.peers.removeAndPersist(lattice::config::DEFAULT_PEERS[i]);
-    return 0;
-  };
-  master->with(stripDefaultPeers);
-  node->with(stripDefaultPeers);
+  // DEFAULT_PEERS placeholder MACs are now stripped automatically by
+  // SimNode::boot() (see SimNode.cpp) -- no per-test workaround needed.
 
   // --- Confirmed gap: master's own health report never reaches its own serial ---
   world.run(50);
@@ -215,4 +209,128 @@ TEST(FakeHubTest, ReceivesHealthReportAndAnswersHealthReq) {
       [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.peerCount; });
   EXPECT_EQ(masterPeersAfter, masterPeersBefore + 1)
       << "master must register the approved node as a peer";
+}
+
+// Exercises the surface the previous test's reconciliation note flagged as
+// fragile: FakeHub::poll()'s reliance on SerialFraming::decode(), which for any
+// message type other than JOIN_ACK/SERIAL_CMD_BROADCAST discards the wire-encoded
+// origin/last-hop MACs and overwrites them with esp_wifi_get_mac()'s CURRENT
+// global value -- i.e. whichever SimNode context the harness last had swapped
+// in, not the actual originating device. FakeHub now does its own nanopb decode
+// (mirroring SerialFraming::decode's field copying, minus the MAC overwrite)
+// because it plays the SERVER's role: it has no device identity of its own, so
+// "my own current MAC" is meaningless for it -- only the wire-encoded origin is
+// ever correct.
+TEST(FakeHubTest, OriginMacsPreservedAndFiltersWork) {
+  sim::SimWorld world;
+  auto* master = world.addNode({{0x02, 0, 0, 0, 0, 0x01}, true, lattice::adapter::SERIAL_ADAPTER});
+  auto* sensor = world.addNode({{0x02, 0, 0, 0, 0, 0x02}, false, lattice::adapter::PIR_ADAPTER});
+  world.bus.link(master, sensor);
+  sim::FakeHub hub(master);
+
+  // DEFAULT_PEERS placeholder MACs are stripped automatically by SimNode::boot()
+  // (see SimNode.cpp) -- no per-test workaround needed.
+
+  // --- Enrollment relay + positive/negative origin filters ---
+  world.run(10005); // 10s broadcast interval + margin for 1-step delivery latency
+  hub.poll();
+  const mesh_message* enr = hub.enrollmentFrom(sensor->mac());
+  ASSERT_NE(enr, nullptr) << "master must relay the sensor's enrollment request to the hub, "
+                             "with the sensor's own mac as wire origin";
+  EXPECT_EQ(hub.enrollmentFrom(master->mac()), nullptr)
+      << "negative filter: the master's own mac must never match an ENROLLMENT origin";
+
+  auto enrollments = hub.ofType(MESH_TYPE_ENROLLMENT);
+  ASSERT_FALSE(enrollments.empty());
+  EXPECT_EQ(0, memcmp(enrollments.front().origin_mac_address, sensor->mac(), 6))
+      << "ofType(MESH_TYPE_ENROLLMENT) frames must carry the sensor's wire origin";
+
+  hub.approveEnrollment(sensor->mac(), enr->enrollment_public_key);
+  world.run(50);
+
+  // --- sendConfigSet: drive a server-issued adapter reconfiguration ---
+  //
+  // Full master->mesh->sensor propagation (sensor rebooting with a new adapter
+  // type) does NOT currently work end-to-end: Mesh::buildMessage() stamps
+  // outgoing ADAPTER_DATA frames' target_mac_address from the SENDER's own
+  // currentMaster.mac, which a master node never sets (masters don't track "their
+  // own master" -- Mesh.cpp only ever writes currentMaster.mac on beacon
+  // receipt). So the rebroadcast frame the sensor receives carries
+  // target_mac_address == 00:00:00:00:00:00, which is neither addressedToSelf,
+  // isBroadcastTarget, nor addressedToMaster from the sensor's point of view;
+  // Mesh::processAdapterData() therefore takes the "downlink to another node"
+  // relay branch and returns without ever invoking externalRecvCallback /
+  // Adapter::onMeshData. That's a genuine main/src bug (Mesh::processAdapterData
+  // / buildMessage interaction), out of scope for this harness-only fix pass
+  // (Task 13's scenario per the brief) -- so this test asserts the narrower,
+  // currently-true contract: the master consumed the OP_CONFIG_SET frame off its
+  // (mock) serial line and rebroadcast it over the mesh with the opcode and the
+  // sensor's mac intact in the payload.
+  //
+  // VirtualBus::deliver() collects AND clears each node's ctx().espNowSent within
+  // the very same step() call that produced it, so inspecting
+  // master->ctx().espNowSent after a world.run() would always see it empty. Tick
+  // the master directly (bypassing SimWorld/VirtualBus) so we can snapshot the
+  // frame the instant SerialAdapter::handleCompleteFrame() produces it.
+  hub.sendConfigSet(sensor->mac(), lattice::adapter::SERIAL_ADAPTER);
+  master->tick();
+  auto pendingSends = master->ctx().espNowSent; // snapshot before VirtualBus can clear it
+  EXPECT_TRUE(master->ctx().serialRx.empty())
+      << "master must have consumed the sendConfigSet frame off its (mock) serial line";
+
+  bool sawConfigSetBroadcast = false;
+  for (const auto& pkt : pendingSends) {
+    if (pkt.data.size() != sizeof(mesh_message))
+      continue;
+    const auto* msg = reinterpret_cast<const mesh_message*>(pkt.data.data());
+    if (msg->data_type == lattice::adapter::SERIAL_ADAPTER && msg->data[0] == OP_CONFIG_SET &&
+        memcmp(&msg->data[1], sensor->mac(), 6) == 0) {
+      sawConfigSetBroadcast = true;
+    }
+  }
+  EXPECT_TRUE(sawConfigSetBroadcast)
+      << "master must rebroadcast the CONFIG_SET opcode (data[0]==0xC1) with the "
+         "sensor's mac embedded in the payload, even though full end-to-end "
+         "delivery into the sensor's adapter is a separate, unfixed gap";
+
+  world.run(50); // let VirtualBus deliver/clear the snapshotted frame normally
+
+  // --- adapterDataFromOrigin: negative-filter proof, then the Fix-1 proof ---
+  EXPECT_FALSE(hub.received.empty());
+  EXPECT_TRUE(hub.adapterDataFromOrigin(sensor->mac()).empty())
+      << "no genuine ADAPTER_DATA frame from the sensor has reached the hub yet";
+  EXPECT_TRUE(hub.adapterDataFromOrigin(master->mac()).empty())
+      << "no genuine ADAPTER_DATA frame from the master has reached the hub yet";
+
+  // Hand-build an ADAPTER_DATA frame with a synthetic origin MAC that matches
+  // neither node, and push it directly into the master's serialWritten mock
+  // buffer (bypassing real mesh delivery entirely) to isolate FakeHub::poll()'s
+  // own decode from everything else. Under the OLD (SerialFraming::decode-based)
+  // implementation, this origin is unconditionally overwritten with
+  // esp_wifi_get_mac()'s CURRENT global value -- never this phantom MAC -- so
+  // this assertion is the reliable RED signal for Fix 1, regardless of tick
+  // ordering or which node's context happened to be swapped in last.
+  static const uint8_t kPhantomOriginMac[6] = {0x02, 0, 0, 0, 0, 0xAA};
+  mesh_message adapterMsg{};
+  adapterMsg.proto_version = 1;
+  adapterMsg.message_type = MESH_TYPE_ADAPTER_DATA;
+  adapterMsg.data_type = lattice::adapter::SERIAL_ADAPTER;
+  memcpy(adapterMsg.origin_mac_address, kPhantomOriginMac, 6);
+  memcpy(adapterMsg.last_hop_mac_address, kPhantomOriginMac, 6);
+  adapterMsg.data[0] = OP_HEALTH_REPORT;
+
+  uint8_t encoded[256];
+  size_t n = lattice::adapter::serial::SerialFraming::encode(adapterMsg, encoded, sizeof(encoded));
+  ASSERT_GT(n, 0u);
+  uint8_t lenLE[2] = {static_cast<uint8_t>(n & 0xFF), static_cast<uint8_t>((n >> 8) & 0xFF)};
+  auto& written = master->ctx().serialWritten;
+  written.insert(written.end(), lenLE, lenLE + 2);
+  written.insert(written.end(), encoded, encoded + n);
+  hub.poll();
+
+  auto fromPhantom = hub.adapterDataFromOrigin(kPhantomOriginMac);
+  ASSERT_FALSE(fromPhantom.empty())
+      << "FakeHub must preserve the wire origin MAC for ADAPTER_DATA frames, not "
+         "overwrite it with whichever SimNode context is globally live";
+  EXPECT_EQ(0, memcmp(fromPhantom.front().origin_mac_address, kPhantomOriginMac, 6));
 }

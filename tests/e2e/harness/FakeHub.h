@@ -2,7 +2,9 @@
 // FakeHub is a scripted stand-in for the real hub/server process that normally
 // sits on the far end of the master node's physical serial cable. It reads
 // framed nanopb mesh_message bytes off the master's SimNode::ctx().serialWritten
-// mock buffer (decoding via SerialFraming::decode) and can inject scripted
+// mock buffer (decoding via its own nanopb decode in FakeHub.cpp -- see that
+// file for why it can't reuse SerialFraming::decode(), which is written from a
+// device's perspective and overwrites origin MACs) and can inject scripted
 // frames back onto the master's ctx().serialRx mock buffer (via
 // SerialFraming::encode), exactly as a real hub process would over UART.
 #include <cstdint>
@@ -32,7 +34,12 @@ public:
   // Script a server-approved enrollment: JOIN_ACK addressed to nodeMac, with
   // the node's own pubkey echoed back in enrollment_public_key (so
   // Mesh::enrollPeer registers it) and its first 4 bytes duplicated into
-  // data[0..3] as the fingerprint Enrollment::processJoinAck checks.
+  // data[0..3]. That data[0..3] fingerprint is NOT checked by the master's
+  // serial handler (SerialAdapter::handleCompleteFrame only checks
+  // enrollment_public_key non-zero) -- it's consumed later by the enrolling
+  // NODE, when Mesh::enrollPeer relays its own JOIN_ACK over the mesh and
+  // Enrollment::processJoinAck there checks the fingerprint against that
+  // node's own device public key.
   void approveEnrollment(const uint8_t* nodeMac, const uint8_t* nodePubKey32);
 
   // Script a server-issued adapter reconfiguration for targetMac.

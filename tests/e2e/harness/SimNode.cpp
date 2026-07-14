@@ -63,15 +63,30 @@ void SimNode::boot() {
 
     lattice::adapter::AdapterFactory::initializeDefaultsIfUnset();
     adapter_.reset(lattice::adapter::AdapterFactory::createFromEEPROM());
-    if (!adapter_ || !adapter_->init()) throw lattice::err::FatalError("SimNode: adapter init failed");
+    if (!adapter_ || !adapter_->init())
+      throw lattice::err::FatalError("SimNode: adapter init failed");
 
     mesh_ = std::make_unique<lattice::mesh::Mesh>();
-    if (!mesh_->init()) throw lattice::err::FatalError("SimNode: mesh init failed");
+    if (!mesh_->init())
+      throw lattice::err::FatalError("SimNode: mesh init failed");
+
+    // PeerRegistry::loadFromEEPROM() falls back to lattice::config::DEFAULT_PEERS
+    // (two placeholder MACs meant to be replaced before real flashing) whenever a
+    // freshly-provisioned node's persisted peer list is empty -- which every SimNode
+    // is on first boot. Those placeholder MACs don't correspond to any node in a
+    // simulated world, so the moment a broadcast actually targets them,
+    // VirtualBus::deliver() throws ("frame to unknown MAC"). Strip them here, once,
+    // for every node, so tests observe real firmware/mesh behavior instead of
+    // crashing on this harness/config artifact.
+    for (int i = 0; i < lattice::config::NUM_DEFAULT_PEERS; ++i)
+      mesh_->peers.removeAndPersist(lattice::config::DEFAULT_PEERS[i]);
+
     mesh_->setEnrollmentRelayFn(lattice::adapter::SerialAdapter::relayEnrollmentToServer);
     mesh_->setIsMaster(EepromManager::getInstance().loadMasterFlag());
     adapter_->setTransmitFn(&lattice::mesh::Mesh::transmit);
     mesh_->linkDataRecvCallback([this](const mesh_message& m) {
-      if (adapter_) adapter_->onMeshData(m);
+      if (adapter_)
+        adapter_->onMeshData(m);
     });
 
     booted_ = true;
@@ -98,7 +113,8 @@ void SimNode::tick() {
       swapOut(ctx_);
       return;
     }
-    if (adapter_) adapter_->loop();
+    if (adapter_)
+      adapter_->loop();
   } catch (...) {
     swapOut(ctx_);
     throw;
@@ -127,7 +143,8 @@ bool SimNode::isEnrolled() {
 void SimNode::simulatePirMotion() {
   with([](lattice::mesh::Mesh&, lattice::adapter::Adapter* a) {
     auto* pir = dynamic_cast<lattice::adapter::PirAdapter*>(a);
-    if (!pir) throw std::runtime_error("simulatePirMotion: node has no PIR adapter");
+    if (!pir)
+      throw std::runtime_error("simulatePirMotion: node has no PIR adapter");
     pir->simulateMotion();
     return 0;
   });
