@@ -34,8 +34,11 @@ bool PirAdapter::init() {
   }
 
   instance = this;
-  // codeql[cpp/expression-has-no-effect] - hardware ISR registration has side effects
-  _pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING);
+  if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING)) {
+    lattice::err::fail(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::ADAPTER,
+                       2, "PIR_Adapter: Failed to attach interrupt.");
+    return false;
+  }
 
   _interruptEnabled = true;
   _initialized = true;
