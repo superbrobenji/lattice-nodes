@@ -54,7 +54,7 @@ void Mesh::enrollPeer(const uint8_t*, const uint8_t*) {
 
 // All other Mesh methods required by the linker — minimal stubs
 Mesh::Mesh()
-    : meshKey{}, deviceMacAddress{}, lastSeenMasterMac{}, peerInfo{}, peerMacs{}, peerCount(0),
+    : meshKey{}, deviceMacAddress{}, lastSeenMasterMac{}, peerInfo{},
       externalRecvCallback(nullptr), currentMaster{}, isMaster(false), lastBeaconMillis(0),
       lastMasterBeaconReceivedMs(0), devicePrivateKey{}, devicePublicKey{},
       relayPendingMsg{}, relayPendingAt(0), relayPending(false), knownMasterMac{},
@@ -71,9 +71,6 @@ void Mesh::broadcastMasterBeacon() {}
 void Mesh::checkMasterTimeout() {}
 void Mesh::loop() {}
 // sendRouteReport is implemented in mesh_logic_impl.cpp (real logic)
-
-void Mesh::addPeer(const uint8_t*) {}
-void Mesh::removePeer(const uint8_t*) {}
 
 bool Mesh::isEnrolled() const {
   return false;
@@ -93,14 +90,6 @@ mesh_message Mesh::buildMessage(adapter_types, const uint8_t*, MeshMessageType) 
   return mesh_message{};
 }
 
-void Mesh::loadPeersFromEEPROM() {}
-void Mesh::savePeersToEEPROM() {}
-void Mesh::addPeerToEEPROM(const uint8_t*) {}
-void Mesh::removePeerFromEEPROM(const uint8_t*) {}
-
-// findPeer, isPeerInRange, findNextHopToMaster are implemented in mesh_logic_impl.cpp (real logic)
-// appendPeer is implemented in mesh_logic_impl.cpp (real logic)
-
 // sendMessage is implemented in mesh_logic_impl.cpp (real logic)
 // broadcastToAllPeers is implemented in mesh_logic_impl.cpp (real logic)
 // transmitCore is implemented in mesh_logic_impl.cpp (real logic)
@@ -112,7 +101,6 @@ bool Mesh::meshKeyIsSet() const {
   return false;
 }
 
-void Mesh::updatePeerLastSeen(const uint8_t*) {}
 // processMasterBeacon is implemented in mesh_logic_impl.cpp (real logic)
 // processAdapterData is implemented in mesh_logic_impl.cpp (real logic)
 

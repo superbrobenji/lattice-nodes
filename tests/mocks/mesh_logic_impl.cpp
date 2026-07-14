@@ -125,7 +125,7 @@ void Mesh::drainRecvQueue() {
     }
 
     // Update last-seen for known peers only
-    updatePeerLastSeen(entry.srcMac);
+    peers.updateLastSeen(entry.srcMac);
 
     switch (msg.message_type) {
     case MESH_TYPE_ENROLLMENT:
@@ -149,13 +149,6 @@ void Mesh::drainRecvQueue() {
   }
 }
 
-bool Mesh::appendPeer(const PeerInfo& peer) {
-  if (peerCount >= MAX_PEERS)
-    return false;
-  peerMacs[peerCount++] = peer;
-  return true;
-}
-
 void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
   if (lattice::utils::MacAddress(target) == lattice::utils::MacAddress(deviceMacAddress)) {
     Logger::logln("MESH", "Not sending to self. Skipped.", LogLevel::LOG_DEBUG);
@@ -175,10 +168,10 @@ void Mesh::relayDownlink(const mesh_message& msg) {
   mesh_message relay = msg;
   relay.hop_count++;
   memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0)
+  for (size_t i = 0; i < peers.peerCount; ++i) {
+    if (memcmp(peers.peerMacs[i].mac, deviceMacAddress, 6) == 0)
       continue;
-    sendMessage(peerMacs[i].mac, relay);
+    sendMessage(peers.peerMacs[i].mac, relay);
   }
 }
 
@@ -231,46 +224,30 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t data[64], MeshMe
   }
 }
 
-PeerInfo* Mesh::findPeer(const uint8_t mac[6]) {
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (memcmp(peerMacs[i].mac, mac, 6) == 0) {
-      return &peerMacs[i];
-    }
-  }
-  return nullptr;
-}
-
-bool Mesh::isPeerInRange(const uint8_t mac[6]) {
-  PeerInfo* peer = findPeer(mac);
-  if (!peer)
-    return false;
-  return millis() - peer->lastSeenMillis < lattice::config::STALE_PEER_THRESHOLD_MS;
-}
-
 PeerInfo* Mesh::findNextHopToMaster() {
   // For this mesh: nextHop == currentMaster.nextHop
   if (currentMaster.distance == 0xFF)
     return nullptr;
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::utils::MacAddress(peerMacs[i].mac) ==
+  for (size_t i = 0; i < peers.peerCount; ++i) {
+    if (lattice::utils::MacAddress(peers.peerMacs[i].mac) ==
             lattice::utils::MacAddress(currentMaster.nextHop) &&
-        isPeerInRange(peerMacs[i].mac) &&
-        lattice::utils::MacAddress(peerMacs[i].mac) !=
+        peers.isPeerInRange(peers.peerMacs[i].mac) &&
+        lattice::utils::MacAddress(peers.peerMacs[i].mac) !=
             lattice::utils::MacAddress(deviceMacAddress))
-      return &peerMacs[i];
+      return &peers.peerMacs[i];
   }
   return nullptr;
 }
 
 void Mesh::broadcastToAllPeers(mesh_message msg) {
-  if (peerCount == 0) {
+  if (peers.peerCount == 0) {
     Logger::logln("MESH", "WARNING: No peers to broadcast to!", LogLevel::LOG_WARN);
     return;
   }
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0)
+  for (size_t i = 0; i < peers.peerCount; ++i) {
+    if (memcmp(peers.peerMacs[i].mac, deviceMacAddress, 6) == 0)
       continue; // Skip self
-    sendMessage(peerMacs[i].mac, msg);
+    sendMessage(peers.peerMacs[i].mac, msg);
   }
 }
 

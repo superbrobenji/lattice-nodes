@@ -14,6 +14,7 @@
 #include "../../lib/lattice-protocol/c/message_types.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 #include "ReplayCache.h"
+#include "PeerRegistry.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -28,23 +29,8 @@ namespace mesh {
 using ::mesh_message;
 using ::MeshMessageType;
 using lattice::adapter::adapter_types;
-using lattice::utils::EEPROM_SIZES::MAX_PEERS; // Use constant from EepromManager
 
 static constexpr uint8_t PROTO_VERSION = 2;
-
-// Peer info struct for RAM and EEPROM storage
-struct PeerInfo {
-  uint8_t mac[6];
-  uint8_t publicKey[32]; // Curve25519 public key (zero = not yet known)
-  uint32_t lastSeenMillis;
-};
-
-// Master routing info
-struct MasterInfo {
-  uint8_t mac[6];
-  uint8_t distance;   // Hops to master
-  uint8_t nextHop[6]; // Next hop MAC
-};
 
 // Enrollment relay callback — registered by Serial_Adapter owner (main.ino).
 // Called from loop() when a pending enrollment is ready to relay to the server.
@@ -70,8 +56,7 @@ private:
 
   esp_now_peer_info_t peerInfo;
 
-  PeerInfo peerMacs[MAX_PEERS]; // Fixed-size peer list (no heap alloc)
-  size_t peerCount;             // Number of valid entries in peerMacs
+  PeerRegistry peers; // Peer list management (no heap alloc)
 
   void readMacAddress();
   void printMac(const uint8_t mac[6]);
@@ -93,19 +78,8 @@ private:
   uint32_t lastMasterBeaconReceivedMs;
   static constexpr uint32_t STALE_MASTER_THRESHOLD_MS = lattice::config::STALE_MASTER_THRESHOLD_MS;
 
-  // Peer EEPROM management
-  void loadPeersFromEEPROM();
-  void savePeersToEEPROM();
-  void addPeerToEEPROM(const uint8_t mac[6]);
-  void removePeerFromEEPROM(const uint8_t mac[6]);
-
-  // Peer logic
-  PeerInfo* findPeer(const uint8_t mac[6]);
-  bool isPeerInRange(const uint8_t mac[6]);
+  // Peer routing (uses currentMaster — stays in Mesh)
   PeerInfo* findNextHopToMaster();
-
-  // Bounds-checked insert into peerMacs fixed array
-  bool appendPeer(const PeerInfo& peer);
 
   void sendMessage(const uint8_t target[6], mesh_message msg);
   void broadcastToAllPeers(mesh_message msg);
@@ -120,7 +94,6 @@ private:
   bool meshKeyIsSet() const;
 
   // --- Tiger Style refactor helpers ---
-  void updatePeerLastSeen(const uint8_t mac[6]);
   void processMasterBeacon(const mesh_message& msg);
   void processAdapterData(const mesh_message& msg);
   void relayDownlink(const mesh_message& msg);
@@ -206,10 +179,10 @@ public:
   bool getDualMasterMode() const { return _dualMasterMode; }
 
   // Peer management API (optional, can be used in your app/UI)
-  void addPeer(const uint8_t mac[6]);
-  void removePeer(const uint8_t mac[6]);
-  const PeerInfo* getPeerList() const { return peerMacs; }
-  size_t getPeerCount() const { return peerCount; }
+  void addPeer(const uint8_t mac[6]) { peers.addAndPersist(mac); }
+  void removePeer(const uint8_t mac[6]) { peers.removeAndPersist(mac); }
+  const PeerInfo* getPeerList() const { return peers.peerMacs; }
+  size_t getPeerCount() const { return peers.peerCount; }
 
   // Broadcast adapter data to all peers
   void broadcastAdapterData(adapter_types type, const uint8_t* data);

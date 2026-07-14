@@ -252,11 +252,11 @@ TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
   PeerInfo p1{};
   memcpy(p1.mac, kPeer1Mac, 6);
   p1.lastSeenMillis = 0;
-  mesh.appendPeer(p1);
+  mesh.peers.append(p1);
   PeerInfo p2{};
   memcpy(p2.mac, kPeer2Mac, 6);
   p2.lastSeenMillis = 0;
-  mesh.appendPeer(p2);
+  mesh.peers.append(p2);
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1, /*hopCount=*/1);
 
@@ -278,7 +278,7 @@ TEST_F(RelayDownlinkTest, DropsAtMaxHops) {
   PeerInfo p1{};
   memcpy(p1.mac, kPeer1Mac, 6);
   p1.lastSeenMillis = 0;
-  mesh.appendPeer(p1);
+  mesh.peers.append(p1);
 
   auto msg = makeDataMsg(kOriginMac, kPeer1Mac, 1, 1,
                          /*hopCount=*/lattice::config::MAX_HOPS);
@@ -294,12 +294,12 @@ TEST_F(RelayDownlinkTest, SkipsSelf_WhenSelfInPeerList) {
   PeerInfo p1{};
   memcpy(p1.mac, kPeer1Mac, 6);
   p1.lastSeenMillis = 0;
-  mesh.appendPeer(p1);
+  mesh.peers.append(p1);
   // Add self to peer list (shouldn't happen in production but guard against it)
   PeerInfo self{};
   memcpy(self.mac, kMyMac, 6);
   self.lastSeenMillis = 0;
-  mesh.appendPeer(self);
+  mesh.peers.append(self);
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1);
   mesh.relayDownlink(msg);
@@ -338,7 +338,7 @@ protected:
     PeerInfo p{};
     memcpy(p.mac, kMasterMac, 6);
     p.lastSeenMillis = 0;
-    mesh.appendPeer(p);
+    mesh.peers.append(p);
     return mesh;
   }
 
@@ -401,7 +401,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysDownlinkToOtherTarget) {
   PeerInfo extra{};
   memcpy(extra.mac, kPeerMac, 6);
   extra.lastSeenMillis = 0;
-  mesh.appendPeer(extra);
+  mesh.peers.append(extra);
 
   mesh_message msg{};
   msg.proto_version = 1;
@@ -431,7 +431,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_BroadcastTarget_DeliveredAndRelaye
   PeerInfo extra{};
   memcpy(extra.mac, kPeerMac, 6);
   extra.lastSeenMillis = 0;
-  mesh.appendPeer(extra);
+  mesh.peers.append(extra);
 
   bool callbackFired = false;
   mesh.linkDataRecvCallback([&](const mesh_message&) { callbackFired = true; });
@@ -462,7 +462,7 @@ TEST_F(AdapterDataRelayTest, BroadcastAdapterData_UsesBroadcastTargetMAC) {
   PeerInfo extra{};
   memcpy(extra.mac, kPeerMac, 6);
   extra.lastSeenMillis = 0;
-  mesh.appendPeer(extra);
+  mesh.peers.append(extra);
 
   static constexpr uint8_t kPayload[64] = {0x01, 0x02, 0x03};
   size_t before = espNowSentPackets.size();
@@ -499,7 +499,7 @@ protected:
     PeerInfo p{};
     memcpy(p.mac, kPeerMac, 6);
     p.lastSeenMillis = 0;
-    mesh.appendPeer(p);
+    mesh.peers.append(p);
     return mesh;
   }
 

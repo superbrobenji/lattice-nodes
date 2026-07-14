@@ -30,7 +30,7 @@ protected:
     PeerInfo peer{};
     memcpy(peer.mac, masterMac, 6);
     peer.lastSeenMillis = millis();
-    mesh.appendPeer(peer);
+    mesh.peers.append(peer);
   }
 
   mesh_message lastSentMsg() {

@@ -55,6 +55,7 @@ set(FIRMWARE_SOURCES
   mocks/WiFi.cpp
   mocks/firmware_stubs.cpp
   mocks/mesh_logic_impl.cpp
+  ../main/src/mesh/PeerRegistry.cpp
 )
 
 enable_testing()
