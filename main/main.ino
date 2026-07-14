@@ -7,6 +7,9 @@
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
 #include "src/persistence/EepromManager.h"
+#include "src/app/BootManager.h"
+#include "src/app/DisplayManager.h"
+#include "src/app/ButtonHandler.h"
 #include "project_config.h"
 #include <esp_wifi.h>
 #include <esp_bt.h>
@@ -25,8 +28,6 @@ constexpr int RED_LED_PIN = lattice::config::RED_LED_PIN;
 constexpr int GREEN_LED_PIN = lattice::config::GREEN_LED_PIN;
 constexpr int CONFIG_BUTTON_PIN = lattice::config::CONFIG_BUTTON_PIN;
 constexpr int RESET_BUTTON_PIN = lattice::config::RESET_BUTTON_PIN;
-
-constexpr unsigned long BUTTON_HOLD_TIME_MS = 5000;  // 5 seconds
 
 // Compile-time dev flag
 constexpr bool DEV_MODE = lattice::config::DEV_MODE;
@@ -90,25 +91,9 @@ void setup() {
   Logger::setLogLevel(lattice::config::DEFAULT_LOG_LEVEL);
 
   // Check and log reset reason; escalate if WDT looping
-  {
-    esp_reset_reason_t reason = esp_reset_reason();
-    EepromManager& em = EepromManager::getInstance();
-    // Must init EEPROM before setDevMode() — saveRebootReason/saveRebootCount no-op in dev mode
-    em.init();
-    em.saveRebootReason(static_cast<uint8_t>(reason));
-    if (reason == ESP_RST_WDT || reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT) {
-      uint8_t count = em.loadRebootCount();
-      count++;
-      em.saveRebootCount(count);
-      Serial.printf("[BOOT] WDT reset #%d (reason: %d)\n", count, (int)reason);
-      if (count >= 5) {
-        Serial.println("[BOOT] WDT loop detected — halting. Manual reset required.");
-        while (true) { delay(1000); }
-      }
-    } else {
-      em.saveRebootCount(0);  // Clean boot resets the counter
-    }
-  }
+  // Must init EEPROM before BootManager::check — saveRebootReason/saveRebootCount no-op if not initialized
+  EepromManager::getInstance().init();
+  lattice::app::BootManager::check(EepromManager::getInstance());
 
   Logger::logln("MAIN", "Logger initialized", LogLevel::LOG_INFO);
 
@@ -311,34 +296,9 @@ void loop() {
 
   // Display state machine: show node identity on 7-segment display
   if (lattice::config::ENABLE_SEVSEG_DISPLAY) {
-    static uint32_t lastDisplayToggleMs = 0;
-    static bool dashVisible = false;
-
-    bool enrolled = mesh.isEnrolled() || mesh.getIsMaster(); // master is always "enrolled"
+    bool enrolled = mesh.isEnrolled() || mesh.getIsMaster();
     uint8_t nodeId = lattice::utils::EepromManager::getInstance().loadNodeId();
-
-    if (!enrolled) {
-      // Unenrolled: flash "----" at 500ms
-      if (millis() - lastDisplayToggleMs >= 500) {
-        lastDisplayToggleMs = static_cast<uint32_t>(millis());
-        dashVisible = !dashVisible;
-        if (dashVisible) {
-          static const uint8_t dashes[4] = {0x40, 0x40, 0x40, 0x40};
-          sevenSeg.setSegments(dashes);
-        } else {
-          sevenSeg.clear();
-        }
-      }
-    } else if (nodeId == 0) {
-      // Enrolled, no ID: "   0"
-      sevenSeg.show(0, false);
-    } else if (mesh.getIsMaster()) {
-      // Master with ID: right-aligned nodeId + DP on last digit
-      sevenSeg.showWithDP(static_cast<int>(nodeId), false);
-    } else {
-      // Sensor node with ID: right-aligned nodeId
-      sevenSeg.show(static_cast<int>(nodeId), false);
-    }
+    lattice::app::DisplayManager::tick(sevenSeg, enrolled, mesh.getIsMaster(), nodeId);
   }
 
   // Enrollment state machine: non-master nodes that are not yet enrolled
@@ -361,73 +321,9 @@ void loop() {
     adapter->loop();
   }
 
-  static bool buttonWasPressed = false;
-  static unsigned long holdStart = 0;
-
-  // Reset button logic
-  static bool resetButtonWasPressed = false;
-  static unsigned long resetHoldStart = 0;
-
-  if (configButton.isPressed()) {
-    if (!buttonWasPressed) {
-      buttonWasPressed = true;
-      holdStart = millis();
-    } else if (millis() - holdStart >= BUTTON_HOLD_TIME_MS) {
-      buttonWasPressed = false;  // Reset BEFORE action to prevent re-fire
-      if (isDevMode) {
-        bool newMaster = !mesh.getIsMaster();
-        mesh.setIsMaster(newMaster);
-        devMasterFlag = newMaster;
-        Logger::logln("MAIN", String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
-        greenLed.blink(newMaster ? 3 : 2, 150, 150);
-      } else {
-        bool wasMaster = EepromManager::getInstance().loadMasterFlag();
-        bool newMaster = !wasMaster;
-        EepromManager::getInstance().saveMasterFlag(newMaster);
-        Logger::logln("MAIN", String("Button held 5s: CONFIG TOGGLED. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
-        Logger::logln("MAIN", "Restarting in 2 seconds for new role...", LogLevel::LOG_INFO);
-        greenLed.blink(newMaster ? 3 : 2, 200, 200);
-        delay(2000);
-        EepromManager::getInstance().forceFlush();
-        ESP.restart();
-      }
-    }
-  } else {
-    buttonWasPressed = false;
-  }
-
-  static bool resetConfirmPending = false;
-  static uint32_t resetConfirmDeadline = 0;
-
-  if (resetButton.isPressed()) {
-    if (!resetButtonWasPressed) {
-      resetButtonWasPressed = true;
-      resetHoldStart = millis();
-    } else if (millis() - resetHoldStart >= BUTTON_HOLD_TIME_MS) {
-      resetButtonWasPressed = false;
-      if (!resetConfirmPending) {
-        resetConfirmPending = true;
-        resetConfirmDeadline = millis() + 3000;
-        Logger::logln("MAIN", "Reset armed: hold again within 3s to confirm EEPROM wipe", LogLevel::LOG_WARN);
-        redLed.blink(3, 100, 100);
-      } else if (millis() < resetConfirmDeadline) {
-        resetConfirmPending = false;
-        Logger::logln("MAIN", "EEPROM wipe confirmed. Clearing all...", LogLevel::LOG_WARN);
-        EepromManager::getInstance().clearAll();
-        redLed.blink(5, 100, 100);
-        greenLed.blink(5, 100, 100);
-        delay(3000);
-        EepromManager::getInstance().forceFlush();
-        ESP.restart();
-      }
-    }
-  } else {
-    resetButtonWasPressed = false;
-    if (resetConfirmPending && millis() > resetConfirmDeadline) {
-      resetConfirmPending = false;
-      Logger::logln("MAIN", "Reset confirmation timed out", LogLevel::LOG_INFO);
-    }
-  }
+  lattice::app::ButtonHandler::tick(configButton, resetButton, mesh,
+    lattice::utils::EepromManager::getInstance(),
+    greenLed, redLed, isDevMode, devMasterFlag);
   // REMOVED: periodic health report was here.
   // Serial_Adapter::loop() handles this correctly when adapter type is SERIAL_ADAPTER.
 
