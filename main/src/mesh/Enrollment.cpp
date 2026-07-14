@@ -12,6 +12,7 @@ namespace lattice {
 namespace mesh {
 
 using namespace lattice::utils;
+using lattice::adapter::adapter_types;
 
 Enrollment::Enrollment() {
   memset(devicePrivateKey, 0, 32);

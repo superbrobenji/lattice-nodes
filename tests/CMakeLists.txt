@@ -14,6 +14,22 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+# mbedtls — real Curve25519 for Enrollment/MeshCrypto on host
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)      # mbedtls' own tests
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+# Newer AppleClang enables -Wunterminated-string-initialization, which mbedtls's
+# TLS layer (not needed here — only mbedcrypto/Curve25519 is used) trips on.
+# We don't build/link the TLS or x509 libraries, but MBEDTLS_FATAL_WARNINGS
+# still promotes that warning to -Werror while compiling them, so disable it.
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  mbedtls
+  URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
+  URL_HASH SHA256=8b54fb9bcf4d5a7078028e0520acddefb7900b3e66fec7f7175bb5b7d85ccdca
+  DOWNLOAD_EXTRACT_TIMESTAMP ON
+)
+FetchContent_MakeAvailable(mbedtls)
+
 # Mock layer + firmware source include paths
 # Mocks shadow real hardware headers via include order
 include_directories(
@@ -54,9 +70,9 @@ set(FIRMWARE_SOURCES
   mocks/Arduino.cpp
   mocks/EEPROM.cpp
   mocks/WiFi.cpp
-  mocks/firmware_stubs.cpp
-  mocks/mesh_logic_impl.cpp
   ../main/src/mesh/PeerRegistry.cpp
+  ../main/src/mesh/Mesh.cpp
+  ../main/src/mesh/Enrollment.cpp
 )
 
 enable_testing()
@@ -65,7 +81,7 @@ include(GoogleTest)
 # Helper macro — one test executable per file
 macro(add_unit_test name source)
   add_executable(${name} ${source} ${FIRMWARE_SOURCES})
-  target_link_libraries(${name} gtest_main gmock)
+  target_link_libraries(${name} gtest_main gmock mbedcrypto)
   gtest_discover_tests(${name})
 endmacro()
 

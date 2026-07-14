@@ -29,6 +29,13 @@ esp_err_t esp_now_register_recv_cb(void (*cb)(const esp_now_recv_info*, const ui
   return ESP_OK;
 }
 
+static void (*sendCallback)(const wifi_tx_info_t*, esp_now_send_status_t) = nullptr;
+
+esp_err_t esp_now_register_send_cb(void (*cb)(const wifi_tx_info_t*, esp_now_send_status_t)) {
+  sendCallback = cb;
+  return ESP_OK;
+}
+
 esp_err_t esp_now_send(const uint8_t* peer_addr, const uint8_t* data, size_t len) {
   if (espNowSendFails) return ESP_FAIL;
   EspNowSend s{};
