@@ -19,21 +19,6 @@ namespace mesh {
 
 using namespace lattice::utils;
 
-bool Mesh::isReplay(const mesh_message& msg) {
-  for (size_t i = 0; i < REPLAY_CACHE_SIZE; ++i) {
-    if (memcmp(replayCache[i].mac, msg.origin_mac_address, 6) == 0 &&
-        replayCache[i].epoch == msg.epoch_num && replayCache[i].seq == msg.seq_num) {
-      return true;
-    }
-  }
-  // Record this entry in the ring buffer
-  memcpy(replayCache[replayCacheIdx].mac, msg.origin_mac_address, 6);
-  replayCache[replayCacheIdx].epoch = msg.epoch_num;
-  replayCache[replayCacheIdx].seq = msg.seq_num;
-  replayCacheIdx = (replayCacheIdx + 1) % REPLAY_CACHE_SIZE;
-  return false;
-}
-
 void Mesh::processMasterBeacon(const mesh_message& msg) {
   // Guard: drop beacon if hop count would overflow uint8_t or exceed limit
   if (msg.hop_count >= lattice::config::MAX_HOPS) {
@@ -99,14 +84,14 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 
   if (!isMaster) {
     // C10 fix: only relay if this beacon is newer than the last one we relayed
-    bool isNewer = (msg.epoch_num > lastRelayedEpoch) ||
-                   (msg.epoch_num == lastRelayedEpoch && msg.seq_num > lastRelayedSeqNum);
+    bool isNewer = (msg.epoch_num > replay.lastRelayedEpoch) ||
+                   (msg.epoch_num == replay.lastRelayedEpoch && msg.seq_num > replay.lastRelayedSeqNum);
     if (!isNewer) {
       Logger::logln("MESH", "Duplicate beacon relay suppressed", LogLevel::LOG_DEBUG);
       return;
     }
-    lastRelayedEpoch = msg.epoch_num;
-    lastRelayedSeqNum = msg.seq_num;
+    replay.lastRelayedEpoch = msg.epoch_num;
+    replay.lastRelayedSeqNum = msg.seq_num;
 
     // Defer relay with jitter (esp_random() returns deterministic 42 in tests)
     uint8_t jitterMs = static_cast<uint8_t>(esp_random() % lattice::config::RELAY_JITTER_MAX_MS);
@@ -133,7 +118,7 @@ void Mesh::drainRecvQueue() {
 
     // Replay check
     if (msg.proto_version == PROTO_VERSION && msg.epoch_num > 0) {
-      if (isReplay(msg)) {
+      if (replay.isReplay(msg)) {
         Logger::logln("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
         continue;
       }

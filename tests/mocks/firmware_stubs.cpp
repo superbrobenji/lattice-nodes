@@ -56,8 +56,7 @@ void Mesh::enrollPeer(const uint8_t*, const uint8_t*) {
 Mesh::Mesh()
     : meshKey{}, deviceMacAddress{}, lastSeenMasterMac{}, peerInfo{}, peerMacs{}, peerCount(0),
       externalRecvCallback(nullptr), currentMaster{}, isMaster(false), lastBeaconMillis(0),
-      lastMasterBeaconReceivedMs(0), devicePrivateKey{}, devicePublicKey{}, bootEpoch(0),
-      txSeqNum(0), replayCache{}, replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
+      lastMasterBeaconReceivedMs(0), devicePrivateKey{}, devicePublicKey{},
       relayPendingMsg{}, relayPendingAt(0), relayPending(false), knownMasterMac{},
       hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
       _dualMasterMode(false), recvQueueHead(0), recvQueueTail(0), lastBeaconMs(0),

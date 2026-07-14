@@ -13,6 +13,7 @@
 #include "../../project_config.h" // Added for global limits/config
 #include "../../lib/lattice-protocol/c/message_types.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
+#include "ReplayCache.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -138,24 +139,8 @@ private:
   uint8_t devicePublicKey[32];
   void loadOrGenerateKeypair();
 
-  // Replay protection
-  uint32_t bootEpoch;
-  uint16_t txSeqNum;
-
-  struct ReplayEntry {
-    uint8_t mac[6];
-    uint32_t epoch;
-    uint16_t seq;
-  };
-  static constexpr size_t REPLAY_CACHE_SIZE = 16;
-  ReplayEntry replayCache[REPLAY_CACHE_SIZE];
-  size_t replayCacheIdx;
-
-  bool isReplay(const mesh_message& msg);
-
-  // Beacon relay dedup (fix C10)
-  uint32_t lastRelayedEpoch;
-  uint16_t lastRelayedSeqNum;
+  // Replay protection (composed)
+  ReplayCache replay;
 
   // Relay jitter: deferred relay pending fields (Task 3)
   mesh_message relayPendingMsg;

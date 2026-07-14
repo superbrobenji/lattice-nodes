@@ -160,8 +160,7 @@ static void registerPeerWithEspNow(const uint8_t mac[6], const uint8_t* ownPriva
 }
 
 Mesh::Mesh()
-    : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0), bootEpoch(0),
-      txSeqNum(0), replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
+    : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0),
       hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
       _dualMasterMode(lattice::config::DUAL_MASTER_MODE), peerCount(0), recvQueueHead(0),
       recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0), relayPending(false),
@@ -174,7 +173,6 @@ Mesh::Mesh()
   memset(deviceMacAddress, 0, 6);
   memset(devicePrivateKey, 0, 32);
   memset(devicePublicKey, 0, 32);
-  memset(replayCache, 0, sizeof(replayCache));
   memset(knownMasterMac, 0xFF, 6);
   memset(knownMasterMacSecondary, 0xFF, 6);
   memset(peerMacs, 0, sizeof(peerMacs));
@@ -364,8 +362,8 @@ mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMes
   if (data)
     memcpy(msg.data, data, sizeof(msg.data));
   msg.hop_count = 0;
-  msg.epoch_num = bootEpoch;
-  msg.seq_num = ++txSeqNum;
+  msg.epoch_num = replay.bootEpoch;
+  msg.seq_num = replay.nextSeq();
   return msg;
 }
 
@@ -376,11 +374,10 @@ bool Mesh::init() {
   loadPersistentState();
 
   // 2. Increment and save boot epoch (replay protection)
-  bootEpoch = EepromManager::getInstance().loadBootEpoch() + 1;
-  EepromManager::getInstance().saveBootEpoch(bootEpoch);
-  txSeqNum = 0;
-  memset(replayCache, 0, sizeof(replayCache));
-  Logger::logln("MESH", "Boot epoch: " + String(bootEpoch), LogLevel::LOG_INFO);
+  uint32_t epoch = EepromManager::getInstance().loadBootEpoch() + 1;
+  EepromManager::getInstance().saveBootEpoch(epoch);
+  replay.init(epoch);
+  Logger::logln("MESH", "Boot epoch: " + String(replay.bootEpoch), LogLevel::LOG_INFO);
 
   // 3. Configure Wi-Fi
   if (!setupWiFi())
@@ -522,21 +519,6 @@ bool Mesh::setupEspNow() {
 }
 // ------------------------------------------------
 
-bool Mesh::isReplay(const mesh_message& msg) {
-  for (size_t i = 0; i < REPLAY_CACHE_SIZE; ++i) {
-    if (memcmp(replayCache[i].mac, msg.origin_mac_address, 6) == 0 &&
-        replayCache[i].epoch == msg.epoch_num && replayCache[i].seq == msg.seq_num) {
-      return true;
-    }
-  }
-  // Record this entry in the ring buffer
-  memcpy(replayCache[replayCacheIdx].mac, msg.origin_mac_address, 6);
-  replayCache[replayCacheIdx].epoch = msg.epoch_num;
-  replayCache[replayCacheIdx].seq = msg.seq_num;
-  replayCacheIdx = (replayCacheIdx + 1) % REPLAY_CACHE_SIZE;
-  return false;
-}
-
 void Mesh::onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status) {
   String statusStr = (status == ESP_NOW_SEND_SUCCESS) ? "Delivery Success" : "Delivery Fail";
   Logger::logln("MESH", "Last Packet Send Status: " + statusStr, LogLevel::LOG_DEBUG);
@@ -576,7 +558,7 @@ void Mesh::drainRecvQueue() {
 
     // Replay check
     if (msg.proto_version == PROTO_VERSION && msg.epoch_num > 0) {
-      if (isReplay(msg)) {
+      if (replay.isReplay(msg)) {
         Logger::logln("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
         continue;
       }
@@ -902,14 +884,14 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 
   if (!isMaster) {
     // C10 fix: only relay if this beacon is newer than the last one we relayed
-    bool isNewer = (msg.epoch_num > lastRelayedEpoch) ||
-                   (msg.epoch_num == lastRelayedEpoch && msg.seq_num > lastRelayedSeqNum);
+    bool isNewer = (msg.epoch_num > replay.lastRelayedEpoch) ||
+                   (msg.epoch_num == replay.lastRelayedEpoch && msg.seq_num > replay.lastRelayedSeqNum);
     if (!isNewer) {
       Logger::logln("MESH", "Duplicate beacon relay suppressed", LogLevel::LOG_DEBUG);
       return;
     }
-    lastRelayedEpoch = msg.epoch_num;
-    lastRelayedSeqNum = msg.seq_num;
+    replay.lastRelayedEpoch = msg.epoch_num;
+    replay.lastRelayedSeqNum = msg.seq_num;
 
     // Defer relay with random jitter to stagger transmissions across all non-master
     // nodes and eliminate the collision burst that occurs when all nodes relay
