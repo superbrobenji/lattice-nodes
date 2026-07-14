@@ -696,6 +696,18 @@ void Mesh::processJoinAck(const mesh_message& msg) {
   }
 }
 
+void Mesh::addPeer(const uint8_t mac[6]) {
+  size_t before = peers.peerCount;
+  peers.addAndPersist(mac);
+  if (peers.peerCount > before) {
+    lattice::mesh::crypto::registerPeerWithEspNow(
+      peers.peerMacs[peers.peerCount - 1].mac,
+      devicePrivateKey,
+      peers.peerMacs[peers.peerCount - 1].publicKey
+    );
+  }
+}
+
 void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
   PeerInfo* p = peers.find(mac);
   if (p) {

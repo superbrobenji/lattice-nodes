@@ -27,6 +27,15 @@ PeerInfo* PeerRegistry::find(const uint8_t mac[6]) {
   return nullptr;
 }
 
+const PeerInfo* PeerRegistry::find(const uint8_t mac[6]) const {
+  for (size_t i = 0; i < peerCount; ++i) {
+    if (memcmp(peerMacs[i].mac, mac, 6) == 0) {
+      return &peerMacs[i];
+    }
+  }
+  return nullptr;
+}
+
 bool PeerRegistry::append(const PeerInfo& peer) {
   if (peerCount >= MAX_PEERS)
     return false;
@@ -43,8 +52,8 @@ void PeerRegistry::remove(const uint8_t mac[6]) {
   }
 }
 
-bool PeerRegistry::isPeerInRange(const uint8_t mac[6]) {
-  PeerInfo* peer = find(mac);
+bool PeerRegistry::isPeerInRange(const uint8_t mac[6]) const {
+  const PeerInfo* peer = find(mac);
   if (!peer)
     return false;
   return millis() - peer->lastSeenMillis < lattice::config::STALE_PEER_THRESHOLD_MS;

@@ -33,9 +33,10 @@ public:
   void setDeviceMac(const uint8_t mac[6]);
 
   PeerInfo* find(const uint8_t mac[6]);
+  const PeerInfo* find(const uint8_t mac[6]) const;
   bool append(const PeerInfo& peer);
   void remove(const uint8_t mac[6]);
-  bool isPeerInRange(const uint8_t mac[6]);
+  bool isPeerInRange(const uint8_t mac[6]) const;
   void updateLastSeen(const uint8_t mac[6]);
 
   void loadFromEEPROM();

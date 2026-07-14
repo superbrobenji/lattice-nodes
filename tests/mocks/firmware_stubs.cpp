@@ -47,6 +47,11 @@ void Mesh::broadcastAdapterDataStatic(lattice::adapter::adapter_types, const uin
   // stub: no-op in tests
 }
 
+// Mesh::addPeer — stub
+void Mesh::addPeer(const uint8_t*) {
+  // stub: no-op in tests (registerPeerWithEspNow requires mbedtls — not available on host)
+}
+
 // Mesh::enrollPeer — stub
 void Mesh::enrollPeer(const uint8_t*, const uint8_t*) {
   // stub: no-op in tests

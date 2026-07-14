@@ -179,7 +179,7 @@ public:
   bool getDualMasterMode() const { return _dualMasterMode; }
 
   // Peer management API (optional, can be used in your app/UI)
-  void addPeer(const uint8_t mac[6]) { peers.addAndPersist(mac); }
+  void addPeer(const uint8_t mac[6]);
   void removePeer(const uint8_t mac[6]) { peers.removeAndPersist(mac); }
   const PeerInfo* getPeerList() const { return peers.peerMacs; }
   size_t getPeerCount() const { return peers.peerCount; }
