@@ -30,19 +30,19 @@ public:
   size_t peerCount{0};
 
   PeerRegistry();
-  void setDeviceMac(const uint8_t mac[6]);
+  void setDeviceMac(const uint8_t* mac);
 
-  PeerInfo* find(const uint8_t mac[6]);
-  const PeerInfo* find(const uint8_t mac[6]) const;
+  PeerInfo* find(const uint8_t* mac);
+  const PeerInfo* find(const uint8_t* mac) const;
   bool append(const PeerInfo& peer);
-  void remove(const uint8_t mac[6]);
-  bool isPeerInRange(const uint8_t mac[6]) const;
-  void updateLastSeen(const uint8_t mac[6]);
+  void remove(const uint8_t* mac);
+  bool isPeerInRange(const uint8_t* mac) const;
+  void updateLastSeen(const uint8_t* mac);
 
   void loadFromEEPROM();
   void saveToEEPROM();
-  void addAndPersist(const uint8_t mac[6]);
-  void removeAndPersist(const uint8_t mac[6]);
+  void addAndPersist(const uint8_t* mac);
+  void removeAndPersist(const uint8_t* mac);
 
   size_t count() const { return peerCount; }
 

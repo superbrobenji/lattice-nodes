@@ -83,7 +83,7 @@ void Enrollment::setRelayFn(EnrollmentRelayFn fn) {
   _enrollmentRelayFn = fn;
 }
 
-void Enrollment::setPendingRelay(const uint8_t mac[6], const uint8_t pubKey[32]) {
+void Enrollment::setPendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
   memcpy(_pendingEnrollmentMac, mac, 6);
   memcpy(_pendingEnrollmentPubKey, pubKey, 32);
   _pendingEnrollmentRelay = true;
@@ -234,7 +234,7 @@ void Mesh::drainRecvQueue() {
   }
 }
 
-void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
+void Mesh::sendMessage(const uint8_t* target, const mesh_message& msg) {
   if (lattice::utils::MacAddress(target) == lattice::utils::MacAddress(deviceMacAddress)) {
     Logger::logln("MESH", "Not sending to self. Skipped.", LogLevel::LOG_DEBUG);
     return;

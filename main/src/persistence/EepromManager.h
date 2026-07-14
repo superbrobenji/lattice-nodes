@@ -145,13 +145,13 @@ public:
   void saveBootEpoch(uint32_t epoch);
 
   // TOFU master MAC — persisted so a power cycle preserves the known master
-  bool loadKnownMasterMac(uint8_t mac[6]);
-  void saveKnownMasterMac(const uint8_t mac[6]);
+  bool loadKnownMasterMac(uint8_t* mac);
+  void saveKnownMasterMac(const uint8_t* mac);
   void clearKnownMasterMac();
 
   // TOFU secondary master MAC — persisted secondary master for dual-master mode
-  bool loadKnownMasterMacSecondary(uint8_t mac[6]);
-  void saveKnownMasterMacSecondary(const uint8_t mac[6]);
+  bool loadKnownMasterMacSecondary(uint8_t* mac);
+  void saveKnownMasterMacSecondary(const uint8_t* mac);
   void clearKnownMasterMacSecondary();
 
   // TX power preset — deployment-specific, persisted across reboots

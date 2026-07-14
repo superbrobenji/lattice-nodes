@@ -280,7 +280,7 @@ void IRAM_ATTR Mesh::dataRecvTrampoline(const esp_now_recv_info* mac_addr, const
   instance->onDataRecvCallback(mac_addr, data, len);
 }
 
-void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
+void Mesh::sendMessage(const uint8_t* target, const mesh_message& msg) {
   if (lattice::utils::MacAddress(target) == lattice::utils::MacAddress(deviceMacAddress)) {
     Logger::logln("MESH", "Not sending to self. Skipped.", LogLevel::LOG_DEBUG);
     return;
@@ -626,7 +626,7 @@ void Mesh::processJoinAck(const mesh_message& msg) {
   enrollment.processJoinAck(msg, deviceMacAddress, nullptr);
 }
 
-void Mesh::addPeer(const uint8_t mac[6]) {
+void Mesh::addPeer(const uint8_t* mac) {
   size_t before = peers.peerCount;
   peers.addAndPersist(mac);
   if (peers.peerCount > before) {
@@ -638,7 +638,7 @@ void Mesh::addPeer(const uint8_t mac[6]) {
   }
 }
 
-void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
+void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
   PeerInfo* p = peers.find(mac);
   if (p) {
     // Update existing peer's public key

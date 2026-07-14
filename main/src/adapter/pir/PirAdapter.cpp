@@ -34,6 +34,7 @@ bool PirAdapter::init() {
   }
 
   instance = this;
+  // codeql[cpp/expression-has-no-effect] - hardware ISR registration has side effects
   _pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING);
 
   _interruptEnabled = true;
@@ -48,7 +49,7 @@ void PirAdapter::detectMotionTrampoline() {
     instance->detectMotion();
 }
 
-void PirAdapter::sendDataTrampoline(adapter_types adapterType, uint8_t data[64]) {
+void PirAdapter::sendDataTrampoline(adapter_types adapterType, uint8_t* data) {
   if (instance)
     instance->sendDataThroughMesh(adapterType, data);
 }

@@ -92,7 +92,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   }
 }
 
-void Enrollment::enrollPeer(const uint8_t mac[6], const uint8_t pubKey32[32],
+void Enrollment::enrollPeer(const uint8_t* mac, const uint8_t* pubKey32,
                              RegisterPeerFn registerFn, bool /*dualMasterMode*/) {
   if (esp_now_is_peer_exist(mac)) {
     esp_now_del_peer(mac);
@@ -106,7 +106,7 @@ void Enrollment::setRelayFn(EnrollmentRelayFn fn) {
   _enrollmentRelayFn = fn;
 }
 
-void Enrollment::setPendingRelay(const uint8_t mac[6], const uint8_t pubKey[32]) {
+void Enrollment::setPendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
   memcpy(_pendingEnrollmentMac, mac, 6);
   memcpy(_pendingEnrollmentPubKey, pubKey, 32);
   _pendingEnrollmentRelay = true;

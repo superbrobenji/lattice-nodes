@@ -14,11 +14,11 @@ PeerRegistry::PeerRegistry() {
   memset(deviceMac, 0, sizeof(deviceMac));
 }
 
-void PeerRegistry::setDeviceMac(const uint8_t mac[6]) {
+void PeerRegistry::setDeviceMac(const uint8_t* mac) {
   memcpy(deviceMac, mac, 6);
 }
 
-PeerInfo* PeerRegistry::find(const uint8_t mac[6]) {
+PeerInfo* PeerRegistry::find(const uint8_t* mac) {
   for (size_t i = 0; i < peerCount; ++i) {
     if (memcmp(peerMacs[i].mac, mac, 6) == 0) {
       return &peerMacs[i];
@@ -27,7 +27,7 @@ PeerInfo* PeerRegistry::find(const uint8_t mac[6]) {
   return nullptr;
 }
 
-const PeerInfo* PeerRegistry::find(const uint8_t mac[6]) const {
+const PeerInfo* PeerRegistry::find(const uint8_t* mac) const {
   for (size_t i = 0; i < peerCount; ++i) {
     if (memcmp(peerMacs[i].mac, mac, 6) == 0) {
       return &peerMacs[i];
@@ -43,7 +43,7 @@ bool PeerRegistry::append(const PeerInfo& peer) {
   return true;
 }
 
-void PeerRegistry::remove(const uint8_t mac[6]) {
+void PeerRegistry::remove(const uint8_t* mac) {
   for (size_t i = 0; i < peerCount; ++i) {
     if (lattice::utils::MacAddress(peerMacs[i].mac) == lattice::utils::MacAddress(mac)) {
       peerMacs[i] = peerMacs[--peerCount];
@@ -52,14 +52,14 @@ void PeerRegistry::remove(const uint8_t mac[6]) {
   }
 }
 
-bool PeerRegistry::isPeerInRange(const uint8_t mac[6]) const {
+bool PeerRegistry::isPeerInRange(const uint8_t* mac) const {
   const PeerInfo* peer = find(mac);
   if (!peer)
     return false;
   return millis() - peer->lastSeenMillis < lattice::config::STALE_PEER_THRESHOLD_MS;
 }
 
-void PeerRegistry::updateLastSeen(const uint8_t mac[6]) {
+void PeerRegistry::updateLastSeen(const uint8_t* mac) {
   if (!mac)
     return;
   if (lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(deviceMac))
@@ -127,7 +127,7 @@ void PeerRegistry::saveToEEPROM() {
   EepromManager::getInstance().savePeerList(peerRecords, peerCount);
 }
 
-void PeerRegistry::addAndPersist(const uint8_t mac[6]) {
+void PeerRegistry::addAndPersist(const uint8_t* mac) {
   if (find(mac) ||
       lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(deviceMac))
     return;
@@ -149,7 +149,7 @@ void PeerRegistry::addAndPersist(const uint8_t mac[6]) {
   Logger::logln("MESH", "Peer added", LogLevel::LOG_DEBUG);
 }
 
-void PeerRegistry::removeAndPersist(const uint8_t mac[6]) {
+void PeerRegistry::removeAndPersist(const uint8_t* mac) {
   for (size_t i = 0; i < peerCount; ++i) {
     if (lattice::utils::MacAddress(peerMacs[i].mac) == lattice::utils::MacAddress(mac)) {
       peerMacs[i] = peerMacs[--peerCount]; // swap with last, shrink count

@@ -7,9 +7,9 @@
 namespace lattice {
 namespace mesh {
 
-using EnrollmentRelayFn = void (*)(const uint8_t mac[6], const uint8_t pubKey[32]);
-using SendMessageFn = std::function<void(const uint8_t target[6], mesh_message)>;
-using RegisterPeerFn = std::function<void(const uint8_t mac[6], const uint8_t* pubKey32)>;
+using EnrollmentRelayFn = void (*)(const uint8_t* mac, const uint8_t* pubKey);
+using SendMessageFn = std::function<void(const uint8_t* target, const mesh_message&)>;
+using RegisterPeerFn = std::function<void(const uint8_t* mac, const uint8_t* pubKey32)>;
 
 class Enrollment {
 public:
@@ -30,11 +30,11 @@ public:
   void processRequest(const mesh_message& msg);
   void processJoinAck(const mesh_message& msg, const uint8_t* deviceMac,
                       RegisterPeerFn registerFn);
-  void enrollPeer(const uint8_t mac[6], const uint8_t pubKey32[32],
+  void enrollPeer(const uint8_t* mac, const uint8_t* pubKey32,
                   RegisterPeerFn registerFn, bool dualMasterMode);
 
   void setRelayFn(EnrollmentRelayFn fn);
-  void setPendingRelay(const uint8_t mac[6], const uint8_t pubKey[32]);
+  void setPendingRelay(const uint8_t* mac, const uint8_t* pubKey);
   void drainPendingRelay();
 
 #ifdef UNIT_TEST

@@ -131,7 +131,7 @@ void Enrollment::init() {
   // Keys: leave zeroed (tests set them directly if needed)
 }
 
-void Enrollment::enrollPeer(const uint8_t mac[6], const uint8_t pubKey32[32],
+void Enrollment::enrollPeer(const uint8_t* mac, const uint8_t* pubKey32,
                              RegisterPeerFn registerFn, bool /*dualMasterMode*/) {
   // Stub: skip LMK derivation (mbedtls not available on host).
   // Just invoke the callback if provided.

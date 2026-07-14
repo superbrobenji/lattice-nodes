@@ -36,7 +36,7 @@ public:
   //   OP_COMMAND_ACK   0xE0  [E0][1B commandId]
 
   // Relay a completed enrollment public key to the server over serial
-  static void relayEnrollmentToServer(const uint8_t mac[6], const uint8_t pubKey[32]);
+  static void relayEnrollmentToServer(const uint8_t* mac, const uint8_t* pubKey);
 
 #if SIMULATE_MODE
   // WARNING: SIMULATE_MODE opcodes 0xD0-0xD2 overlap with OP_LED_SOLID/OFF/BLINK from the

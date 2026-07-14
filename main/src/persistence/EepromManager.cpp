@@ -466,7 +466,7 @@ void EepromManager::saveBootEpoch(uint32_t epoch) {
 }
 
 // TOFU master MAC operations
-bool EepromManager::loadKnownMasterMac(uint8_t mac[6]) {
+bool EepromManager::loadKnownMasterMac(uint8_t* mac) {
   if (!ensureInitialized())
     return false;
   for (int i = 0; i < 6; ++i)
@@ -482,7 +482,7 @@ bool EepromManager::loadKnownMasterMac(uint8_t mac[6]) {
   return !allFF;
 }
 
-void EepromManager::saveKnownMasterMac(const uint8_t mac[6]) {
+void EepromManager::saveKnownMasterMac(const uint8_t* mac) {
   if (!ensureInitialized() || isDevMode)
     return;
   for (int i = 0; i < 6; ++i)
@@ -501,7 +501,7 @@ void EepromManager::clearKnownMasterMac() {
 }
 
 // TOFU secondary master MAC operations
-bool EepromManager::loadKnownMasterMacSecondary(uint8_t mac[6]) {
+bool EepromManager::loadKnownMasterMacSecondary(uint8_t* mac) {
   if (!ensureInitialized())
     return false;
   for (int i = 0; i < 6; ++i)
@@ -516,7 +516,7 @@ bool EepromManager::loadKnownMasterMacSecondary(uint8_t mac[6]) {
   return !allFF;
 }
 
-void EepromManager::saveKnownMasterMacSecondary(const uint8_t mac[6]) {
+void EepromManager::saveKnownMasterMacSecondary(const uint8_t* mac) {
   if (!ensureInitialized() || isDevMode)
     return;
   for (int i = 0; i < 6; ++i)

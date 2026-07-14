@@ -17,7 +17,7 @@ public:
 
   // Trampoline for interrupt (must be static):
   static void detectMotionTrampoline();
-  static void sendDataTrampoline(adapter_types adapterType, uint8_t data[64]);
+  static void sendDataTrampoline(adapter_types adapterType, uint8_t* data);
 
   // Singleton accessor (used by SerialAdapter in SIMULATE_MODE)
   static PirAdapter* getInstance() { return instance; }

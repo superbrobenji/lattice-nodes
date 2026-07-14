@@ -56,7 +56,7 @@ private:
   PeerRegistry peers; // Peer list management (no heap alloc)
 
   void readMacAddress();
-  void printMac(const uint8_t mac[6]);
+  void printMac(const uint8_t* mac);
   void printMeshMessage(const mesh_message& msg);
 
   static void onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status);
@@ -78,7 +78,7 @@ private:
   // Peer routing (uses currentMaster — stays in Mesh)
   PeerInfo* findNextHopToMaster();
 
-  void sendMessage(const uint8_t target[6], mesh_message msg);
+  void sendMessage(const uint8_t* target, const mesh_message& msg);
   void broadcastToAllPeers(mesh_message msg);
 
   void transmitCore(const adapter_types type, const uint8_t* data,
@@ -161,8 +161,8 @@ public:
   bool getDualMasterMode() const { return _dualMasterMode; }
 
   // Peer management API (optional, can be used in your app/UI)
-  void addPeer(const uint8_t mac[6]);
-  void removePeer(const uint8_t mac[6]) { peers.removeAndPersist(mac); }
+  void addPeer(const uint8_t* mac);
+  void removePeer(const uint8_t* mac) { peers.removeAndPersist(mac); }
   const PeerInfo* getPeerList() const { return peers.peerMacs; }
   size_t getPeerCount() const { return peers.peerCount; }
 
@@ -184,10 +184,10 @@ public:
   // Enrollment protocol
   void sendEnrollmentRequest() {
     enrollment.sendRequest(deviceMacAddress,
-      [this](const uint8_t* t, mesh_message m) { this->sendMessage(t, m); });
+      [this](const uint8_t* t, const mesh_message& m) { this->sendMessage(t, m); });
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
-  void enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]);
+  void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);
 
   // Enrollment relay callback — set by Serial_Adapter owner (main.ino)
   void setEnrollmentRelayFn(EnrollmentRelayFn fn) { enrollment.setRelayFn(fn); }
