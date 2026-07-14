@@ -1,16 +1,16 @@
 #include <gtest/gtest.h>
 #include <cstring>
-#include "persistence/EEPROM_Manager.h"
-#include "Mesh/Mesh.h" // for PeerInfo and PEER_RECORD_SIZE constants
+#include "persistence/EepromManager.h"
+#include "mesh/Mesh.h" // for PeerInfo and PEER_RECORD_SIZE constants
 
 using lattice::mesh::PeerInfo;
-using lattice::utils::EEPROM_Manager;
+using lattice::utils::EepromManager;
 using lattice::utils::EEPROM_SIZES::PEER_RECORD_SIZE;
 
 // -----------------------------------------------------------------------
 // Test fixture
 //
-// The EEPROM_Manager is a Meyers singleton — isInitialized stays true for
+// The EepromManager is a Meyers singleton — isInitialized stays true for
 // the process lifetime. Between tests we:
 //   1. clearAll()   — fills EEPROM with 0xFF and commits (via the manager)
 //   2. EEPROM.reset() — resets the backing store + _commitCount to a clean
@@ -31,7 +31,7 @@ protected:
     // To get a truly blank state we re-initialize the internal flag by using
     // clearAll() which fills 0xFF and commits, then reset the backing store
     // again to undo the schema-version byte left by init().
-    auto& mgr = EEPROM_Manager::getInstance();
+    auto& mgr = EepromManager::getInstance();
     mgr.init();     // Ensure initialized (no-op after first test)
     mgr.clearAll(); // Fill 0xFF + commit
     EEPROM.reset(); // Wipe commit counter and restore blank backing store
@@ -44,18 +44,18 @@ protected:
 
 TEST_F(EEPROMMgrTest, BootEpoch_StartsAtZeroWhenUnset) {
   // EEPROM is all 0xFF; loadBootEpoch() maps 0xFFFFFFFF → 0
-  uint32_t epoch = EEPROM_Manager::getInstance().loadBootEpoch();
+  uint32_t epoch = EepromManager::getInstance().loadBootEpoch();
   EXPECT_EQ(epoch, 0u);
 }
 
 TEST_F(EEPROMMgrTest, BootEpoch_SaveAndLoad_RoundTrip) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
   mgr.saveBootEpoch(12345);
   EXPECT_EQ(mgr.loadBootEpoch(), 12345u);
 }
 
 TEST_F(EEPROMMgrTest, BootEpoch_WrapsAtMax) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
   mgr.saveBootEpoch(0xFFFFFFFE);
   EXPECT_EQ(mgr.loadBootEpoch(), 0xFFFFFFFEu);
 }
@@ -65,7 +65,7 @@ TEST_F(EEPROMMgrTest, BootEpoch_WrapsAtMax) {
 // -----------------------------------------------------------------------
 
 TEST_F(EEPROMMgrTest, PeerList_SaveAndLoad_EmptyList) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
 
   // Save zero peers (fills entire peer region with 0xFF)
   uint8_t emptyBuf[1]{}; // Not accessed when numPeers=0
@@ -78,7 +78,7 @@ TEST_F(EEPROMMgrTest, PeerList_SaveAndLoad_EmptyList) {
 }
 
 TEST_F(EEPROMMgrTest, PeerList_SaveAndLoad_SinglePeer) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
 
   // Build a 38-byte peer record: 6-byte MAC + 32-byte public key
   uint8_t peerRecord[PEER_RECORD_SIZE]{};
@@ -105,7 +105,7 @@ TEST_F(EEPROMMgrTest, PeerList_SaveAndLoad_SinglePeer) {
 }
 
 TEST_F(EEPROMMgrTest, PeerList_SaveAndLoad_MaxPeers) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
 
   constexpr size_t MAX = 10;
   uint8_t peers[MAX * PEER_RECORD_SIZE]{};
@@ -129,7 +129,7 @@ TEST_F(EEPROMMgrTest, PeerList_SaveAndLoad_MaxPeers) {
 // -----------------------------------------------------------------------
 
 TEST_F(EEPROMMgrTest, Keypair_SaveAndLoad_ValidCRC) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
 
   uint8_t privKey[32]{}, pubKey[32]{};
   for (int i = 0; i < 32; ++i) {
@@ -146,7 +146,7 @@ TEST_F(EEPROMMgrTest, Keypair_SaveAndLoad_ValidCRC) {
 }
 
 TEST_F(EEPROMMgrTest, Keypair_Load_CorruptedData_ReturnsFalse) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
 
   uint8_t priv[32];
   memset(priv, 42, 32);
@@ -165,7 +165,7 @@ TEST_F(EEPROMMgrTest, Keypair_Load_CorruptedData_ReturnsFalse) {
 TEST_F(EEPROMMgrTest, Keypair_Load_Unset_ReturnsFalse) {
   // Blank EEPROM — CRC mismatch expected
   uint8_t p1[32]{}, p2[32]{};
-  EXPECT_FALSE(EEPROM_Manager::getInstance().loadKeypair(p1, p2));
+  EXPECT_FALSE(EepromManager::getInstance().loadKeypair(p1, p2));
 }
 
 // -----------------------------------------------------------------------
@@ -177,7 +177,7 @@ TEST_F(EEPROMMgrTest, Keypair_Load_Unset_ReturnsFalse) {
 // -----------------------------------------------------------------------
 
 TEST_F(EEPROMMgrTest, DirtyFlag_NoFlushBeforeInterval) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
   int commitsBefore = EEPROM._commitCount;
 
   // savePeerList → markDirty(), no commit
@@ -194,7 +194,7 @@ TEST_F(EEPROMMgrTest, DirtyFlag_NoFlushBeforeInterval) {
 }
 
 TEST_F(EEPROMMgrTest, DirtyFlag_FlushAfterInterval) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
 
   uint8_t peers[PEER_RECORD_SIZE]{};
   mgr.savePeerList(peers, 0);
@@ -207,7 +207,7 @@ TEST_F(EEPROMMgrTest, DirtyFlag_FlushAfterInterval) {
 }
 
 TEST_F(EEPROMMgrTest, ForceFlush_CommitsImmediately) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
 
   uint8_t peers[PEER_RECORD_SIZE]{};
   mgr.savePeerList(peers, 0);
@@ -223,12 +223,12 @@ TEST_F(EEPROMMgrTest, ForceFlush_CommitsImmediately) {
 
 TEST_F(EEPROMMgrTest, TxPower_DefaultIsOutdoor) {
   // Blank EEPROM (0xFF) → default preset
-  auto preset = EEPROM_Manager::getInstance().loadTxPowerPreset();
+  auto preset = EepromManager::getInstance().loadTxPowerPreset();
   EXPECT_EQ(preset, lattice::config::TxPowerPreset::OUTDOOR);
 }
 
 TEST_F(EEPROMMgrTest, TxPower_SaveAndLoad) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
   mgr.saveTxPowerPreset(lattice::config::TxPowerPreset::INDOOR);
   EXPECT_EQ(mgr.loadTxPowerPreset(), lattice::config::TxPowerPreset::INDOOR);
 }
@@ -238,18 +238,18 @@ TEST_F(EEPROMMgrTest, TxPower_SaveAndLoad) {
 // -----------------------------------------------------------------------
 
 TEST_F(EEPROMMgrTest, NodeId_DefaultIsZero) {
-  EXPECT_EQ(EEPROM_Manager::getInstance().loadNodeId(), 0u);
+  EXPECT_EQ(EepromManager::getInstance().loadNodeId(), 0u);
 }
 
 TEST_F(EEPROMMgrTest, NodeId_SaveAndLoad) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
   mgr.saveNodeId(42);
   mgr.forceFlush();
   EXPECT_EQ(mgr.loadNodeId(), 42u);
 }
 
 TEST_F(EEPROMMgrTest, NodeId_SaveZeroRoundtrips) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
   mgr.saveNodeId(7);
   mgr.saveNodeId(0);
   mgr.forceFlush();
@@ -261,7 +261,7 @@ TEST_F(EEPROMMgrTest, NodeId_SaveZeroRoundtrips) {
 // -----------------------------------------------------------------------
 
 TEST_F(EEPROMMgrTest, KnownMasterMacSecondary_UnsetReturnsFalse) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
   mgr.init();
   uint8_t mac[6] = {};
   bool found = mgr.loadKnownMasterMacSecondary(mac);
@@ -269,7 +269,7 @@ TEST_F(EEPROMMgrTest, KnownMasterMacSecondary_UnsetReturnsFalse) {
 }
 
 TEST_F(EEPROMMgrTest, KnownMasterMacSecondary_SaveAndLoad_RoundTrip) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
   mgr.init();
   const uint8_t expected[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   mgr.saveKnownMasterMacSecondary(expected);
@@ -282,7 +282,7 @@ TEST_F(EEPROMMgrTest, KnownMasterMacSecondary_SaveAndLoad_RoundTrip) {
 }
 
 TEST_F(EEPROMMgrTest, KnownMasterMacSecondary_Clear_ResetsToUnset) {
-  auto& mgr = EEPROM_Manager::getInstance();
+  auto& mgr = EepromManager::getInstance();
   mgr.init();
   const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
   mgr.saveKnownMasterMacSecondary(mac);

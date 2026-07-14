@@ -8,11 +8,14 @@
 #include <esp_wifi.h>
 #include <array>
 #include <cstdint>
-#include "src/Adapter/Adapter.h"
-#include "src/persistence/EEPROM_Manager.h"
+#include "src/adapter/Adapter.h"
+#include "src/persistence/EepromManager.h"
 #include "../../project_config.h" // Added for global limits/config
 #include "../../lib/lattice-protocol/c/message_types.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
+#include "ReplayCache.h"
+#include "PeerRegistry.h"
+#include "Enrollment.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -27,27 +30,8 @@ namespace mesh {
 using ::mesh_message;
 using ::MeshMessageType;
 using lattice::adapter::adapter_types;
-using lattice::utils::EEPROM_SIZES::MAX_PEERS; // Use constant from EEPROM_Manager
 
 static constexpr uint8_t PROTO_VERSION = 2;
-
-// Peer info struct for RAM and EEPROM storage
-struct PeerInfo {
-  uint8_t mac[6];
-  uint8_t publicKey[32]; // Curve25519 public key (zero = not yet known)
-  uint32_t lastSeenMillis;
-};
-
-// Master routing info
-struct MasterInfo {
-  uint8_t mac[6];
-  uint8_t distance;   // Hops to master
-  uint8_t nextHop[6]; // Next hop MAC
-};
-
-// Enrollment relay callback — registered by Serial_Adapter owner (main.ino).
-// Called from loop() when a pending enrollment is ready to relay to the server.
-typedef void (*EnrollmentRelayFn)(const uint8_t mac[6], const uint8_t pubKey[32]);
 
 class Mesh {
 #ifdef UNIT_TEST
@@ -69,11 +53,10 @@ private:
 
   esp_now_peer_info_t peerInfo;
 
-  PeerInfo peerMacs[MAX_PEERS]; // Fixed-size peer list (no heap alloc)
-  size_t peerCount;             // Number of valid entries in peerMacs
+  PeerRegistry peers; // Peer list management (no heap alloc)
 
   void readMacAddress();
-  void printMac(const uint8_t mac[6]);
+  void printMac(const uint8_t* mac);
   void printMeshMessage(const mesh_message& msg);
 
   static void onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status);
@@ -92,21 +75,10 @@ private:
   uint32_t lastMasterBeaconReceivedMs;
   static constexpr uint32_t STALE_MASTER_THRESHOLD_MS = lattice::config::STALE_MASTER_THRESHOLD_MS;
 
-  // Peer EEPROM management
-  void loadPeersFromEEPROM();
-  void savePeersToEEPROM();
-  void addPeerToEEPROM(const uint8_t mac[6]);
-  void removePeerFromEEPROM(const uint8_t mac[6]);
-
-  // Peer logic
-  PeerInfo* findPeer(const uint8_t mac[6]);
-  bool isPeerInRange(const uint8_t mac[6]);
+  // Peer routing (uses currentMaster — stays in Mesh)
   PeerInfo* findNextHopToMaster();
 
-  // Bounds-checked insert into peerMacs fixed array
-  bool appendPeer(const PeerInfo& peer);
-
-  void sendMessage(const uint8_t target[6], mesh_message msg);
+  void sendMessage(const uint8_t* target, const mesh_message& msg);
   void broadcastToAllPeers(mesh_message msg);
 
   void transmitCore(const adapter_types type, const uint8_t* data,
@@ -119,7 +91,6 @@ private:
   bool meshKeyIsSet() const;
 
   // --- Tiger Style refactor helpers ---
-  void updatePeerLastSeen(const uint8_t mac[6]);
   void processMasterBeacon(const mesh_message& msg);
   void processAdapterData(const mesh_message& msg);
   void relayDownlink(const mesh_message& msg);
@@ -129,51 +100,18 @@ private:
   bool setupEspNow();
   void loadPersistentState();
 
-  // Enrollment helpers
-  void processEnrollmentRequest(const mesh_message& msg);
+  // Enrollment helper (relay dispatch only — "addressed to us" branch is in Enrollment)
   void processJoinAck(const mesh_message& msg);
 
-  // Curve25519 keypair
-  uint8_t devicePrivateKey[32];
-  uint8_t devicePublicKey[32];
-  void loadOrGenerateKeypair();
-
-  // Replay protection
-  uint32_t bootEpoch;
-  uint16_t txSeqNum;
-
-  struct ReplayEntry {
-    uint8_t mac[6];
-    uint32_t epoch;
-    uint16_t seq;
-  };
-  static constexpr size_t REPLAY_CACHE_SIZE = 16;
-  ReplayEntry replayCache[REPLAY_CACHE_SIZE];
-  size_t replayCacheIdx;
-
-  bool isReplay(const mesh_message& msg);
-
-  // Beacon relay dedup (fix C10)
-  uint32_t lastRelayedEpoch;
-  uint16_t lastRelayedSeqNum;
+  // Replay protection (composed)
+  ReplayCache replay;
 
   // Relay jitter: deferred relay pending fields (Task 3)
   mesh_message relayPendingMsg;
   uint32_t relayPendingAt;
   bool relayPending;
 
-  // TOFU master MAC — learned on first enrollment beacon, persisted across reboots
-  uint8_t knownMasterMac[6];
-  bool hasMasterMac;
-  uint8_t knownMasterMacSecondary[6];
-  bool hasMasterMacSecondary;
   bool _dualMasterMode;
-
-  // Pending enrollment relay (filled in ESP-NOW callback, drained in loop())
-  volatile bool _pendingEnrollmentRelay = false;
-  uint8_t _pendingEnrollmentMac[6]{};
-  uint8_t _pendingEnrollmentPubKey[32]{};
-  EnrollmentRelayFn _enrollmentRelayFn = nullptr;
 
   // --- ESP-NOW receive ring buffer (lock-free SPSC) ---
   static constexpr size_t RECV_QUEUE_SIZE = 8;
@@ -188,13 +126,15 @@ private:
   uint8_t recvQueueTail;          // read by main task (loop)
 
   void drainRecvQueue();
-  void drainPendingEnrollment();
   bool sendRouteReport();
   void processRouteReport(const mesh_message& msg);
 
   // Beacon timer (moved from broadcastMasterBeacon for loop() integration)
   uint32_t lastBeaconMs;
   uint32_t lastRouteReportMs;
+
+  // Enrollment state (composed — mbedtls-heavy methods stubbed in test builds)
+  Enrollment enrollment;
 
 public:
   Mesh();
@@ -221,10 +161,10 @@ public:
   bool getDualMasterMode() const { return _dualMasterMode; }
 
   // Peer management API (optional, can be used in your app/UI)
-  void addPeer(const uint8_t mac[6]);
-  void removePeer(const uint8_t mac[6]);
-  const PeerInfo* getPeerList() const { return peerMacs; }
-  size_t getPeerCount() const { return peerCount; }
+  void addPeer(const uint8_t* mac);
+  void removePeer(const uint8_t* mac) { peers.removeAndPersist(mac); }
+  const PeerInfo* getPeerList() const { return peers.peerMacs; }
+  size_t getPeerCount() const { return peers.peerCount; }
 
   // Broadcast adapter data to all peers
   void broadcastAdapterData(adapter_types type, const uint8_t* data);
@@ -236,18 +176,22 @@ public:
   void debugDumpRadio();
 
   // Provisioning: public key accessor (private key never exposed)
-  const uint8_t* getDevicePublicKey() const { return devicePublicKey; }
+  const uint8_t* getDevicePublicKey() const { return enrollment.getPublicKey(); }
 
   // Singleton accessor (used by Serial_Adapter for enrollment callbacks)
   static Mesh* getInstance() { return instance; }
 
   // Enrollment protocol
-  void sendEnrollmentRequest();
-  bool isEnrolled() const;
-  void enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]);
+  void sendEnrollmentRequest() {
+    enrollment.sendRequest(deviceMacAddress, [this](const uint8_t* t, const mesh_message& m) {
+      this->sendMessage(t, m);
+    });
+  }
+  bool isEnrolled() const { return enrollment.isEnrolled(); }
+  void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);
 
   // Enrollment relay callback — set by Serial_Adapter owner (main.ino)
-  void setEnrollmentRelayFn(EnrollmentRelayFn fn);
+  void setEnrollmentRelayFn(EnrollmentRelayFn fn) { enrollment.setRelayFn(fn); }
 
   // Get current hop count to master (0 if this node is master)
   uint8_t getHopCount() const { return isMaster ? 0 : currentMaster.distance; }

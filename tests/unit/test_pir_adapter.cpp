@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <vector>
-#include "Adapter/PIR_Adapter/PIR_Adapter.h"
-#include "Adapter/AdapterFactory.h"
+#include "adapter/pir/PirAdapter.h"
+#include "adapter/AdapterFactory.h"
 #include "esp_wifi_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
-#include "persistence/EEPROM_Manager.h"
-#include "Mesh/Mesh.h"
+#include "persistence/EepromManager.h"
+#include "mesh/Mesh.h"
 
 using namespace lattice::adapter;
 
@@ -26,7 +26,7 @@ class PIRHealthTest : public ::testing::Test {
 protected:
   void SetUp() override {
     EEPROM.reset();
-    lattice::utils::EEPROM_Manager::getInstance().init();
+    lattice::utils::EepromManager::getInstance().init();
     resetMillis();
     resetWifiMock();
     lastTxType = adapter_types::UNKNOWN_ADAPTER;
@@ -35,17 +35,17 @@ protected:
   }
 };
 
-// Helper: construct + init a PIR_Adapter with the capture transmit fn wired up.
+// Helper: construct + init a PirAdapter with the capture transmit fn wired up.
 // Pin 27 is valid per GpioInput::isValidInputPin.
-static PIR_Adapter* makePir() {
-  auto* pir = new PIR_Adapter(27);
+static PirAdapter* makePir() {
+  auto* pir = new PirAdapter(27);
   pir->setTransmitFn(captureTransmit);
-  pir->init(); // sets PIR_Adapter::instance = pir; also marks _initialized
+  pir->init(); // sets PirAdapter::instance = pir; also marks _initialized
   return pir;
 }
 
 TEST_F(PIRHealthTest, SendsNodeHealthAfter30s) {
-  PIR_Adapter* pir = makePir();
+  PirAdapter* pir = makePir();
 
   // Advance past the 30s threshold
   advanceMillis(30001);
@@ -72,7 +72,7 @@ TEST_F(PIRHealthTest, SendsNodeHealthAfter30s) {
 }
 
 TEST_F(PIRHealthTest, DoesNotSendNodeHealthBefore30s) {
-  PIR_Adapter* pir = makePir();
+  PirAdapter* pir = makePir();
 
   advanceMillis(29999);
   pir->loop();
@@ -83,7 +83,7 @@ TEST_F(PIRHealthTest, DoesNotSendNodeHealthBefore30s) {
 }
 
 TEST_F(PIRHealthTest, SendsHealthExactlyAtThreshold) {
-  PIR_Adapter* pir = makePir();
+  PirAdapter* pir = makePir();
 
   advanceMillis(30000);
   pir->loop();
@@ -95,7 +95,7 @@ TEST_F(PIRHealthTest, SendsHealthExactlyAtThreshold) {
 }
 
 TEST_F(PIRHealthTest, DoesNotSendHealthTwiceWithinInterval) {
-  PIR_Adapter* pir = makePir();
+  PirAdapter* pir = makePir();
 
   advanceMillis(30001);
   pir->loop();
@@ -111,7 +111,7 @@ TEST_F(PIRHealthTest, DoesNotSendHealthTwiceWithinInterval) {
 }
 
 TEST_F(PIRHealthTest, SendsHealthAgainAfterSecondInterval) {
-  PIR_Adapter* pir = makePir();
+  PirAdapter* pir = makePir();
 
   advanceMillis(30001);
   pir->loop();
@@ -127,7 +127,7 @@ TEST_F(PIRHealthTest, SendsHealthAgainAfterSecondInterval) {
 }
 
 TEST_F(PIRHealthTest, UptimeReflectsActualMillis) {
-  PIR_Adapter* pir = makePir();
+  PirAdapter* pir = makePir();
 
   // Simulate 2 minutes elapsed
   advanceMillis(120001);
@@ -148,7 +148,7 @@ TEST_F(PIRHealthTest, UptimeReflectsActualMillis) {
 // -----------------------------------------------------------------------
 
 TEST_F(PIRHealthTest, OpNodeIdSet_AssignsNodeId_WhenTargetMatchesMac) {
-  PIR_Adapter* pir = new PIR_Adapter(2);
+  PirAdapter* pir = new PirAdapter(2);
   pir->setTransmitFn([](adapter_types, const uint8_t*) {});
 
   // Set mockDeviceMac to known value
@@ -168,12 +168,12 @@ TEST_F(PIRHealthTest, OpNodeIdSet_AssignsNodeId_WhenTargetMatchesMac) {
 
   pir->onMeshData(msg);
 
-  EXPECT_EQ(lattice::utils::EEPROM_Manager::getInstance().loadNodeId(), 99u);
+  EXPECT_EQ(lattice::utils::EepromManager::getInstance().loadNodeId(), 99u);
   delete pir;
 }
 
 TEST_F(PIRHealthTest, OpNodeIdSet_IgnoresMessage_WhenTargetMismatch) {
-  PIR_Adapter* pir = new PIR_Adapter(2);
+  PirAdapter* pir = new PirAdapter(2);
   pir->setTransmitFn([](adapter_types, const uint8_t*) {});
 
   mockDeviceMac[0] = 0xAA;
@@ -192,6 +192,6 @@ TEST_F(PIRHealthTest, OpNodeIdSet_IgnoresMessage_WhenTargetMismatch) {
 
   pir->onMeshData(msg);
 
-  EXPECT_EQ(lattice::utils::EEPROM_Manager::getInstance().loadNodeId(), 0u);
+  EXPECT_EQ(lattice::utils::EepromManager::getInstance().loadNodeId(), 0u);
   delete pir;
 }

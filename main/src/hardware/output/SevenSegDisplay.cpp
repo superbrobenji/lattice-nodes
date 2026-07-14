@@ -1,6 +1,6 @@
 #include "SevenSegDisplay.h"
 #include "GpioOutput.h"
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "src/error/Error.h"
 
 using lattice::core::ErrorTypeDigit;

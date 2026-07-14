@@ -1,5 +1,5 @@
 #include "Led.h"
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "src/error/Error.h"
 
 namespace lattice {

@@ -1,10 +1,10 @@
 #include "Adapter.h"
-#include "src/Mesh/Mesh.h" // for full definition of mesh_message
-#include "src/core/Logger.h"
+#include "src/mesh/Mesh.h" // for full definition of mesh_message
+#include "src/logging/Logger.h"
 #include "src/error/Error.h"
-#include "src/Adapter/AdapterFactory.h"
-#include "src/Adapter/Serial_Adapter/Serial_Adapter.h"
-#include "src/persistence/EEPROM_Manager.h"
+#include "src/adapter/AdapterFactory.h"
+#include "src/adapter/serial/SerialAdapter.h"
+#include "src/persistence/EepromManager.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include <esp_wifi.h>
 #include <cstring>
@@ -82,7 +82,7 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
       bool isTarget = allFF || (memcmp(&message.data[1], ownMac, 6) == 0);
       if (isTarget) {
         uint8_t nodeId = message.data[7];
-        lattice::utils::EEPROM_Manager::getInstance().saveNodeId(nodeId);
+        lattice::utils::EepromManager::getInstance().saveNodeId(nodeId);
         Logger::logln("ADAPTER", "Node ID assigned: " + String(nodeId), LogLevel::LOG_INFO);
       }
     }

@@ -1,19 +1,15 @@
 #include "Mesh.h"
 #include "src/network/MacAddress.h"
-#include "src/core/Logger.h"
+#include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
-#include "src/persistence/EEPROM_Manager.h"
+#include "src/persistence/EepromManager.h"
 // Error.h already provides ERROR_CHECK macros
 #include <esp_now.h>
 #include <WiFi.h>
 #include <cstring>
 #include "../../project_config.h"
 #include "lib/lattice-protocol/c/opcodes.h"
-#include <mbedtls/ecdh.h>
-#include <mbedtls/entropy.h>
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/ecp.h>
-#include <mbedtls/sha256.h>
+#include "MeshCrypto.h"
 
 namespace lattice {
 namespace mesh {
@@ -24,169 +20,18 @@ Mesh* Mesh::instance = nullptr;
 
 // no longer need macEquals helper – use MacAddress equality directly
 
-// Derive a 16-byte LMK for a peer using ECDH + SHA256.
-// LMK = SHA256(ECDH_shared_secret || "lattice-lmk")[0:16]
-static void derivePeerLMK(const uint8_t* ownPrivateKey32, const uint8_t* peerPublicKey32,
-                          uint8_t* lmk16Out) {
-  mbedtls_ecdh_context ecdh;
-  mbedtls_entropy_context entropy;
-  mbedtls_ctr_drbg_context ctr_drbg;
-  mbedtls_ecdh_init(&ecdh);
-  mbedtls_entropy_init(&entropy);
-  mbedtls_ctr_drbg_init(&ctr_drbg);
-
-  int ret = 0;
-
-  const char* pers = "lattice_ecdh";
-  ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                              reinterpret_cast<const uint8_t*>(pers), strlen(pers));
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 10,
-                        "MESH: derivePeerLMK — ctr_drbg_seed failed");
-  }
-
-  ret = mbedtls_ecdh_setup(&ecdh, MBEDTLS_ECP_DP_CURVE25519);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 11,
-                        "MESH: derivePeerLMK — ecdh_setup failed");
-  }
-
-  // Load own private key and peer public key (X coordinate only for Curve25519)
-  ret = mbedtls_mpi_read_binary(
-      &ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(d), ownPrivateKey32,
-      32);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 12,
-                        "MESH: derivePeerLMK — mpi_read_binary (private key) failed");
-  }
-
-  ret = mbedtls_mpi_read_binary(
-      &ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(X),
-      peerPublicKey32, 32);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 13,
-                        "MESH: derivePeerLMK — mpi_read_binary (peer public key) failed");
-  }
-
-  ret = mbedtls_mpi_lset(
-      &ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(Z),
-      1);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 14,
-                        "MESH: derivePeerLMK — mpi_lset (Qp.Z) failed");
-  }
-
-  uint8_t sharedSecret[32] = {};
-  size_t outLen = 0;
-  ret = mbedtls_ecdh_calc_secret(&ecdh, &outLen, sharedSecret, sizeof(sharedSecret),
-                                 mbedtls_ctr_drbg_random, &ctr_drbg);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 15,
-                        "MESH: derivePeerLMK — ecdh_calc_secret failed");
-  }
-
-  mbedtls_ecdh_free(&ecdh);
-  mbedtls_ctr_drbg_free(&ctr_drbg);
-  mbedtls_entropy_free(&entropy);
-
-  // KDF: SHA256(sharedSecret || "lattice-lmk"), take first 16 bytes
-  mbedtls_sha256_context sha;
-  mbedtls_sha256_init(&sha);
-
-  ret = mbedtls_sha256_starts(&sha, 0); // 0 = SHA-256, not SHA-224
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 16,
-                        "MESH: derivePeerLMK — sha256_starts failed");
-  }
-
-  ret = mbedtls_sha256_update(&sha, sharedSecret, 32);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 17,
-                        "MESH: derivePeerLMK — sha256_update (secret) failed");
-  }
-
-  const uint8_t label[] = "lattice-lmk";
-  ret = mbedtls_sha256_update(&sha, label, sizeof(label) - 1);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 18,
-                        "MESH: derivePeerLMK — sha256_update (label) failed");
-  }
-
-  uint8_t digest[32];
-  ret = mbedtls_sha256_finish(&sha, digest);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 19,
-                        "MESH: derivePeerLMK — sha256_finish failed");
-  }
-
-  mbedtls_sha256_free(&sha);
-
-  memcpy(lmk16Out, digest, 16);
-
-  // Zero sensitive buffers after use (Fix 2)
-  memset(sharedSecret, 0, sizeof(sharedSecret));
-  memset(digest, 0, sizeof(digest));
-}
-
-static void registerPeerWithEspNow(const uint8_t mac[6], const uint8_t* ownPrivateKey32,
-                                   const uint8_t* peerPublicKey32) {
-  if (esp_now_is_peer_exist(mac))
-    return;
-  uint8_t lmk[16];
-  bool hasPublicKey = false;
-  if (peerPublicKey32) {
-    // Check that public key is not all-zero (unset)
-    for (int i = 0; i < 32; ++i) {
-      if (peerPublicKey32[i] != 0x00) {
-        hasPublicKey = true;
-        break;
-      }
-    }
-  }
-  if (hasPublicKey && ownPrivateKey32) {
-    derivePeerLMK(ownPrivateKey32, peerPublicKey32, lmk);
-  } else {
-    // Peer public key not yet known (pre-enrollment) — no encryption
-    memset(lmk, 0, 16);
-  }
-  esp_now_peer_info_t info = {};
-  memcpy(info.peer_addr, mac, 6);
-  info.channel = 0;
-  info.encrypt = hasPublicKey;
-  if (hasPublicKey)
-    memcpy(info.lmk, lmk, 16);
-  lattice::err::checkEsp(esp_now_add_peer(&info), lattice::utils::ErrorType::COMMUNICATION_FAIL,
-                         "registerPeerWithEspNow: add_peer failed");
-}
-
 Mesh::Mesh()
-    : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0), bootEpoch(0),
-      txSeqNum(0), replayCacheIdx(0), lastRelayedEpoch(0), lastRelayedSeqNum(0),
-      hasMasterMac(false), knownMasterMacSecondary{}, hasMasterMacSecondary(false),
-      _dualMasterMode(lattice::config::DUAL_MASTER_MODE), peerCount(0), recvQueueHead(0),
-      recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0), relayPending(false),
-      relayPendingAt(0) {
+    : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0),
+      _dualMasterMode(lattice::config::DUAL_MASTER_MODE), recvQueueHead(0), recvQueueTail(0),
+      lastBeaconMs(0), lastRouteReportMs(0), relayPending(false), relayPendingAt(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
   memset(currentMaster.nextHop, 0, 6);
   memset(lastSeenMasterMac, 0, 6);
   memset(deviceMacAddress, 0, 6);
-  memset(devicePrivateKey, 0, 32);
-  memset(devicePublicKey, 0, 32);
-  memset(replayCache, 0, sizeof(replayCache));
-  memset(knownMasterMac, 0xFF, 6);
-  memset(knownMasterMacSecondary, 0xFF, 6);
-  memset(peerMacs, 0, sizeof(peerMacs));
   memset(recvQueue, 0, sizeof(recvQueue));
   memset(&relayPendingMsg, 0, sizeof(relayPendingMsg));
-}
-
-bool Mesh::appendPeer(const PeerInfo& peer) {
-  if (peerCount >= MAX_PEERS)
-    return false;
-  peerMacs[peerCount++] = peer;
-  return true;
 }
 
 void Mesh::readMacAddress() {
@@ -230,121 +75,17 @@ void Mesh::printMeshMessage(const mesh_message& msg) {
   Logger::logln("MESH", "-------------------------", LogLevel::LOG_DEBUG);
 }
 
-// --- EEPROM Peer Management ---
-void Mesh::loadPeersFromEEPROM() {
-  peerCount = 0;
-
-  // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key
-  uint8_t peerRecords[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_RECORD_SIZE];
-  bool eepromOk = EEPROM_Manager::getInstance().loadPeerList(peerRecords, EEPROM_SIZES::MAX_PEERS);
-
-  if (eepromOk) {
-    for (int i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
-      const uint8_t* record = peerRecords + (i * EEPROM_SIZES::PEER_RECORD_SIZE);
-      // Treat all-0xFF MAC as empty slot
-      bool valid = false;
-      for (int j = 0; j < 6; ++j) {
-        if (record[j] != 0xFF) {
-          valid = true;
-          break;
-        }
-      }
-      if (valid) {
-        PeerInfo peer;
-        memcpy(peer.mac, record, 6);
-        memcpy(peer.publicKey, record + 6, 32);
-        peer.lastSeenMillis = 0;
-        appendPeer(peer);
-      }
-    }
-  }
-
-  // Fallback in dev mode or when list is empty
-  if (peerCount == 0) {
-    Logger::logln("MESH", "Peer list empty; loading defaults from config", LogLevel::LOG_INFO);
-    for (int i = 0; i < lattice::config::NUM_DEFAULT_PEERS; ++i) {
-      PeerInfo peer;
-      memcpy(peer.mac, lattice::config::DEFAULT_PEERS[i], 6);
-      memset(peer.publicKey, 0, 32); // Public key not known yet for config defaults
-      peer.lastSeenMillis = 0;
-      appendPeer(peer);
-    }
-  }
-}
-
-void Mesh::savePeersToEEPROM() {
-  // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key
-  uint8_t peerRecords[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_RECORD_SIZE];
-  memset(peerRecords, 0xFF, sizeof(peerRecords));
-
-  for (size_t i = 0; i < peerCount && i < EEPROM_SIZES::MAX_PEERS; ++i) {
-    uint8_t* record = peerRecords + (i * EEPROM_SIZES::PEER_RECORD_SIZE);
-    memcpy(record, peerMacs[i].mac, 6);
-    memcpy(record + 6, peerMacs[i].publicKey, 32);
-  }
-
-  EEPROM_Manager::getInstance().savePeerList(peerRecords, peerCount);
-}
-
-void Mesh::addPeerToEEPROM(const uint8_t mac[6]) {
-  if (findPeer(mac) ||
-      lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(deviceMacAddress))
-    return;
-
-  if (peerCount >= MAX_PEERS) {
-    lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::MESH, 2,
-                       "Peer list full! Cannot add new peer. MAX_PEERS reached.");
-    return;
-  }
-
-  PeerInfo peer;
-  memcpy(peer.mac, mac, 6);
-  memset(peer.publicKey, 0, 32); // Public key unknown until enrollment
-  peer.lastSeenMillis = millis();
-  appendPeer(peer);
-  savePeersToEEPROM();
-  registerPeerWithEspNow(peerMacs[peerCount - 1].mac, devicePrivateKey,
-                         peerMacs[peerCount - 1].publicKey);
-  Logger::logln("MESH", "Peer added", LogLevel::LOG_DEBUG);
-}
-
-void Mesh::removePeerFromEEPROM(const uint8_t mac[6]) {
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::utils::MacAddress(peerMacs[i].mac) == lattice::utils::MacAddress(mac)) {
-      peerMacs[i] = peerMacs[--peerCount]; // swap with last, shrink count
-      break;
-    }
-  }
-  savePeersToEEPROM();
-  esp_err_t result = esp_now_del_peer(mac);
-  lattice::err::checkEsp(result, lattice::utils::ErrorType::COMMUNICATION_FAIL,
-                         "removePeerFromEEPROM: del_peer failed");
-  Logger::logln("MESH", "Removed ESP-NOW peer.", LogLevel::LOG_DEBUG);
-}
-
-PeerInfo* Mesh::findPeer(const uint8_t mac[6]) {
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::utils::MacAddress(peerMacs[i].mac) == lattice::utils::MacAddress(mac))
-      return &peerMacs[i];
-  }
-  return nullptr;
-}
-bool Mesh::isPeerInRange(const uint8_t mac[6]) {
-  PeerInfo* peer = findPeer(mac);
-  if (!peer)
-    return false;
-  return millis() - peer->lastSeenMillis < lattice::config::STALE_PEER_THRESHOLD_MS;
-}
 PeerInfo* Mesh::findNextHopToMaster() {
   // For this mesh: nextHop == currentMaster.nextHop
   if (currentMaster.distance == 0xFF)
     return nullptr;
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::utils::MacAddress(peerMacs[i].mac) ==
+  for (size_t i = 0; i < peers.peerCount; ++i) {
+    if (lattice::utils::MacAddress(peers.peerMacs[i].mac) ==
             lattice::utils::MacAddress(currentMaster.nextHop) &&
-        isPeerInRange(peerMacs[i].mac) &&
-        lattice::utils::MacAddress(peerMacs[i].mac) != lattice::utils::MacAddress(deviceMacAddress))
-      return &peerMacs[i];
+        peers.isPeerInRange(peers.peerMacs[i].mac) &&
+        lattice::utils::MacAddress(peers.peerMacs[i].mac) !=
+            lattice::utils::MacAddress(deviceMacAddress))
+      return &peers.peerMacs[i];
   }
   return nullptr;
 }
@@ -364,8 +105,8 @@ mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMes
   if (data)
     memcpy(msg.data, data, sizeof(msg.data));
   msg.hop_count = 0;
-  msg.epoch_num = bootEpoch;
-  msg.seq_num = ++txSeqNum;
+  msg.epoch_num = replay.bootEpoch;
+  msg.seq_num = replay.nextSeq();
   return msg;
 }
 
@@ -376,11 +117,10 @@ bool Mesh::init() {
   loadPersistentState();
 
   // 2. Increment and save boot epoch (replay protection)
-  bootEpoch = EEPROM_Manager::getInstance().loadBootEpoch() + 1;
-  EEPROM_Manager::getInstance().saveBootEpoch(bootEpoch);
-  txSeqNum = 0;
-  memset(replayCache, 0, sizeof(replayCache));
-  Logger::logln("MESH", "Boot epoch: " + String(bootEpoch), LogLevel::LOG_INFO);
+  uint32_t epoch = EepromManager::getInstance().loadBootEpoch() + 1;
+  EepromManager::getInstance().saveBootEpoch(epoch);
+  replay.init(epoch);
+  Logger::logln("MESH", "Boot epoch: " + String(replay.bootEpoch), LogLevel::LOG_INFO);
 
   // 3. Configure Wi-Fi
   if (!setupWiFi())
@@ -388,7 +128,7 @@ bool Mesh::init() {
 
   // 3a. Apply TX power preset from EEPROM (deployment-specific)
   {
-    lattice::config::TxPowerPreset preset = EEPROM_Manager::getInstance().loadTxPowerPreset();
+    lattice::config::TxPowerPreset preset = EepromManager::getInstance().loadTxPowerPreset();
     uint8_t txPowerVal = lattice::config::TX_POWER_VALUES[static_cast<uint8_t>(preset)];
     esp_err_t txErr = esp_wifi_set_max_tx_power(static_cast<int8_t>(txPowerVal));
     if (txErr != ESP_OK) {
@@ -412,82 +152,20 @@ bool Mesh::setupWiFi() {
                          lattice::utils::ErrorType::HARDWARE_FAILURE, "Failed to set WiFi channel");
 
   readMacAddress();
+  peers.setDeviceMac(deviceMacAddress);
   return true;
 }
 
 void Mesh::loadPersistentState() {
-  loadPeersFromEEPROM();
+  peers.loadFromEEPROM();
   loadMeshKeyFromEEPROM();
-  loadOrGenerateKeypair();
-  hasMasterMac = EEPROM_Manager::getInstance().loadKnownMasterMac(knownMasterMac);
-  if (hasMasterMac) {
+  enrollment.init();
+  if (enrollment.hasMasterMac) {
     Logger::logln("MESH", "Known master MAC loaded from EEPROM", LogLevel::LOG_INFO);
   }
-  if (_dualMasterMode) {
-    hasMasterMacSecondary =
-        EEPROM_Manager::getInstance().loadKnownMasterMacSecondary(knownMasterMacSecondary);
-    if (hasMasterMacSecondary) {
-      Logger::logln("MESH", "Known secondary master MAC loaded from EEPROM", LogLevel::LOG_INFO);
-    }
+  if (_dualMasterMode && enrollment.hasMasterMacSecondary) {
+    Logger::logln("MESH", "Known secondary master MAC loaded from EEPROM", LogLevel::LOG_INFO);
   }
-}
-
-void Mesh::loadOrGenerateKeypair() {
-  if (EEPROM_Manager::getInstance().loadKeypair(devicePrivateKey, devicePublicKey)) {
-    Logger::logln("MESH", "Device keypair loaded from EEPROM", LogLevel::LOG_INFO);
-    return;
-  }
-
-  Logger::logln("MESH", "Generating new Curve25519 keypair...", LogLevel::LOG_INFO);
-
-  // Use the low-level ECP API directly to avoid the opaque ecdh context internals
-  // that are private in the mbedTLS 3.x non-legacy context.
-  mbedtls_ecp_group grp;
-  mbedtls_mpi d;
-  mbedtls_ecp_point Q;
-  mbedtls_entropy_context entropy;
-  mbedtls_ctr_drbg_context ctr_drbg;
-
-  mbedtls_ecp_group_init(&grp);
-  mbedtls_mpi_init(&d);
-  mbedtls_ecp_point_init(&Q);
-  mbedtls_entropy_init(&entropy);
-  mbedtls_ctr_drbg_init(&ctr_drbg);
-
-  const char* pers = "lattice_keygen";
-  int ret;
-  ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                              reinterpret_cast<const uint8_t*>(pers), strlen(pers));
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 1,
-                        "MESH: keypair gen — entropy seed failed");
-  }
-
-  ret = mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_CURVE25519);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 2,
-                        "MESH: keypair gen — ecp_group_load failed");
-  }
-
-  ret = mbedtls_ecdh_gen_public(&grp, &d, &Q, mbedtls_ctr_drbg_random, &ctr_drbg);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 3,
-                        "MESH: keypair gen — ecdh_gen_public failed");
-  }
-
-  // Export private scalar (d) — 32 bytes big-endian (NEVER printed to serial)
-  mbedtls_mpi_write_binary(&d, devicePrivateKey, 32);
-  // Export public key X coordinate — 32 bytes (Curve25519 public key is X only)
-  mbedtls_mpi_write_binary(&Q.MBEDTLS_PRIVATE(X), devicePublicKey, 32);
-
-  mbedtls_ecp_group_free(&grp);
-  mbedtls_mpi_free(&d);
-  mbedtls_ecp_point_free(&Q);
-  mbedtls_ctr_drbg_free(&ctr_drbg);
-  mbedtls_entropy_free(&entropy);
-
-  EEPROM_Manager::getInstance().saveKeypair(devicePrivateKey, devicePublicKey);
-  Logger::logln("MESH", "New keypair generated and saved", LogLevel::LOG_INFO);
 }
 
 bool Mesh::setupEspNow() {
@@ -512,8 +190,9 @@ bool Mesh::setupEspNow() {
     esp_now_add_peer(&broadcast);
   }
 
-  for (size_t i = 0; i < peerCount; ++i) {
-    registerPeerWithEspNow(peerMacs[i].mac, devicePrivateKey, peerMacs[i].publicKey);
+  for (size_t i = 0; i < peers.peerCount; ++i) {
+    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[i].mac, enrollment.getPrivateKey(),
+                                                  peers.peerMacs[i].publicKey);
   }
   esp_now_register_send_cb(onDataSentCallback);
   esp_now_register_recv_cb(Mesh::dataRecvTrampoline);
@@ -521,21 +200,6 @@ bool Mesh::setupEspNow() {
   return true;
 }
 // ------------------------------------------------
-
-bool Mesh::isReplay(const mesh_message& msg) {
-  for (size_t i = 0; i < REPLAY_CACHE_SIZE; ++i) {
-    if (memcmp(replayCache[i].mac, msg.origin_mac_address, 6) == 0 &&
-        replayCache[i].epoch == msg.epoch_num && replayCache[i].seq == msg.seq_num) {
-      return true;
-    }
-  }
-  // Record this entry in the ring buffer
-  memcpy(replayCache[replayCacheIdx].mac, msg.origin_mac_address, 6);
-  replayCache[replayCacheIdx].epoch = msg.epoch_num;
-  replayCache[replayCacheIdx].seq = msg.seq_num;
-  replayCacheIdx = (replayCacheIdx + 1) % REPLAY_CACHE_SIZE;
-  return false;
-}
 
 void Mesh::onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status) {
   String statusStr = (status == ESP_NOW_SEND_SUCCESS) ? "Delivery Success" : "Delivery Fail";
@@ -576,18 +240,19 @@ void Mesh::drainRecvQueue() {
 
     // Replay check
     if (msg.proto_version == PROTO_VERSION && msg.epoch_num > 0) {
-      if (isReplay(msg)) {
+      if (replay.isReplay(msg)) {
         Logger::logln("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
         continue;
       }
     }
 
     // Update last-seen for known peers only (no EEPROM write — see Task 4)
-    updatePeerLastSeen(entry.srcMac);
+    peers.updateLastSeen(entry.srcMac);
 
     switch (msg.message_type) {
     case MESH_TYPE_ENROLLMENT:
-      processEnrollmentRequest(msg);
+      if (isMaster)
+        enrollment.processRequest(msg);
       break;
     case MESH_TYPE_JOIN_ACK:
       processJoinAck(msg);
@@ -614,7 +279,7 @@ void IRAM_ATTR Mesh::dataRecvTrampoline(const esp_now_recv_info* mac_addr, const
   instance->onDataRecvCallback(mac_addr, data, len);
 }
 
-void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
+void Mesh::sendMessage(const uint8_t* target, const mesh_message& msg) {
   if (lattice::utils::MacAddress(target) == lattice::utils::MacAddress(deviceMacAddress)) {
     Logger::logln("MESH", "Not sending to self. Skipped.", LogLevel::LOG_DEBUG);
     return;
@@ -629,14 +294,14 @@ void Mesh::sendMessage(const uint8_t target[6], mesh_message msg) {
 }
 
 void Mesh::broadcastToAllPeers(mesh_message msg) {
-  if (peerCount == 0) {
+  if (peers.peerCount == 0) {
     Logger::logln("MESH", "WARNING: No peers to broadcast to!", LogLevel::LOG_WARN);
     return;
   }
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0)
+  for (size_t i = 0; i < peers.peerCount; ++i) {
+    if (memcmp(peers.peerMacs[i].mac, deviceMacAddress, 6) == 0)
       continue; // Skip self
-    sendMessage(peerMacs[i].mac, msg);
+    sendMessage(peers.peerMacs[i].mac, msg);
   }
 }
 
@@ -706,32 +371,9 @@ void Mesh::broadcastMasterBeacon() {
                 LogLevel::LOG_DEBUG);
 }
 
-// Optional peer management (can be used in your admin tools)
-void Mesh::addPeer(const uint8_t mac[6]) {
-  if (!findPeer(mac)) {
-    if (peerCount >= MAX_PEERS) {
-      lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::MESH, 6,
-                         "Peer list full! Cannot add new peer. MAX_PEERS reached.");
-      Logger::logln("MESH", "Peer list is full, skipping add", LogLevel::LOG_WARN);
-      return;
-    }
-    PeerInfo p;
-    memcpy(p.mac, mac, 6);
-    memset(p.publicKey, 0, 32); // Public key unknown until enrollment
-    p.lastSeenMillis = 0;
-    appendPeer(p);
-    savePeersToEEPROM();
-    registerPeerWithEspNow(peerMacs[peerCount - 1].mac, devicePrivateKey,
-                           peerMacs[peerCount - 1].publicKey);
-  }
-}
-void Mesh::removePeer(const uint8_t mac[6]) {
-  removePeerFromEEPROM(mac);
-}
-
 void Mesh::loadMeshKeyFromEEPROM() {
   // Attempt to load mesh key from EEPROM
-  if (!EEPROM_Manager::getInstance().loadMeshKey(meshKey, MESH_KEY_SIZE)) {
+  if (!EepromManager::getInstance().loadMeshKey(meshKey, MESH_KEY_SIZE)) {
     Logger::logln("MESH", "EEPROM read failed, using default mesh key", LogLevel::LOG_WARN);
   }
 
@@ -759,7 +401,7 @@ void Mesh::loadMeshKeyFromEEPROM() {
 }
 
 void Mesh::saveMeshKeyToEEPROM(const uint8_t* key) {
-  EEPROM_Manager::getInstance().saveMeshKey(key, MESH_KEY_SIZE);
+  EepromManager::getInstance().saveMeshKey(key, MESH_KEY_SIZE);
 }
 
 // Generate a new random 16-byte mesh key
@@ -789,7 +431,7 @@ void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t* data) {
 }
 
 void Mesh::debugDumpRadio() {
-  if (!EEPROM_Manager::getInstance().getDevMode())
+  if (!EepromManager::getInstance().getDevMode())
     return;
   uint8_t ch;
   esp_wifi_get_channel(&ch, nullptr);
@@ -819,18 +461,6 @@ void Mesh::checkMasterTimeout() {
 }
 
 // ---------- Tiger Style helper implementations ----------
-void Mesh::updatePeerLastSeen(const uint8_t mac[6]) {
-  if (!mac)
-    return;
-  if (lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(deviceMacAddress))
-    return;
-  // Enrollment is the only path for new peers — do not auto-add unknown senders here.
-  // Unknown senders are silently ignored for non-enrollment messages.
-  PeerInfo* p = findPeer(mac);
-  if (p) {
-    p->lastSeenMillis = millis();
-  }
-}
 
 void Mesh::processMasterBeacon(const mesh_message& msg) {
   // Guard: drop beacon if hop count would overflow uint8_t or exceed limit
@@ -840,24 +470,25 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   }
 
   // --- TOFU master MAC enforcement ---
-  bool fromPrimary = hasMasterMac && memcmp(msg.origin_mac_address, knownMasterMac, 6) == 0;
-  bool fromSecondary = _dualMasterMode && hasMasterMacSecondary &&
-                       memcmp(msg.origin_mac_address, knownMasterMacSecondary, 6) == 0;
+  bool fromPrimary =
+      enrollment.hasMasterMac && memcmp(msg.origin_mac_address, enrollment.knownMasterMac, 6) == 0;
+  bool fromSecondary = _dualMasterMode && enrollment.hasMasterMacSecondary &&
+                       memcmp(msg.origin_mac_address, enrollment.knownMasterMacSecondary, 6) == 0;
 
-  if (!hasMasterMac) {
+  if (!enrollment.hasMasterMac) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
-    memcpy(knownMasterMac, msg.origin_mac_address, 6);
-    hasMasterMac = true;
-    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+    memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
+    enrollment.hasMasterMac = true;
+    EepromManager::getInstance().saveKnownMasterMac(enrollment.knownMasterMac);
     Logger::logln("MESH", "Master MAC learned from first beacon (TOFU fallback)",
                   LogLevel::LOG_INFO);
   } else if (!fromPrimary && !fromSecondary) {
     // Beacon from unrecognised MAC
-    if (_dualMasterMode && !hasMasterMacSecondary) {
+    if (_dualMasterMode && !enrollment.hasMasterMacSecondary) {
       // Second master TOFU — learn and save as secondary
-      memcpy(knownMasterMacSecondary, msg.origin_mac_address, 6);
-      hasMasterMacSecondary = true;
-      EEPROM_Manager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
+      memcpy(enrollment.knownMasterMacSecondary, msg.origin_mac_address, 6);
+      enrollment.hasMasterMacSecondary = true;
+      EepromManager::getInstance().saveKnownMasterMacSecondary(enrollment.knownMasterMacSecondary);
       Logger::logln("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
       // fall through to process this beacon as valid
     } else if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
@@ -868,8 +499,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     } else {
       // All known masters stale — accept as new primary (hotswap)
       Logger::logln("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
-      memcpy(knownMasterMac, msg.origin_mac_address, 6);
-      EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
+      memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
+      EepromManager::getInstance().saveKnownMasterMac(enrollment.knownMasterMac);
     }
   }
 
@@ -902,14 +533,15 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 
   if (!isMaster) {
     // C10 fix: only relay if this beacon is newer than the last one we relayed
-    bool isNewer = (msg.epoch_num > lastRelayedEpoch) ||
-                   (msg.epoch_num == lastRelayedEpoch && msg.seq_num > lastRelayedSeqNum);
+    bool isNewer =
+        (msg.epoch_num > replay.lastRelayedEpoch) ||
+        (msg.epoch_num == replay.lastRelayedEpoch && msg.seq_num > replay.lastRelayedSeqNum);
     if (!isNewer) {
       Logger::logln("MESH", "Duplicate beacon relay suppressed", LogLevel::LOG_DEBUG);
       return;
     }
-    lastRelayedEpoch = msg.epoch_num;
-    lastRelayedSeqNum = msg.seq_num;
+    replay.lastRelayedEpoch = msg.epoch_num;
+    replay.lastRelayedSeqNum = msg.seq_num;
 
     // Defer relay with random jitter to stagger transmissions across all non-master
     // nodes and eliminate the collision burst that occurs when all nodes relay
@@ -931,7 +563,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   bool addressedToSelf = (memcmp(msg.target_mac_address, deviceMacAddress, 6) == 0);
   bool isBroadcastTarget = (memcmp(msg.target_mac_address, kBroadcastMac, 6) == 0);
   bool addressedToMaster =
-      hasMasterMac && (memcmp(msg.target_mac_address, currentMaster.mac, 6) == 0);
+      enrollment.hasMasterMac && (memcmp(msg.target_mac_address, currentMaster.mac, 6) == 0);
 
   if (!isMaster && !addressedToSelf && !isBroadcastTarget) {
     if (addressedToMaster) {
@@ -954,7 +586,8 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   bool isConfigOpcode =
       (msg.data_type == adapter_types::SERIAL_ADAPTER && msg.data[0] == OP_CONFIG_SET);
   // TODO(dual-master): also allow secondary master MAC for CONFIG_SET
-  if (isConfigOpcode && hasMasterMac && memcmp(msg.origin_mac_address, knownMasterMac, 6) != 0) {
+  if (isConfigOpcode && enrollment.hasMasterMac &&
+      memcmp(msg.origin_mac_address, enrollment.knownMasterMac, 6) != 0) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;
   }
@@ -977,41 +610,11 @@ void Mesh::relayDownlink(const mesh_message& msg) {
   mesh_message relay = msg;
   relay.hop_count++;
   memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (memcmp(peerMacs[i].mac, deviceMacAddress, 6) == 0)
+  for (size_t i = 0; i < peers.peerCount; ++i) {
+    if (memcmp(peers.peerMacs[i].mac, deviceMacAddress, 6) == 0)
       continue;
-    sendMessage(peerMacs[i].mac, relay);
+    sendMessage(peers.peerMacs[i].mac, relay);
   }
-}
-
-bool Mesh::isEnrolled() const {
-  return EEPROM_Manager::getInstance().loadEnrolledFlag();
-}
-
-void Mesh::sendEnrollmentRequest() {
-  mesh_message msg = {};
-  msg.message_type = MESH_TYPE_ENROLLMENT;
-  msg.data_type = adapter_types::UNKNOWN_ADAPTER;
-  memcpy(msg.origin_mac_address, deviceMacAddress, 6);
-  memset(msg.target_mac_address, 0xFF, 6);
-  memcpy(msg.last_hop_mac_address, deviceMacAddress, 6);
-  msg.hop_count = 0;
-  memcpy(msg.enrollment_public_key, devicePublicKey, 32);
-
-  static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
-  Logger::logln("MESH", "Enrollment request sent", LogLevel::LOG_INFO);
-}
-
-void Mesh::processEnrollmentRequest(const mesh_message& msg) {
-  if (!isMaster) {
-    return;
-  }
-  memcpy(_pendingEnrollmentMac, msg.origin_mac_address, 6);
-  memcpy(_pendingEnrollmentPubKey, msg.enrollment_public_key, 32);
-  _pendingEnrollmentRelay = true;
-  Logger::logln("MESH", "Enrollment request received, deferring relay to loop()",
-                LogLevel::LOG_INFO);
 }
 
 void Mesh::processJoinAck(const mesh_message& msg) {
@@ -1020,30 +623,26 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     relayDownlink(msg);
     return;
   }
-  // Verify fingerprint matches our public key (first 4 bytes)
-  if (memcmp(msg.data, devicePublicKey, 4) != 0) {
-    Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
-    return;
-  }
-  Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
-  EEPROM_Manager::getInstance().saveEnrolledFlag(true);
+  enrollment.processJoinAck(msg, deviceMacAddress, nullptr);
+}
 
-  // The node sending JOIN_ACK is the master — record its MAC (TOFU)
-  if (!hasMasterMac) {
-    memcpy(knownMasterMac, msg.origin_mac_address, 6);
-    hasMasterMac = true;
-    EEPROM_Manager::getInstance().saveKnownMasterMac(knownMasterMac);
-    Logger::logln("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
+void Mesh::addPeer(const uint8_t* mac) {
+  size_t before = peers.peerCount;
+  peers.addAndPersist(mac);
+  if (peers.peerCount > before) {
+    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[peers.peerCount - 1].mac,
+                                                  enrollment.getPrivateKey(),
+                                                  peers.peerMacs[peers.peerCount - 1].publicKey);
   }
 }
 
-void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
-  PeerInfo* p = findPeer(mac);
+void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
+  PeerInfo* p = peers.find(mac);
   if (p) {
     // Update existing peer's public key
     memcpy(p->publicKey, publicKey32, 32);
   } else {
-    if (peerCount >= MAX_PEERS) {
+    if (peers.peerCount >= MAX_PEERS) {
       Logger::logln("MESH", "Peer list full, cannot enroll", LogLevel::LOG_WARN);
       return;
     }
@@ -1051,16 +650,12 @@ void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
     memcpy(newPeer.mac, mac, 6);
     memcpy(newPeer.publicKey, publicKey32, 32);
     newPeer.lastSeenMillis = 0;
-    appendPeer(newPeer);
-    p = &peerMacs[peerCount - 1];
+    peers.append(newPeer);
   }
-  savePeersToEEPROM();
+  peers.saveToEEPROM();
 
-  // Re-register with encryption now that we have the public key
-  if (esp_now_is_peer_exist(mac)) {
-    esp_now_del_peer(mac);
-  }
-  registerPeerWithEspNow(mac, devicePrivateKey, publicKey32);
+  // Re-register with encryption now that we have the public key (mbedtls-heavy via Enrollment)
+  enrollment.enrollPeer(mac, publicKey32, nullptr, _dualMasterMode);
 
   // Send JOIN_ACK unicast to new node
   mesh_message ack = {};
@@ -1079,19 +674,6 @@ void Mesh::enrollPeer(const uint8_t mac[6], const uint8_t publicKey32[32]) {
   Logger::logln("MESH", "JOIN_ACK sent to newly enrolled node", LogLevel::LOG_INFO);
 }
 // --------------------------------------------------------
-
-void Mesh::setEnrollmentRelayFn(EnrollmentRelayFn fn) {
-  _enrollmentRelayFn = fn;
-}
-
-void Mesh::drainPendingEnrollment() {
-  if (!_pendingEnrollmentRelay)
-    return;
-  _pendingEnrollmentRelay = false;
-  if (_enrollmentRelayFn) {
-    _enrollmentRelayFn(_pendingEnrollmentMac, _pendingEnrollmentPubKey);
-  }
-}
 
 bool Mesh::sendRouteReport() {
   if (isMaster)
@@ -1143,11 +725,11 @@ void Mesh::processRouteReport(const mesh_message& msg) {
 
 void Mesh::loop() {
   drainRecvQueue();
-  EEPROM_Manager::getInstance().flushIfDirty();
+  EepromManager::getInstance().flushIfDirty();
 
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
   // Serial.write() must not be called from that callback — safe to do here in loop().
-  drainPendingEnrollment();
+  enrollment.drainPendingRelay();
 
   {
     uint32_t now = millis();

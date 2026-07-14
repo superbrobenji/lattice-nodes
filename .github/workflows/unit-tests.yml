@@ -73,6 +73,6 @@ jobs:
             --suppress=unmatchedSuppression \
             --inline-suppr \
             -I main/src \
-            -i main/src/Mesh/serialization/nanopb \
-            -i main/src/Mesh/serialization/mesh.pb.c \
+            -i main/src/mesh/serialization/nanopb \
+            -i main/src/mesh/serialization/mesh.pb.c \
             main/src/ 2>&1

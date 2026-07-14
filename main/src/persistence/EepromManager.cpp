@@ -1,39 +1,39 @@
-#include "EEPROM_Manager.h"
+#include "EepromManager.h"
 #include "src/error/Error.h"
 
 namespace lattice {
 namespace utils {
 
-EEPROM_Manager::EEPROM_Manager()
+EepromManager::EepromManager()
     : isInitialized(false), isDevMode(false), _dirty(false), _lastFlushMs(0) {}
 
-EEPROM_Manager::~EEPROM_Manager() {
+EepromManager::~EepromManager() {
   if (isInitialized) {
     EEPROM.end();
   }
 }
 
-EEPROM_Manager& EEPROM_Manager::getInstance() {
-  static EEPROM_Manager instance;
+EepromManager& EepromManager::getInstance() {
+  static EepromManager instance;
   return instance;
 }
 
 // Tiger Style helpers
-bool EEPROM_Manager::beginEEPROM() {
+bool EepromManager::beginEEPROM() {
   if (EEPROM.begin(EEPROM_SIZES::TOTAL_SIZE))
     return true;
   handleInitFailure();
   return false;
 }
 
-void EEPROM_Manager::handleInitFailure() {
+void EepromManager::handleInitFailure() {
   Logger::logln("EEPROM", "Failed to initialize EEPROM", LogLevel::LOG_ERROR);
   lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 1,
-                     "EEPROM_Manager: EEPROM.begin failed");
+                     "EepromManager: EEPROM.begin failed");
 }
 
 // --- refactored init with formal schema versioning ---
-bool EEPROM_Manager::init() {
+bool EepromManager::init() {
   if (isInitialized)
     return true;
   if (!beginEEPROM())
@@ -136,16 +136,16 @@ bool EEPROM_Manager::init() {
   return true;
 }
 
-void EEPROM_Manager::setDevMode(bool devMode) {
+void EepromManager::setDevMode(bool devMode) {
   isDevMode = devMode;
   logOperation("Dev mode set", devMode ? "Development mode enabled" : "Production mode enabled");
 }
 
-bool EEPROM_Manager::getDevMode() const {
+bool EepromManager::getDevMode() const {
   return isDevMode;
 }
 
-bool EEPROM_Manager::ensureInitialized() {
+bool EepromManager::ensureInitialized() {
   if (!isInitialized) {
     Logger::logln("EEPROM", "EEPROM not initialized", LogLevel::LOG_ERROR);
     return false;
@@ -153,7 +153,7 @@ bool EEPROM_Manager::ensureInitialized() {
   return true;
 }
 
-void EEPROM_Manager::logOperation(const char* operation, const char* details) {
+void EepromManager::logOperation(const char* operation, const char* details) {
   if (details) {
     Logger::logln("EEPROM", String(operation) + ": " + details, LogLevel::LOG_DEBUG);
   } else {
@@ -162,11 +162,11 @@ void EEPROM_Manager::logOperation(const char* operation, const char* details) {
 }
 
 // Deferred flush implementation
-void EEPROM_Manager::markDirty() {
+void EepromManager::markDirty() {
   _dirty = true;
 }
 
-void EEPROM_Manager::flushIfDirty() {
+void EepromManager::flushIfDirty() {
   if (!_dirty)
     return;
   if (millis() - _lastFlushMs < EEPROM_FLUSH_INTERVAL_MS)
@@ -177,7 +177,7 @@ void EEPROM_Manager::flushIfDirty() {
   logOperation("EEPROM flushed (deferred)");
 }
 
-void EEPROM_Manager::forceFlush() {
+void EepromManager::forceFlush() {
   if (!_dirty)
     return;
   EEPROM.commit();
@@ -186,7 +186,7 @@ void EEPROM_Manager::forceFlush() {
 }
 
 // Master flag operations
-bool EEPROM_Manager::loadMasterFlag() {
+bool EepromManager::loadMasterFlag() {
   if (!ensureInitialized())
     return false;
 
@@ -196,7 +196,7 @@ bool EEPROM_Manager::loadMasterFlag() {
   return isMaster;
 }
 
-void EEPROM_Manager::saveMasterFlag(bool isMaster) {
+void EepromManager::saveMasterFlag(bool isMaster) {
   if (!ensureInitialized())
     return;
   if (isDevMode) {
@@ -210,7 +210,7 @@ void EEPROM_Manager::saveMasterFlag(bool isMaster) {
 }
 
 // Dev flag operations
-bool EEPROM_Manager::loadDevFlag() {
+bool EepromManager::loadDevFlag() {
   if (!ensureInitialized())
     return false;
 
@@ -220,7 +220,7 @@ bool EEPROM_Manager::loadDevFlag() {
   return isDev;
 }
 
-void EEPROM_Manager::saveDevFlag(bool isDev) {
+void EepromManager::saveDevFlag(bool isDev) {
   if (!ensureInitialized())
     return;
   if (isDevMode) {
@@ -234,7 +234,7 @@ void EEPROM_Manager::saveDevFlag(bool isDev) {
 }
 
 // Mesh key operations
-bool EEPROM_Manager::loadMeshKey(uint8_t* key, size_t keySize) {
+bool EepromManager::loadMeshKey(uint8_t* key, size_t keySize) {
   if (!ensureInitialized())
     return false;
   if (keySize != EEPROM_SIZES::MESH_KEY_SIZE) {
@@ -249,7 +249,7 @@ bool EEPROM_Manager::loadMeshKey(uint8_t* key, size_t keySize) {
   return true;
 }
 
-void EEPROM_Manager::saveMeshKey(const uint8_t* key, size_t keySize) {
+void EepromManager::saveMeshKey(const uint8_t* key, size_t keySize) {
   if (!ensureInitialized())
     return;
   if (keySize != EEPROM_SIZES::MESH_KEY_SIZE) {
@@ -270,7 +270,7 @@ void EEPROM_Manager::saveMeshKey(const uint8_t* key, size_t keySize) {
 
 // Peer list operations
 // Each peer record is PEER_RECORD_SIZE (38) bytes: 6-byte MAC + 32-byte Curve25519 public key.
-bool EEPROM_Manager::loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
+bool EepromManager::loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
   lattice::err::check(peerRecords != nullptr, lattice::utils::ErrorType::CONFIG_ERROR,
                       "loadPeerList: peerRecords null");
   if (!ensureInitialized())
@@ -287,7 +287,7 @@ bool EEPROM_Manager::loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
   return true;
 }
 
-void EEPROM_Manager::savePeerList(const uint8_t* peerRecords, size_t numPeers) {
+void EepromManager::savePeerList(const uint8_t* peerRecords, size_t numPeers) {
   lattice::err::check(peerRecords != nullptr, lattice::utils::ErrorType::CONFIG_ERROR,
                       "savePeerList: peerRecords null");
   if (!ensureInitialized())
@@ -313,7 +313,7 @@ void EEPROM_Manager::savePeerList(const uint8_t* peerRecords, size_t numPeers) {
   logOperation("Peer list saved", String(numPeers).c_str());
 }
 
-bool EEPROM_Manager::hasPeers() {
+bool EepromManager::hasPeers() {
   if (!ensureInitialized())
     return false;
 
@@ -325,7 +325,7 @@ bool EEPROM_Manager::hasPeers() {
   return false;
 }
 
-void EEPROM_Manager::clearPeerList() {
+void EepromManager::clearPeerList() {
   if (!ensureInitialized())
     return;
 
@@ -337,7 +337,7 @@ void EEPROM_Manager::clearPeerList() {
 }
 
 // Adapter type operations
-uint8_t EEPROM_Manager::loadAdapterType() {
+uint8_t EepromManager::loadAdapterType() {
   if (!ensureInitialized())
     return 0xFF;
 
@@ -349,7 +349,7 @@ uint8_t EEPROM_Manager::loadAdapterType() {
   return adapterType;
 }
 
-void EEPROM_Manager::saveAdapterType(uint8_t adapterType) {
+void EepromManager::saveAdapterType(uint8_t adapterType) {
   if (!ensureInitialized())
     return;
   if (isDevMode) {
@@ -363,24 +363,24 @@ void EEPROM_Manager::saveAdapterType(uint8_t adapterType) {
 }
 
 // Reboot tracking operations
-uint8_t EEPROM_Manager::loadRebootCount() {
+uint8_t EepromManager::loadRebootCount() {
   if (!ensureInitialized())
     return 0;
   return EEPROM.read(EEPROM_ADDRESSES::REBOOT_COUNT);
 }
-void EEPROM_Manager::saveRebootCount(uint8_t count) {
+void EepromManager::saveRebootCount(uint8_t count) {
   if (!ensureInitialized() || isDevMode)
     return;
   EEPROM.write(EEPROM_ADDRESSES::REBOOT_COUNT, count);
   markDirty();
 }
-void EEPROM_Manager::saveRebootReason(uint8_t reason) {
+void EepromManager::saveRebootReason(uint8_t reason) {
   if (!ensureInitialized() || isDevMode)
     return;
   EEPROM.write(EEPROM_ADDRESSES::REBOOT_REASON, reason);
   markDirty();
 }
-uint8_t EEPROM_Manager::loadRebootReason() {
+uint8_t EepromManager::loadRebootReason() {
   if (!ensureInitialized())
     return 0xFF;
   return EEPROM.read(EEPROM_ADDRESSES::REBOOT_REASON);
@@ -398,7 +398,7 @@ static uint16_t crc16(const uint8_t* data, size_t len) {
 }
 
 // Keypair operations
-bool EEPROM_Manager::loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
+bool EepromManager::loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
   if (!ensureInitialized())
     return false;
   for (int i = 0; i < 32; ++i) {
@@ -418,7 +418,7 @@ bool EEPROM_Manager::loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
   return true;
 }
 
-void EEPROM_Manager::saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32) {
+void EepromManager::saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32) {
   if (!ensureInitialized() || isDevMode)
     return;
   for (int i = 0; i < 32; ++i) {
@@ -435,20 +435,20 @@ void EEPROM_Manager::saveKeypair(const uint8_t* privateKey32, const uint8_t* pub
   logOperation("Keypair saved");
 }
 
-bool EEPROM_Manager::loadEnrolledFlag() {
+bool EepromManager::loadEnrolledFlag() {
   if (!ensureInitialized())
     return false;
   return EEPROM.read(EEPROM_ADDRESSES::ENROLLED_FLAG) == 0x01;
 }
 
-void EEPROM_Manager::saveEnrolledFlag(bool enrolled) {
+void EepromManager::saveEnrolledFlag(bool enrolled) {
   if (!ensureInitialized() || isDevMode)
     return;
   EEPROM.write(EEPROM_ADDRESSES::ENROLLED_FLAG, enrolled ? 0x01 : 0xFF);
   EEPROM.commit();
 }
 
-uint32_t EEPROM_Manager::loadBootEpoch() {
+uint32_t EepromManager::loadBootEpoch() {
   if (!ensureInitialized())
     return 0;
   uint32_t epoch = 0;
@@ -457,7 +457,7 @@ uint32_t EEPROM_Manager::loadBootEpoch() {
   return (epoch == 0xFFFFFFFF) ? 0 : epoch;
 }
 
-void EEPROM_Manager::saveBootEpoch(uint32_t epoch) {
+void EepromManager::saveBootEpoch(uint32_t epoch) {
   if (!ensureInitialized() || isDevMode)
     return;
   for (int i = 0; i < 4; ++i)
@@ -466,7 +466,7 @@ void EEPROM_Manager::saveBootEpoch(uint32_t epoch) {
 }
 
 // TOFU master MAC operations
-bool EEPROM_Manager::loadKnownMasterMac(uint8_t mac[6]) {
+bool EepromManager::loadKnownMasterMac(uint8_t* mac) {
   if (!ensureInitialized())
     return false;
   for (int i = 0; i < 6; ++i)
@@ -482,7 +482,7 @@ bool EEPROM_Manager::loadKnownMasterMac(uint8_t mac[6]) {
   return !allFF;
 }
 
-void EEPROM_Manager::saveKnownMasterMac(const uint8_t mac[6]) {
+void EepromManager::saveKnownMasterMac(const uint8_t* mac) {
   if (!ensureInitialized() || isDevMode)
     return;
   for (int i = 0; i < 6; ++i)
@@ -491,7 +491,7 @@ void EEPROM_Manager::saveKnownMasterMac(const uint8_t mac[6]) {
   logOperation("Known master MAC saved");
 }
 
-void EEPROM_Manager::clearKnownMasterMac() {
+void EepromManager::clearKnownMasterMac() {
   if (!ensureInitialized() || isDevMode)
     return;
   for (int i = 0; i < 6; ++i)
@@ -501,7 +501,7 @@ void EEPROM_Manager::clearKnownMasterMac() {
 }
 
 // TOFU secondary master MAC operations
-bool EEPROM_Manager::loadKnownMasterMacSecondary(uint8_t mac[6]) {
+bool EepromManager::loadKnownMasterMacSecondary(uint8_t* mac) {
   if (!ensureInitialized())
     return false;
   for (int i = 0; i < 6; ++i)
@@ -516,7 +516,7 @@ bool EEPROM_Manager::loadKnownMasterMacSecondary(uint8_t mac[6]) {
   return !allFF;
 }
 
-void EEPROM_Manager::saveKnownMasterMacSecondary(const uint8_t mac[6]) {
+void EepromManager::saveKnownMasterMacSecondary(const uint8_t* mac) {
   if (!ensureInitialized() || isDevMode)
     return;
   for (int i = 0; i < 6; ++i)
@@ -525,7 +525,7 @@ void EEPROM_Manager::saveKnownMasterMacSecondary(const uint8_t mac[6]) {
   logOperation("Known secondary master MAC saved");
 }
 
-void EEPROM_Manager::clearKnownMasterMacSecondary() {
+void EepromManager::clearKnownMasterMacSecondary() {
   if (!ensureInitialized() || isDevMode)
     return;
   for (int i = 0; i < 6; ++i)
@@ -534,7 +534,7 @@ void EEPROM_Manager::clearKnownMasterMacSecondary() {
 }
 
 // TX power preset operations
-lattice::config::TxPowerPreset EEPROM_Manager::loadTxPowerPreset() {
+lattice::config::TxPowerPreset EepromManager::loadTxPowerPreset() {
   if (!ensureInitialized())
     return lattice::config::DEFAULT_TX_POWER_PRESET;
   uint8_t val = EEPROM.read(EEPROM_ADDRESSES::TX_POWER_PRESET);
@@ -543,7 +543,7 @@ lattice::config::TxPowerPreset EEPROM_Manager::loadTxPowerPreset() {
   return static_cast<lattice::config::TxPowerPreset>(val);
 }
 
-void EEPROM_Manager::saveTxPowerPreset(lattice::config::TxPowerPreset preset) {
+void EepromManager::saveTxPowerPreset(lattice::config::TxPowerPreset preset) {
   if (!ensureInitialized() || isDevMode)
     return;
   EEPROM.write(EEPROM_ADDRESSES::TX_POWER_PRESET, static_cast<uint8_t>(preset));
@@ -552,7 +552,7 @@ void EEPROM_Manager::saveTxPowerPreset(lattice::config::TxPowerPreset preset) {
 }
 
 // Node ID operations
-void EEPROM_Manager::saveNodeId(uint8_t nodeId) {
+void EepromManager::saveNodeId(uint8_t nodeId) {
   if (!ensureInitialized())
     return;
   EEPROM.write(EEPROM_ADDRESSES::NODE_ID, nodeId);
@@ -560,7 +560,7 @@ void EEPROM_Manager::saveNodeId(uint8_t nodeId) {
   logOperation("saveNodeId");
 }
 
-uint8_t EEPROM_Manager::loadNodeId() {
+uint8_t EepromManager::loadNodeId() {
   if (!ensureInitialized())
     return 0;
   uint8_t raw = EEPROM.read(EEPROM_ADDRESSES::NODE_ID);
@@ -568,7 +568,7 @@ uint8_t EEPROM_Manager::loadNodeId() {
 }
 
 // Utility operations
-void EEPROM_Manager::clearAll() {
+void EepromManager::clearAll() {
   if (!ensureInitialized())
     return;
 
@@ -579,7 +579,7 @@ void EEPROM_Manager::clearAll() {
   logOperation("All EEPROM cleared");
 }
 
-void EEPROM_Manager::clearRange(uint16_t startAddr, uint16_t endAddr) {
+void EepromManager::clearRange(uint16_t startAddr, uint16_t endAddr) {
   if (!ensureInitialized())
     return;
   if (!isAddressValid(startAddr) || !isAddressValid(endAddr) || startAddr > endAddr) {
@@ -595,12 +595,12 @@ void EEPROM_Manager::clearRange(uint16_t startAddr, uint16_t endAddr) {
   logOperation("EEPROM range cleared", msg.c_str());
 }
 
-bool EEPROM_Manager::isAddressValid(uint16_t address) {
+bool EepromManager::isAddressValid(uint16_t address) {
   return address < EEPROM_SIZES::TOTAL_SIZE;
 }
 
 // Debug and diagnostics
-void EEPROM_Manager::dumpEEPROM() {
+void EepromManager::dumpEEPROM() {
   if (!ensureInitialized())
     return;
 
@@ -623,7 +623,7 @@ void EEPROM_Manager::dumpEEPROM() {
   }
 }
 
-void EEPROM_Manager::printAddress(uint16_t address, uint16_t length) {
+void EepromManager::printAddress(uint16_t address, uint16_t length) {
   if (!ensureInitialized())
     return;
   if (!isAddressValid(address) || !isAddressValid(address + length - 1)) {

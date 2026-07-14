@@ -1,12 +1,16 @@
-#include "src/Mesh/Mesh.h"
-#include "src/Adapter/AdapterFactory.h"
-#include "src/core/Logger.h"
+#include "src/mesh/Mesh.h"
+#include "src/adapter/AdapterFactory.h"
+#include "src/adapter/serial/SerialAdapter.h"
+#include "src/logging/Logger.h"
 #include "src/hardware/output/Led.h"
 #include "src/hardware/output/SevenSegDisplay.h"
 #include "src/hardware/input/Button.h"
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
-#include "src/persistence/EEPROM_Manager.h"
+#include "src/persistence/EepromManager.h"
+#include "src/app/BootManager.h"
+#include "src/app/DisplayManager.h"
+#include "src/app/ButtonHandler.h"
 #include "project_config.h"
 #include <esp_wifi.h>
 #include <esp_bt.h>
@@ -25,8 +29,6 @@ constexpr int RED_LED_PIN = lattice::config::RED_LED_PIN;
 constexpr int GREEN_LED_PIN = lattice::config::GREEN_LED_PIN;
 constexpr int CONFIG_BUTTON_PIN = lattice::config::CONFIG_BUTTON_PIN;
 constexpr int RESET_BUTTON_PIN = lattice::config::RESET_BUTTON_PIN;
-
-constexpr unsigned long BUTTON_HOLD_TIME_MS = 5000;  // 5 seconds
 
 // Compile-time dev flag
 constexpr bool DEV_MODE = lattice::config::DEV_MODE;
@@ -53,7 +55,7 @@ constexpr int NUM_DEFAULT_PEERS = lattice::config::NUM_DEFAULT_PEERS;
 // Validate configuration for server communication
 static inline void validateServerConfiguration() {
   // Check if this is a master node intended for server communication
-  bool isMasterNode = isDevMode ? devMasterFlag : EEPROM_Manager::getInstance().loadMasterFlag();
+  bool isMasterNode = isDevMode ? devMasterFlag : EepromManager::getInstance().loadMasterFlag();
   bool hasSerialAdapter = (adapter && adapter->getAdapterType() == lattice::adapter::adapter_types::SERIAL_ADAPTER);
   bool loggingDisabled = (lattice::config::DEFAULT_LOG_LEVEL == lattice::utils::LogLevel::LOG_NONE);
   
@@ -90,25 +92,9 @@ void setup() {
   Logger::setLogLevel(lattice::config::DEFAULT_LOG_LEVEL);
 
   // Check and log reset reason; escalate if WDT looping
-  {
-    esp_reset_reason_t reason = esp_reset_reason();
-    EEPROM_Manager& em = EEPROM_Manager::getInstance();
-    // Must init EEPROM before setDevMode() — saveRebootReason/saveRebootCount no-op in dev mode
-    em.init();
-    em.saveRebootReason(static_cast<uint8_t>(reason));
-    if (reason == ESP_RST_WDT || reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT) {
-      uint8_t count = em.loadRebootCount();
-      count++;
-      em.saveRebootCount(count);
-      Serial.printf("[BOOT] WDT reset #%d (reason: %d)\n", count, (int)reason);
-      if (count >= 5) {
-        Serial.println("[BOOT] WDT loop detected — halting. Manual reset required.");
-        while (true) { delay(1000); }
-      }
-    } else {
-      em.saveRebootCount(0);  // Clean boot resets the counter
-    }
-  }
+  // Must init EEPROM before BootManager::check — saveRebootReason/saveRebootCount no-op if not initialized
+  EepromManager::getInstance().init();
+  lattice::app::BootManager::check(EepromManager::getInstance());
 
   Logger::logln("MAIN", "Logger initialized", LogLevel::LOG_INFO);
 
@@ -158,7 +144,7 @@ void setup() {
   }
 
   // Initialize EEPROM Manager
-  if (!EEPROM_Manager::getInstance().init()) {
+  if (!EepromManager::getInstance().init()) {
     Logger::logln("MAIN", "Failed to initialize EEPROM Manager", LogLevel::LOG_ERROR);
     lattice::err::fatal(lattice::core::ErrorTypeDigit::MEMORY,
                           lattice::core::ModuleDigit::CORE,
@@ -173,19 +159,19 @@ void setup() {
   isDevMode = DEV_MODE;
   if (!isDevMode) {
     // If not compile-time dev mode, check EEPROM
-    isDevMode = EEPROM_Manager::getInstance().loadDevFlag();
+    isDevMode = EepromManager::getInstance().loadDevFlag();
   }
 
   Logger::logln("MAIN", String("Running in ") + (isDevMode ? "DEV" : "PRODUCTION") + " mode", LogLevel::LOG_INFO);
 
   // Set dev mode in AdapterFactory and EEPROM Manager
   lattice::adapter::AdapterFactory::setDevMode(isDevMode);
-  EEPROM_Manager::getInstance().setDevMode(isDevMode);
+  EepromManager::getInstance().setDevMode(isDevMode);
 
   // Declare peers to EEPROM (only if not in dev mode and EEPROM is empty)
-  if (!isDevMode && !EEPROM_Manager::getInstance().hasPeers()) {
+  if (!isDevMode && !EepromManager::getInstance().hasPeers()) {
     // Write default peers to EEPROM
-    EEPROM_Manager::getInstance().savePeerList(
+    EepromManager::getInstance().savePeerList(
       reinterpret_cast<const uint8_t*>(defaultPeerList),
       NUM_DEFAULT_PEERS);
     Logger::logln("MAIN", "Wrote default peer MACs to EEPROM.", LogLevel::LOG_INFO);
@@ -235,7 +221,7 @@ void setup() {
                           "MAIN: Mesh init failed — cannot operate without mesh");
   }
 
-  mesh.setEnrollmentRelayFn(Serial_Adapter::relayEnrollmentToServer);
+  mesh.setEnrollmentRelayFn(SerialAdapter::relayEnrollmentToServer);
 
   // Nodes must always receive — modem sleep drops ESP-NOW packets without AP sync
   esp_wifi_set_ps(WIFI_PS_NONE);
@@ -264,7 +250,7 @@ void setup() {
     Logger::logln("MAIN", String("DEV mode: starting as ") + (isMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
   } else {
     // In production mode, load from EEPROM
-    isMaster = EEPROM_Manager::getInstance().loadMasterFlag();
+    isMaster = EepromManager::getInstance().loadMasterFlag();
   }
 
   // Master keeps 240MHz for serial USB reliability
@@ -311,34 +297,9 @@ void loop() {
 
   // Display state machine: show node identity on 7-segment display
   if (lattice::config::ENABLE_SEVSEG_DISPLAY) {
-    static uint32_t lastDisplayToggleMs = 0;
-    static bool dashVisible = false;
-
-    bool enrolled = mesh.isEnrolled() || mesh.getIsMaster(); // master is always "enrolled"
-    uint8_t nodeId = lattice::utils::EEPROM_Manager::getInstance().loadNodeId();
-
-    if (!enrolled) {
-      // Unenrolled: flash "----" at 500ms
-      if (millis() - lastDisplayToggleMs >= 500) {
-        lastDisplayToggleMs = static_cast<uint32_t>(millis());
-        dashVisible = !dashVisible;
-        if (dashVisible) {
-          static const uint8_t dashes[4] = {0x40, 0x40, 0x40, 0x40};
-          sevenSeg.setSegments(dashes);
-        } else {
-          sevenSeg.clear();
-        }
-      }
-    } else if (nodeId == 0) {
-      // Enrolled, no ID: "   0"
-      sevenSeg.show(0, false);
-    } else if (mesh.getIsMaster()) {
-      // Master with ID: right-aligned nodeId + DP on last digit
-      sevenSeg.showWithDP(static_cast<int>(nodeId), false);
-    } else {
-      // Sensor node with ID: right-aligned nodeId
-      sevenSeg.show(static_cast<int>(nodeId), false);
-    }
+    bool enrolled = mesh.isEnrolled() || mesh.getIsMaster();
+    uint8_t nodeId = lattice::utils::EepromManager::getInstance().loadNodeId();
+    lattice::app::DisplayManager::tick(sevenSeg, enrolled, mesh.getIsMaster(), nodeId);
   }
 
   // Enrollment state machine: non-master nodes that are not yet enrolled
@@ -361,73 +322,9 @@ void loop() {
     adapter->loop();
   }
 
-  static bool buttonWasPressed = false;
-  static unsigned long holdStart = 0;
-
-  // Reset button logic
-  static bool resetButtonWasPressed = false;
-  static unsigned long resetHoldStart = 0;
-
-  if (configButton.isPressed()) {
-    if (!buttonWasPressed) {
-      buttonWasPressed = true;
-      holdStart = millis();
-    } else if (millis() - holdStart >= BUTTON_HOLD_TIME_MS) {
-      buttonWasPressed = false;  // Reset BEFORE action to prevent re-fire
-      if (isDevMode) {
-        bool newMaster = !mesh.getIsMaster();
-        mesh.setIsMaster(newMaster);
-        devMasterFlag = newMaster;
-        Logger::logln("MAIN", String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
-        greenLed.blink(newMaster ? 3 : 2, 150, 150);
-      } else {
-        bool wasMaster = EEPROM_Manager::getInstance().loadMasterFlag();
-        bool newMaster = !wasMaster;
-        EEPROM_Manager::getInstance().saveMasterFlag(newMaster);
-        Logger::logln("MAIN", String("Button held 5s: CONFIG TOGGLED. Now ") + (newMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
-        Logger::logln("MAIN", "Restarting in 2 seconds for new role...", LogLevel::LOG_INFO);
-        greenLed.blink(newMaster ? 3 : 2, 200, 200);
-        delay(2000);
-        EEPROM_Manager::getInstance().forceFlush();
-        ESP.restart();
-      }
-    }
-  } else {
-    buttonWasPressed = false;
-  }
-
-  static bool resetConfirmPending = false;
-  static uint32_t resetConfirmDeadline = 0;
-
-  if (resetButton.isPressed()) {
-    if (!resetButtonWasPressed) {
-      resetButtonWasPressed = true;
-      resetHoldStart = millis();
-    } else if (millis() - resetHoldStart >= BUTTON_HOLD_TIME_MS) {
-      resetButtonWasPressed = false;
-      if (!resetConfirmPending) {
-        resetConfirmPending = true;
-        resetConfirmDeadline = millis() + 3000;
-        Logger::logln("MAIN", "Reset armed: hold again within 3s to confirm EEPROM wipe", LogLevel::LOG_WARN);
-        redLed.blink(3, 100, 100);
-      } else if (millis() < resetConfirmDeadline) {
-        resetConfirmPending = false;
-        Logger::logln("MAIN", "EEPROM wipe confirmed. Clearing all...", LogLevel::LOG_WARN);
-        EEPROM_Manager::getInstance().clearAll();
-        redLed.blink(5, 100, 100);
-        greenLed.blink(5, 100, 100);
-        delay(3000);
-        EEPROM_Manager::getInstance().forceFlush();
-        ESP.restart();
-      }
-    }
-  } else {
-    resetButtonWasPressed = false;
-    if (resetConfirmPending && millis() > resetConfirmDeadline) {
-      resetConfirmPending = false;
-      Logger::logln("MAIN", "Reset confirmation timed out", LogLevel::LOG_INFO);
-    }
-  }
+  lattice::app::ButtonHandler::tick(configButton, resetButton, mesh,
+    lattice::utils::EepromManager::getInstance(),
+    greenLed, redLed, isDevMode, devMasterFlag);
   // REMOVED: periodic health report was here.
   // Serial_Adapter::loop() handles this correctly when adapter type is SERIAL_ADAPTER.
 
