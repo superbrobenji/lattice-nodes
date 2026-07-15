@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <array>
+#include <vector>
 #include "mesh/Mesh.h"
 #include "mesh/MeshCrypto.h"
 #include "esp_now_mock.h"
@@ -868,9 +870,10 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
 
   mesh.enrollment.processRequest(msg);
 
-  EXPECT_TRUE(mesh.enrollment._pendingEnrollmentRelay);
-  EXPECT_EQ(memcmp(mesh.enrollment._pendingEnrollmentMac, kMac, 6), 0);
-  EXPECT_EQ(memcmp(mesh.enrollment._pendingEnrollmentPubKey, kKey, 32), 0)
+  ASSERT_EQ(mesh.enrollment._pendingRelayCount, 1u);
+  const auto& e = mesh.enrollment._pendingRelayQueue[mesh.enrollment._pendingRelayHead];
+  EXPECT_EQ(memcmp(e.mac, kMac, 6), 0);
+  EXPECT_EQ(memcmp(e.pubKey, kKey, 32), 0)
       << "Full 32-byte key must be copied without chunk reassembly";
 }
 
@@ -904,13 +907,11 @@ TEST_F(EnrollmentRelayCallbackTest, DrainCallsRegisteredCallback) {
                                        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
                                        0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
-  memcpy(mesh.enrollment._pendingEnrollmentMac, kMac, 6);
-  memcpy(mesh.enrollment._pendingEnrollmentPubKey, kKey, 32);
-  mesh.enrollment._pendingEnrollmentRelay = true;
+  mesh.enrollment.setPendingRelay(kMac, kKey);
 
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_FALSE(mesh.enrollment._pendingEnrollmentRelay) << "flag must clear after drain";
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u) << "queue must be empty after drain";
   ASSERT_NE(g_capturedMac, nullptr) << "callback was not called";
   EXPECT_EQ(memcmp(g_capturedMac, kMac, 6), 0) << "wrong MAC passed to callback";
   EXPECT_EQ(memcmp(g_capturedKey, kKey, 32), 0) << "wrong pubKey passed to callback";
@@ -921,9 +922,50 @@ TEST_F(EnrollmentRelayCallbackTest, DrainWithNoCallbackClearsFlag) {
   mesh.isMaster = true;
   // No callback registered.
 
-  mesh.enrollment._pendingEnrollmentRelay = true;
+  static constexpr uint8_t kMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  static constexpr uint8_t kKey[32] = {0};
+  mesh.enrollment.setPendingRelay(kMac, kKey);
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_FALSE(mesh.enrollment._pendingEnrollmentRelay) << "flag must clear even with no callback";
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u) << "queue must clear even with no callback";
   EXPECT_EQ(g_capturedMac, nullptr) << "callback must not fire when unregistered";
+}
+
+// Bug #6 regression: two enrollment requests queued before a single drain must
+// BOTH be relayed. The old single-slot latch dropped the first (only the last
+// survived), starving a concurrently-enrolling node.
+TEST_F(EnrollmentRelayCallbackTest, QueueHoldsAndDrainsMultipleConcurrentRelays) {
+  Mesh mesh;
+  mesh.isMaster = true;
+
+  static std::vector<std::array<uint8_t, 6>> drained;
+  drained.clear();
+  mesh.setEnrollmentRelayFn(
+      [](const uint8_t mac[6], const uint8_t /*pubKey*/[32]) {
+        std::array<uint8_t, 6> m{};
+        memcpy(m.data(), mac, 6);
+        drained.push_back(m);
+      });
+
+  static constexpr uint8_t kMacA[6] = {0xA0, 0, 0, 0, 0, 0x0A};
+  static constexpr uint8_t kMacB[6] = {0xB0, 0, 0, 0, 0, 0x0B};
+  uint8_t key[32] = {0x11};
+
+  mesh_message reqA{};
+  reqA.message_type = MESH_TYPE_ENROLLMENT;
+  memcpy(reqA.origin_mac_address, kMacA, 6);
+  memcpy(reqA.enrollment_public_key, key, 32);
+  mesh_message reqB = reqA;
+  memcpy(reqB.origin_mac_address, kMacB, 6);
+
+  mesh.enrollment.processRequest(reqA);
+  mesh.enrollment.processRequest(reqB); // second request must NOT overwrite the first
+  ASSERT_EQ(mesh.enrollment._pendingRelayCount, 2u);
+
+  mesh.enrollment.drainPendingRelay();
+
+  ASSERT_EQ(drained.size(), 2u) << "both queued relays must fire (Bug #6 starvation)";
+  EXPECT_EQ(memcmp(drained[0].data(), kMacA, 6), 0) << "FIFO order: A first";
+  EXPECT_EQ(memcmp(drained[1].data(), kMacB, 6), 0) << "FIFO order: B second";
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u);
 }

@@ -44,10 +44,26 @@ private:
 #endif
   uint8_t devicePrivateKey[32]{};
   uint8_t devicePublicKey[32]{};
-  volatile bool _pendingEnrollmentRelay{false};
-  uint8_t _pendingEnrollmentMac[6]{};
-  uint8_t _pendingEnrollmentPubKey[32]{};
+
+  // Bounded, heap-free FIFO of enrollment requests awaiting relay to the server.
+  // Sized to RECV_QUEUE_SIZE (8): the master drains this queue once per loop()
+  // AFTER draining its full 8-entry ESP-NOW receive ring, so up to 8 distinct
+  // enrollment requests can accumulate between two drains. A single-slot latch
+  // (the previous design) silently dropped all but the last when two nodes
+  // enrolled concurrently — see Task 9b Bug #6.
+  static constexpr size_t PENDING_RELAY_QUEUE_SIZE = 8;
+  struct PendingRelay {
+    uint8_t mac[6];
+    uint8_t pubKey[32];
+  };
+  PendingRelay _pendingRelayQueue[PENDING_RELAY_QUEUE_SIZE]{};
+  size_t _pendingRelayHead{0};  // index of oldest queued entry
+  size_t _pendingRelayCount{0}; // number of queued entries
+
   EnrollmentRelayFn _enrollmentRelayFn{nullptr};
+
+  // Append one pending relay; drops (with a LOG_WARN, never err::fail) if full.
+  void enqueuePendingRelay(const uint8_t* mac, const uint8_t* pubKey);
 };
 
 } // namespace mesh

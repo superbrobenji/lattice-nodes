@@ -19,8 +19,6 @@ Enrollment::Enrollment() {
   memset(devicePublicKey, 0, 32);
   memset(knownMasterMac, 0xFF, 6);
   memset(knownMasterMacSecondary, 0xFF, 6);
-  memset(_pendingEnrollmentMac, 0, 6);
-  memset(_pendingEnrollmentPubKey, 0, 32);
 }
 
 // NOTE: Enrollment::init() and Enrollment::enrollPeer() are mbedtls-heavy.
@@ -66,11 +64,20 @@ void Enrollment::sendRequest(const uint8_t* deviceMac, SendMessageFn /*sendFn*/)
 }
 
 void Enrollment::processRequest(const mesh_message& msg) {
-  memcpy(_pendingEnrollmentMac, msg.origin_mac_address, 6);
-  memcpy(_pendingEnrollmentPubKey, msg.enrollment_public_key, 32);
-  _pendingEnrollmentRelay = true;
+  enqueuePendingRelay(msg.origin_mac_address, msg.enrollment_public_key);
   Logger::logln("MESH", "Enrollment request received, deferring relay to loop()",
                 LogLevel::LOG_INFO);
+}
+
+void Enrollment::enqueuePendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
+  if (_pendingRelayCount >= PENDING_RELAY_QUEUE_SIZE) {
+    Logger::logln("MESH", "Enrollment relay queue full — dropping request", LogLevel::LOG_WARN);
+    return;
+  }
+  size_t idx = (_pendingRelayHead + _pendingRelayCount) % PENDING_RELAY_QUEUE_SIZE;
+  memcpy(_pendingRelayQueue[idx].mac, mac, 6);
+  memcpy(_pendingRelayQueue[idx].pubKey, pubKey, 32);
+  _pendingRelayCount++;
 }
 
 void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*deviceMac*/,
@@ -132,17 +139,18 @@ void Enrollment::setRelayFn(EnrollmentRelayFn fn) {
 }
 
 void Enrollment::setPendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
-  memcpy(_pendingEnrollmentMac, mac, 6);
-  memcpy(_pendingEnrollmentPubKey, pubKey, 32);
-  _pendingEnrollmentRelay = true;
+  enqueuePendingRelay(mac, pubKey);
 }
 
 void Enrollment::drainPendingRelay() {
-  if (!_pendingEnrollmentRelay)
-    return;
-  _pendingEnrollmentRelay = false;
-  if (_enrollmentRelayFn) {
-    _enrollmentRelayFn(_pendingEnrollmentMac, _pendingEnrollmentPubKey);
+  // Drain EVERY queued entry per call so concurrent enrollments are not starved.
+  while (_pendingRelayCount > 0) {
+    const PendingRelay& e = _pendingRelayQueue[_pendingRelayHead];
+    if (_enrollmentRelayFn) {
+      _enrollmentRelayFn(e.mac, e.pubKey);
+    }
+    _pendingRelayHead = (_pendingRelayHead + 1) % PENDING_RELAY_QUEUE_SIZE;
+    _pendingRelayCount--;
   }
 }
 
