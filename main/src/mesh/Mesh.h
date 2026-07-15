@@ -97,6 +97,9 @@ private:
   void processMasterBeacon(const mesh_message& msg);
   void processAdapterData(const mesh_message& msg);
   void relayDownlink(const mesh_message& msg);
+  // Relay an enrollment (JOIN_REQUEST) broadcast one hop toward the master so a
+  // node out of direct RF range of the master can still enroll (Task 9b Bug #5).
+  void relayEnrollmentUplink(const mesh_message& msg);
 
   // Setup helpers (Tiger Style refactor)
   bool setupWiFi();

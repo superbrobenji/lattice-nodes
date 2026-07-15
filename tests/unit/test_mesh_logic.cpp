@@ -479,6 +479,49 @@ TEST_F(AdapterDataRelayTest, BroadcastAdapterData_UsesBroadcastTargetMAC) {
   }
 }
 
+// Bug #5 regression: a non-master node that hears an ENROLLMENT broadcast from a
+// node further from the master must relay it one hop toward the master, so a leaf
+// out of direct RF range of the master can still enroll.
+TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysEnrollmentTowardMaster) {
+  Mesh mesh = makeIntermediateNode();
+
+  mesh_message req{};
+  req.message_type = MESH_TYPE_ENROLLMENT;
+  req.data_type = adapter_types::UNKNOWN_ADAPTER;
+  memcpy(req.origin_mac_address, kSensorMac, 6); // originated by a distant leaf
+  memset(req.target_mac_address, 0xFF, 6);       // enrollment is broadcast
+  memcpy(req.last_hop_mac_address, kSensorMac, 6);
+  req.hop_count = 0;
+
+  size_t before = espNowSentPackets.size();
+  mesh.relayEnrollmentUplink(req);
+
+  ASSERT_EQ(espNowSentPackets.size(), before + 1) << "must relay one hop toward master";
+  EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0)
+      << "relay must be routed to the next hop toward master";
+  const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
+  EXPECT_EQ(sent.message_type, MESH_TYPE_ENROLLMENT);
+  EXPECT_EQ(sent.hop_count, 1u) << "hop_count incremented on relay";
+  EXPECT_EQ(memcmp(sent.origin_mac_address, kSensorMac, 6), 0) << "origin preserved";
+  EXPECT_EQ(memcmp(sent.last_hop_mac_address, kMyMac, 6), 0) << "last hop stamped as relay";
+}
+
+TEST_F(AdapterDataRelayTest, IntermediateNode_DoesNotRelayOwnEnrollment) {
+  Mesh mesh = makeIntermediateNode();
+
+  mesh_message req{};
+  req.message_type = MESH_TYPE_ENROLLMENT;
+  memcpy(req.origin_mac_address, kMyMac, 6); // our OWN outbound request echoed back
+  memset(req.target_mac_address, 0xFF, 6);
+  memcpy(req.last_hop_mac_address, kMyMac, 6);
+  req.hop_count = 0;
+
+  size_t before = espNowSentPackets.size();
+  mesh.relayEnrollmentUplink(req);
+
+  EXPECT_EQ(espNowSentPackets.size(), before) << "must not relay our own request";
+}
+
 // ─── processJoinAck: relay ───────────────────────────────────────────────────
 
 class JoinAckRelayTest : public ::testing::Test {
@@ -533,11 +576,29 @@ TEST_F(JoinAckRelayTest, RelaysJoinAck_WhenNotAddressedToSelf) {
   size_t before = espNowSentPackets.size();
   mesh.processJoinAck(msg);
 
-  EXPECT_GT(espNowSentPackets.size(), before); // relayed to kPeerMac
-  EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kPeerMac, 6), 0);
+  // Task 9b: re-broadcast (not unicast-to-peers) so the still-unenrolled distant
+  // node — which is not yet a registered unicast peer — can hear the ACK.
+  ASSERT_EQ(espNowSentPackets.size(), before + 1);
+  static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kBroadcast, 6), 0)
+      << "JOIN_ACK relay must be broadcast";
   const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
   EXPECT_EQ(sent.hop_count, 2u);
   EXPECT_EQ(memcmp(sent.target_mac_address, kDistantNode, 6), 0); // target preserved
+  EXPECT_EQ(memcmp(sent.last_hop_mac_address, kMyMac, 6), 0);     // last hop stamped as us
+}
+
+TEST_F(JoinAckRelayTest, DoesNotRelayJoinAck_WeOriginated) {
+  // Loop safety: a node (a master) must never re-broadcast a JOIN_ACK it emitted.
+  Mesh mesh = makeIntermediateNode();
+
+  auto msg = makeJoinAck(kDistantNode);
+  memcpy(msg.origin_mac_address, kMyMac, 6); // we originated it
+
+  size_t before = espNowSentPackets.size();
+  mesh.processJoinAck(msg);
+
+  EXPECT_EQ(espNowSentPackets.size(), before) << "must not relay our own JOIN_ACK";
 }
 
 TEST_F(JoinAckRelayTest, DoesNotRelayJoinAck_WhenAddressedToSelf) {

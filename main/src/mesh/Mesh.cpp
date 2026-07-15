@@ -253,6 +253,8 @@ void Mesh::drainRecvQueue() {
     case MESH_TYPE_ENROLLMENT:
       if (isMaster)
         enrollment.processRequest(msg);
+      else
+        relayEnrollmentUplink(msg);
       break;
     case MESH_TYPE_JOIN_ACK:
       processJoinAck(msg);
@@ -638,10 +640,46 @@ void Mesh::relayDownlink(const mesh_message& msg) {
   }
 }
 
+void Mesh::relayEnrollmentUplink(const mesh_message& msg) {
+  // Never relay our own outbound request echoed back to us over the air.
+  if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
+    return;
+  // Bound relay depth (mirrors the ADAPTER_DATA uplink guard).
+  if (msg.hop_count >= lattice::config::MAX_HOPS)
+    return;
+  // Can only relay toward the master if we actually have a route to it.
+  if (!findNextHopToMaster())
+    return;
+  // Relay one hop toward the master, exactly like the ADAPTER_DATA uplink path:
+  // bump hop_count, stamp ourselves as last hop, and route via findNextHopToMaster
+  // (transmitCore does NOT rewrite target for non-ADAPTER_DATA types, so the
+  // request's broadcast target is preserved for the master to process).
+  mesh_message relay = msg;
+  relay.hop_count++;
+  memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+  transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ENROLLMENT,
+               &relay);
+}
+
 void Mesh::processJoinAck(const mesh_message& msg) {
-  // Relay outward if not addressed to us (multi-hop enrollment)
+  // Relay outward if not addressed to us (multi-hop enrollment, Task 9b Bug #5
+  // downlink counterpart). The target node is still mid-enrollment and is NOT
+  // yet a registered unicast peer of ours, so — exactly as the master does when
+  // it first emits the ACK (see enrollPeer: broadcast via the FF:FF peer) — we
+  // RE-BROADCAST rather than unicast to known peers via relayDownlink(). Loop
+  // safety: never re-broadcast a JOIN_ACK we originated (only masters originate
+  // them, so this stops the master looping on its own echo), and bound depth by
+  // MAX_HOPS as a backstop for cyclic topologies.
   if (memcmp(msg.target_mac_address, deviceMacAddress, 6) != 0) {
-    relayDownlink(msg);
+    if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
+      return;
+    if (msg.hop_count >= lattice::config::MAX_HOPS)
+      return;
+    mesh_message relay = msg;
+    relay.hop_count++;
+    memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+    static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&relay), sizeof(relay));
     return;
   }
   // Masters issue JOIN_ACKs; they never enroll via one. Without this guard a
