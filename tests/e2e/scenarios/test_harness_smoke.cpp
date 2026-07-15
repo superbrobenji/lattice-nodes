@@ -250,22 +250,25 @@ TEST(FakeHubTest, OriginMacsPreservedAndFiltersWork) {
 
   // --- sendConfigSet: drive a server-issued adapter reconfiguration ---
   //
-  // Full master->mesh->sensor propagation (sensor rebooting with a new adapter
-  // type) does NOT currently work end-to-end: Mesh::buildMessage() stamps
-  // outgoing ADAPTER_DATA frames' target_mac_address from the SENDER's own
-  // currentMaster.mac, which a master node never sets (masters don't track "their
-  // own master" -- Mesh.cpp only ever writes currentMaster.mac on beacon
-  // receipt). So the rebroadcast frame the sensor receives carries
-  // target_mac_address == 00:00:00:00:00:00, which is neither addressedToSelf,
-  // isBroadcastTarget, nor addressedToMaster from the sensor's point of view;
-  // Mesh::processAdapterData() therefore takes the "downlink to another node"
-  // relay branch and returns without ever invoking externalRecvCallback /
-  // Adapter::onMeshData. That's a genuine main/src bug (Mesh::processAdapterData
-  // / buildMessage interaction), out of scope for this harness-only fix pass
-  // (Task 13's scenario per the brief) -- so this test asserts the narrower,
-  // currently-true contract: the master consumed the OP_CONFIG_SET frame off its
-  // (mock) serial line and rebroadcast it over the mesh with the opcode and the
-  // sensor's mac intact in the payload.
+  // CORRECTION (Task 6a investigation, see .superpowers/sdd/task-6a-report.md):
+  // this comment previously claimed full master->mesh->sensor propagation was
+  // broken because Mesh::buildMessage() stamps outgoing ADAPTER_DATA frames'
+  // target_mac_address from the sender's own (unset, all-zero) currentMaster.mac.
+  // That claim does not hold for this call path: SerialAdapter::handleCompleteFrame
+  // reaches the mesh via Mesh::broadcastAdapterDataStatic() -> broadcastAdapterData(),
+  // which overwrites target_mac_address to the broadcast address FF:FF:FF:FF:FF:FF
+  // right after buildMessage() runs (Mesh.cpp) -- buildMessage()'s currentMaster.mac
+  // stamp is immediately discarded, never sent. Mesh::processAdapterData() on the
+  // receiving node already special-cases that broadcast target: it delivers locally
+  // (invoking externalRecvCallback / Adapter::onMeshData) AND relays outward for
+  // multi-hop, exactly as this opcode needs. This is exercised directly by
+  // test_mesh_logic.cpp's AdapterDataRelayTest.IntermediateNode_BroadcastTarget_
+  // DeliveredAndRelayed and .BroadcastAdapterData_UsesBroadcastTargetMAC, and
+  // end-to-end (enrollment -> sendConfigSet -> sensor reboots with the new adapter
+  // type) by ServerBroadcastTest.ConfigSetReachesNodeAdapterAndPersists below.
+  // No main/src change was needed for Task 6a; this test's own assertions below
+  // were already correct (they only ever inspected the payload data[], never
+  // target_mac_address) and are left as-is.
   //
   // VirtualBus::deliver() collects AND clears each node's ctx().espNowSent within
   // the very same step() call that produced it, so inspecting
@@ -333,4 +336,43 @@ TEST(FakeHubTest, OriginMacsPreservedAndFiltersWork) {
       << "FakeHub must preserve the wire origin MAC for ADAPTER_DATA frames, not "
          "overwrite it with whichever SimNode context is globally live";
   EXPECT_EQ(0, memcmp(fromPhantom.front().origin_mac_address, kPhantomOriginMac, 6));
+}
+
+// Task 6a: end-to-end proof that a server-issued OP_CONFIG_SET actually reaches
+// the target node's adapter, persists to EEPROM, and survives the resulting
+// reboot. The enrollment dance is required first: Mesh::broadcastToAllPeers()
+// only sends to nodes in Mesh::peers (the enrolled-peer list), not to every
+// node the VirtualBus happens to link -- an unenrolled sensor would never
+// receive the mesh-side broadcast regardless of the target_mac_address fix.
+TEST(ServerBroadcastTest, ConfigSetReachesNodeAdapterAndPersists) {
+  sim::SimWorld world;
+  auto* master = world.addNode({{0x02, 0, 0, 0, 0, 0x31}, true, lattice::adapter::SERIAL_ADAPTER});
+  auto* sensor = world.addNode({{0x02, 0, 0, 0, 0, 0x32}, false, lattice::adapter::PIR_ADAPTER});
+  world.bus.link(master, sensor);
+  sim::FakeHub hub(master);
+
+  // Enroll the sensor so the master's peer list (and thus broadcastToAllPeers)
+  // actually includes it.
+  world.run(10005); // 10s enrollment-broadcast interval + margin for delivery latency
+  hub.poll();
+  const mesh_message* enr = hub.enrollmentFrom(sensor->mac());
+  ASSERT_NE(enr, nullptr) << "master must relay the sensor's enrollment request to the hub";
+  hub.approveEnrollment(sensor->mac(), enr->enrollment_public_key);
+  world.run(50);
+  size_t masterPeers = master->with(
+      [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.peerCount; });
+  ASSERT_GE(masterPeers, 1u) << "sensor must be an enrolled peer of the master before broadcast";
+
+  auto preType = sensor->with(
+      [](lattice::mesh::Mesh&, lattice::adapter::Adapter* a) { return a->getAdapterType(); });
+  EXPECT_EQ(preType, lattice::adapter::PIR_ADAPTER) << "precondition: sensor starts as PIR";
+
+  hub.sendConfigSet(sensor->mac(), lattice::adapter::SERIAL_ADAPTER);
+  world.run(500); // master reads serial -> mesh broadcast -> sensor delivers -> saves EEPROM ->
+                  // ESP.restart -> SimWorld auto-reboots
+
+  auto type = sensor->with(
+      [](lattice::mesh::Mesh&, lattice::adapter::Adapter* a) { return a->getAdapterType(); });
+  EXPECT_EQ(type, lattice::adapter::SERIAL_ADAPTER)
+      << "OP_CONFIG_SET must reach the node adapter, persist, and survive the config reboot";
 }
