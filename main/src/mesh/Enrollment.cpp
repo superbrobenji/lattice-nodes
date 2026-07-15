@@ -80,16 +80,33 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
     Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
     return;
   }
-  Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
-  EepromManager::getInstance().saveEnrolledFlag(true);
+  // TOFU origin gate: JOIN_ACKs arrive over the unencrypted broadcast peer and
+  // the fingerprint above is observable over the air (it is broadcast in our own
+  // ENROLLMENT requests), so it does NOT authenticate the sender. Once a master
+  // MAC is known (from enrollment or the beacon TOFU fallback), only that origin
+  // may deliver a JOIN_ACK; anything else is a forgery and must not enroll us,
+  // TOFU-learn, or touch peer key material.
+  if (hasMasterMac && memcmp(msg.origin_mac_address, knownMasterMac, 6) != 0) {
+    Logger::logln("MESH", "JOIN_ACK from unexpected origin — ignoring", LogLevel::LOG_WARN);
+    return;
+  }
 
   // Register the approving master as a routable peer. Mesh::findNextHopToMaster()
   // can only route through PeerRegistry entries, so without this the enrolled
   // node has no uplink route (adapter data / route reports toward the master).
   // The JOIN_ACK carries the master's public key in enrollment_public_key
-  // (mirroring how the master registers the node with the node's key).
-  if (registerFn)
-    registerFn(msg.origin_mac_address, msg.enrollment_public_key);
+  // (mirroring how the master registers the node with the node's key). The
+  // Mesh-provided registerFn is add-only: it never replaces an established
+  // peer key, so even an origin-spoofed forgery cannot re-key a trusted link.
+  // If registration fails (registry full), do NOT mark enrolled or TOFU-learn —
+  // an "enrolled" node without an uplink route is worse than retrying.
+  if (registerFn && !registerFn(msg.origin_mac_address, msg.enrollment_public_key)) {
+    Logger::logln("MESH", "JOIN_ACK peer registration failed — not enrolling", LogLevel::LOG_ERROR);
+    return;
+  }
+
+  Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
+  EepromManager::getInstance().saveEnrolledFlag(true);
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
   if (!hasMasterMac) {

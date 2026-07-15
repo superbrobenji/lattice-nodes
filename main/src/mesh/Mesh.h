@@ -108,9 +108,13 @@ private:
 
   // Add (or key-update) a peer in the registry, persist, and register it with
   // ESP-NOW encryption. Shared by enrollPeer() (master registers the enrolling
-  // node) and processJoinAck() (node registers the approving master).
-  // Returns false if the registry is full and the peer could not be added.
-  bool registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32);
+  // node; allowRekey=true — the hub-approved serial path may legitimately
+  // re-key a re-enrolling node) and processJoinAck() (node registers the
+  // approving master; allowRekey=false — an over-the-air JOIN_ACK must never
+  // replace established key material, only set it on first contact or upgrade
+  // a placeholder all-zero key). Returns false if the registry is full and the
+  // peer could not be added.
+  bool registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, bool allowRekey);
 
   // Replay protection (composed)
   ReplayCache replay;

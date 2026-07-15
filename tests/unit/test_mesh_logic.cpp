@@ -591,6 +591,123 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
       << "uplink route must resolve through the newly registered master peer";
 }
 
+// ─── JOIN_ACK forgery resistance ─────────────────────────────────────────────
+// JOIN_ACKs travel over the unencrypted broadcast peer, and everything a forger
+// needs is observable over the air: the victim's pubkey prefix (broadcast in its
+// own ENROLLMENT requests) and the master's MAC + pubkey (broadcast in every
+// legitimate JOIN_ACK). The fingerprint check alone therefore does NOT
+// authenticate the sender — the registration path must additionally be gated by
+// TOFU origin and must never replace established key material.
+
+class JoinAckForgeryTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    EEPROM.reset();
+    resetMillis();
+    resetEspNowMock();
+    lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
+    lattice::mesh::crypto::generateKeypair(masterPriv, masterKey);
+    lattice::mesh::crypto::generateKeypair(attackerPriv, attackerKey);
+  }
+
+  static constexpr uint8_t kMyMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  static constexpr uint8_t kAttackerMac[6] = {0xBA, 0xDB, 0xAD, 0xBA, 0xDB, 0xAD};
+
+  uint8_t nodePriv[32], nodePub[32];
+  uint8_t masterPriv[32], masterKey[32];
+  uint8_t attackerPriv[32], attackerKey[32];
+
+  // A node that already trusts kMasterMac: TOFU MAC recorded, master registered
+  // as a peer with an established (non-zero) key.
+  Mesh makeEnrolledNode() {
+    Mesh mesh;
+    memcpy(mesh.deviceMacAddress, kMyMac, 6);
+    mesh.isMaster = false;
+    memcpy(mesh.enrollment.devicePrivateKey, nodePriv, 32);
+    memcpy(mesh.enrollment.devicePublicKey, nodePub, 32);
+    mesh.enrollment.hasMasterMac = true;
+    memcpy(mesh.enrollment.knownMasterMac, kMasterMac, 6);
+    PeerInfo master{};
+    memcpy(master.mac, kMasterMac, 6);
+    memcpy(master.publicKey, masterKey, 32);
+    master.lastSeenMillis = 0;
+    mesh.peers.append(master);
+    return mesh;
+  }
+
+  // Forged JOIN_ACK addressed to the victim, carrying the victim's (observable)
+  // fingerprint and attacker-chosen key material.
+  mesh_message makeForgedAck(const uint8_t origin[6]) {
+    mesh_message m{};
+    m.proto_version = 1;
+    m.message_type = MESH_TYPE_JOIN_ACK;
+    m.data_type = adapter_types::UNKNOWN_ADAPTER;
+    memcpy(m.origin_mac_address, origin, 6);
+    memcpy(m.target_mac_address, kMyMac, 6);
+    memcpy(m.last_hop_mac_address, origin, 6);
+    m.hop_count = 1;
+    m.epoch_num = 1;
+    m.seq_num = 1;
+    memcpy(m.data, nodePub, 4); // victim fingerprint — observable over the air
+    memcpy(m.enrollment_public_key, attackerKey, 32);
+    return m;
+  }
+};
+
+constexpr uint8_t JoinAckForgeryTest::kMyMac[];
+constexpr uint8_t JoinAckForgeryTest::kMasterMac[];
+constexpr uint8_t JoinAckForgeryTest::kAttackerMac[];
+
+TEST_F(JoinAckForgeryTest, UnexpectedOrigin_DroppedEntirely) {
+  Mesh mesh = makeEnrolledNode();
+
+  mesh.processJoinAck(makeForgedAck(kAttackerMac));
+
+  EXPECT_EQ(mesh.peers.find(kAttackerMac), nullptr)
+      << "a JOIN_ACK from a non-master origin must not register that origin as a peer";
+  PeerInfo* master = mesh.peers.find(kMasterMac);
+  ASSERT_NE(master, nullptr);
+  EXPECT_EQ(memcmp(master->publicKey, masterKey, 32), 0)
+      << "known master's established key must be untouched";
+  EXPECT_FALSE(mesh.enrollment.isEnrolled())
+      << "a JOIN_ACK from an unexpected origin must not mark the node enrolled";
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, kMasterMac, 6), 0)
+      << "TOFU master MAC must be untouched";
+}
+
+TEST_F(JoinAckForgeryTest, SpoofedMasterOrigin_DoesNotRekeyEstablishedMasterPeer) {
+  Mesh mesh = makeEnrolledNode();
+
+  // Attacker spoofs the (observable) known-master MAC as origin, supplying its
+  // own key: the origin gate alone cannot catch this — the registration path
+  // must refuse to replace already-established key material.
+  mesh.processJoinAck(makeForgedAck(kMasterMac));
+
+  PeerInfo* master = mesh.peers.find(kMasterMac);
+  ASSERT_NE(master, nullptr);
+  EXPECT_EQ(memcmp(master->publicKey, masterKey, 32), 0)
+      << "an over-the-air JOIN_ACK must never re-key an established master peer";
+}
+
+TEST_F(JoinAckForgeryTest, MasterNode_IgnoresJoinAckAddressedToItself) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = true;
+  memcpy(mesh.enrollment.devicePrivateKey, nodePriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, nodePub, 32);
+  // A fresh master has no TOFU master MAC — without an isMaster guard a forged
+  // ACK could TOFU-poison it and register attacker key material.
+
+  mesh.processJoinAck(makeForgedAck(kAttackerMac));
+
+  EXPECT_EQ(mesh.peers.find(kAttackerMac), nullptr)
+      << "a master must not peer-register from a JOIN_ACK addressed to itself";
+  EXPECT_FALSE(mesh.enrollment.hasMasterMac)
+      << "a master must not TOFU-learn a 'master' from a forged JOIN_ACK";
+  EXPECT_FALSE(mesh.enrollment.isEnrolled()) << "masters never enroll via JOIN_ACK";
+}
+
 // ─── drainRecvQueue: replay protection ───────────────────────────────────────
 // Relay dedup is drainRecvQueue's responsibility; relay paths no longer call
 // isReplay directly. These tests verify that the production path (drainRecvQueue

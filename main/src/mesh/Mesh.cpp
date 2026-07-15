@@ -644,9 +644,17 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     relayDownlink(msg);
     return;
   }
-  enrollment.processJoinAck(
-      msg, deviceMacAddress,
-      [this](const uint8_t* mac, const uint8_t* pubKey32) { registerPeerWithKey(mac, pubKey32); });
+  // Masters issue JOIN_ACKs; they never enroll via one. Without this guard a
+  // forged ACK addressed to the master (fingerprint is observable over the
+  // air) could TOFU-poison it and register attacker key material.
+  if (isMaster) {
+    Logger::logln("MESH", "JOIN_ACK addressed to master — ignoring", LogLevel::LOG_WARN);
+    return;
+  }
+  enrollment.processJoinAck(msg, deviceMacAddress,
+                            [this](const uint8_t* mac, const uint8_t* pubKey32) {
+                              return registerPeerWithKey(mac, pubKey32, /*allowRekey=*/false);
+                            });
 }
 
 void Mesh::addPeer(const uint8_t* mac) {
@@ -659,9 +667,29 @@ void Mesh::addPeer(const uint8_t* mac) {
   }
 }
 
-bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32) {
+bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, bool allowRekey) {
   PeerInfo* p = peers.find(mac);
   if (p) {
+    if (!allowRekey) {
+      // Established (non-zero) key material must never be replaced from this
+      // path — an over-the-air JOIN_ACK with a spoofed trusted origin would
+      // otherwise re-key the link to attacker-chosen material. An all-zero
+      // stored key is a pre-enrollment placeholder (e.g. DEFAULT_PEERS), not
+      // an established key, so upgrading it is allowed.
+      bool keyEstablished = false;
+      for (int i = 0; i < 32; ++i) {
+        if (p->publicKey[i] != 0) {
+          keyEstablished = true;
+          break;
+        }
+      }
+      if (keyEstablished) {
+        Logger::logln("MESH", "Peer already registered — keeping established key",
+                      LogLevel::LOG_DEBUG);
+        p->lastSeenMillis = millis();
+        return true; // already routable; nothing to change
+      }
+    }
     // Update existing peer's public key
     memcpy(p->publicKey, publicKey32, 32);
     p->lastSeenMillis = millis();
@@ -684,7 +712,7 @@ bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32) {
 }
 
 void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
-  if (!registerPeerWithKey(mac, publicKey32))
+  if (!registerPeerWithKey(mac, publicKey32, /*allowRekey=*/true))
     return; // registry full — do not ACK an enrollment we could not record
 
   // Send JOIN_ACK unicast to new node

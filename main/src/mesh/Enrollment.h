@@ -9,7 +9,8 @@ namespace mesh {
 
 using EnrollmentRelayFn = void (*)(const uint8_t* mac, const uint8_t* pubKey);
 using SendMessageFn = std::function<void(const uint8_t* target, const mesh_message&)>;
-using RegisterPeerFn = std::function<void(const uint8_t* mac, const uint8_t* pubKey32)>;
+// Returns false if the peer could not be registered (e.g. registry full).
+using RegisterPeerFn = std::function<bool(const uint8_t* mac, const uint8_t* pubKey32)>;
 
 class Enrollment {
 public:
