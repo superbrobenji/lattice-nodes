@@ -333,16 +333,28 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
   }
 }
 
+void Mesh::transmitDispatch(const adapter_types type, const uint8_t* data, bool selfOriginated) {
+  if (isMaster) {
+    broadcastAdapterData(type, data, selfOriginated);
+    return;
+  }
+  transmitCore(type, data, MESH_TYPE_ADAPTER_DATA, nullptr);
+}
+
 void Mesh::transmit(const adapter_types type, const uint8_t* data) {
   if (!instance) {
     Logger::logln("MESH", "transmit() called before init", LogLevel::LOG_WARN);
     return;
   }
-  if (instance->isMaster) {
-    instance->broadcastAdapterData(type, data);
+  instance->transmitDispatch(type, data, false);
+}
+
+void Mesh::transmitSelfOriginated(const adapter_types type, const uint8_t* data) {
+  if (!instance) {
+    Logger::logln("MESH", "transmitSelfOriginated() called before init", LogLevel::LOG_WARN);
     return;
   }
-  instance->transmitCore(type, data, MESH_TYPE_ADAPTER_DATA, nullptr);
+  instance->transmitDispatch(type, data, true);
 }
 
 void Mesh::linkDataRecvCallback(std::function<void(const mesh_message&)> recvCallback) {
@@ -419,10 +431,13 @@ bool Mesh::meshKeyIsSet() const {
   return false;
 }
 
-void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data) {
+void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally) {
   mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
   memset(msg.target_mac_address, 0xFF, 6); // broadcast indicator — relayed by intermediate nodes
   broadcastToAllPeers(msg);
+  if (deliverLocally && externalRecvCallback) {
+    externalRecvCallback(msg);
+  }
 }
 
 void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t* data) {

@@ -127,26 +127,29 @@ TEST(VirtualBusTest, BeaconReachesLinkedNodeOnly) {
 //
 // The brief's literal scenario (a lone master, world.run(50), expecting its own
 // spontaneous SerialAdapter::sendHealthReport() to appear on its own Serial.written)
-// does not hold, for two independently-confirmed reasons:
+// did not hold at the time Task 6 wrote this test, for two independently-confirmed
+// reasons:
 //
 // 1. "Immediate health report on hop-count init" does not apply to a master node.
 //    SerialAdapter::loop() only fires early when `getHopCount()` changes from its
 //    last-reported value, but Mesh::getHopCount() is `isMaster ? 0 : ...` -- a
 //    constant for the master. Its health report only ever fires on the 30s
 //    periodic interval (lattice::config::HEALTH_REPORT_INTERVAL_MS), never sooner.
+//    This part is still true today; it's not a bug (see Task 6b brief).
 //
 // 2. Once that interval elapses (or a HEALTH_REQ triggers sendHealthReport()
-//    directly) and the master's Mesh::transmit() takes its master branch
-//    (Mesh.cpp:341, broadcastAdapterData -> broadcastToAllPeers), the master's own
-//    health data is always routed as an ESP-NOW broadcast to *other* mesh peers --
-//    never written to its own Serial. sendMessage() (Mesh.cpp:283-286) and
-//    broadcastToAllPeers() (Mesh.cpp:302-303) both explicitly skip sending to
-//    device's own MAC ("Skip self"), and there is no other code path that calls
-//    Serial.write() for the master's own generated telemetry. This is a genuine
-//    firmware gap (the master's own health can never reach the cable it is
-//    physically wired to) -- confirmed empirically (serialWritten stays empty
-//    across ticking) but out of scope to fix under Task 6 (harness-only: FakeHub +
-//    this test + CMakeLists, no main/src changes).
+//    directly), the master's own health data used to be routed only as an
+//    ESP-NOW broadcast to *other* mesh peers, never written to its own Serial
+//    -- a genuine firmware gap (the master's own health could never reach the
+//    cable it is physically wired to), confirmed empirically and left out of
+//    scope for Task 6 (harness-only). Task 6b (.superpowers/sdd/task-6b-report.md)
+//    fixed this: Mesh::transmitSelfOriginated() (used by
+//    SerialAdapter::sendHealthReport()) now also delivers the built message to
+//    the master's own externalRecvCallback, so it reaches SerialAdapter's
+//    onMeshDataImpl() and gets written to Serial like any other mesh-received
+//    message. See test_master_health_e2e.cpp for dedicated master-only coverage
+//    of both the periodic report and the HEALTH_REQ response; the assertions
+//    below now just confirm the same fix holds in this multi-node topology.
 //
 // A third, unrelated harness/config interaction was hit while investigating: every
 // freshly-provisioned node's peer list starts EEPROM-erased, and
@@ -159,11 +162,12 @@ TEST(VirtualBusTest, BeaconReachesLinkedNodeOnly) {
 // them below so the test can observe the *firmware* behavior in isolation instead
 // of crashing on this harness/config artifact.
 //
-// Given (1)+(2), this test demonstrates the confirmed gap directly (health report
-// silent, before and after a HEALTH_REQ) and separately proves FakeHub's own
-// mechanics (poll/decode/enrollmentFrom/sendFrame/approveEnrollment) against a
-// real, working, non-mesh serial write: SerialAdapter::relayEnrollmentToServer,
-// which writes straight to Serial and is unaffected by the gap above.
+// This test now demonstrates the fixed behavior directly (health report silent
+// before 50ms, since no interval elapsed and no request was sent yet; present
+// after a HEALTH_REQ) and separately proves FakeHub's own mechanics
+// (poll/decode/enrollmentFrom/sendFrame/approveEnrollment) against a real,
+// working, non-mesh serial write: SerialAdapter::relayEnrollmentToServer, which
+// writes straight to Serial and is unaffected by either gap above.
 TEST(FakeHubTest, ReceivesHealthReportAndAnswersHealthReq) {
   sim::SimWorld world;
   auto* master = world.addNode({{0x02, 0, 0, 0, 0, 0x01}, true, lattice::adapter::SERIAL_ADAPTER});
@@ -174,19 +178,27 @@ TEST(FakeHubTest, ReceivesHealthReportAndAnswersHealthReq) {
   // DEFAULT_PEERS placeholder MACs are now stripped automatically by
   // SimNode::boot() (see SimNode.cpp) -- no per-test workaround needed.
 
-  // --- Confirmed gap: master's own health report never reaches its own serial ---
+  // Nothing sent yet: the 30s periodic interval hasn't elapsed and no
+  // HEALTH_REQ has been issued. Unrelated to the Task 6b fix.
   world.run(50);
   hub.poll();
   EXPECT_TRUE(hub.ofType(MESH_TYPE_ADAPTER_DATA).empty())
-      << "documents the confirmed gap: master's own SerialAdapter data never "
-         "reaches its own Serial output (see reconciliation note above)";
+      << "no health report expected yet: periodic interval not elapsed, no request sent";
 
+  // Fixed by Task 6b: the master now answers its own OP_HEALTH_REQ over its
+  // own serial (previously silent -- see reconciliation note above).
   hub.sendHealthReq();
   world.run(50);
   hub.poll();
-  EXPECT_TRUE(hub.received.empty())
-      << "documents the confirmed gap: master's own answer to OP_HEALTH_REQ is "
-         "subject to the same self-broadcast limitation as its spontaneous report";
+  bool answeredHealthReq = false;
+  for (const auto& m : hub.received) {
+    if (m.data[0] == OP_HEALTH_REPORT && memcmp(&m.data[2], master->mac(), 6) == 0) {
+      answeredHealthReq = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(answeredHealthReq)
+      << "master must answer its own OP_HEALTH_REQ over its own serial (Task 6b fix)";
 
   // --- Working path: FakeHub's poll/decode/query mechanics against a real,
   //     non-mesh Serial.write -- the enrollment-request relay. `node` is

@@ -85,6 +85,9 @@ private:
                     MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA,
                     const mesh_message* msgOverride = nullptr);
 
+  // Shared body for transmit()/transmitSelfOriginated() — see their comments.
+  void transmitDispatch(const adapter_types type, const uint8_t* data, bool selfOriginated);
+
   void loadMeshKeyFromEEPROM();
   void saveMeshKeyToEEPROM(const uint8_t* key);
   void generateRandomMeshKey();
@@ -140,8 +143,21 @@ public:
   Mesh();
   bool init();
 
-  // Static trampoline for Adapter usage
+  // Static trampoline for Adapter usage. NOTE: keep this exact 2-arg
+  // signature — it's assigned by address to Adapter::TransmitPtr
+  // (mesh_transmit_fn), which is a plain function pointer type; adding a
+  // (even defaulted) parameter here changes that pointer's type and breaks
+  // that assignment. Forwarding/relay callers (e.g. relaying server-issued
+  // commands onward through the mesh) should use this.
   static void transmit(const adapter_types type, const uint8_t* data);
+
+  // Use instead of transmit() when this node is originating data ABOUT
+  // itself that must reach the server (currently: the master's own health
+  // report). On a master node, transmit() only reaches OTHER mesh peers —
+  // broadcastToAllPeers() explicitly skips self — so self-originated data
+  // would otherwise never reach the server. This delivers the built message
+  // locally via externalRecvCallback in addition to the normal broadcast.
+  static void transmitSelfOriginated(const adapter_types type, const uint8_t* data);
 
   void linkDataRecvCallback(std::function<void(const mesh_message&)> recvCallback);
 
@@ -166,8 +182,13 @@ public:
   const PeerInfo* getPeerList() const { return peers.peerMacs; }
   size_t getPeerCount() const { return peers.peerCount; }
 
-  // Broadcast adapter data to all peers
-  void broadcastAdapterData(adapter_types type, const uint8_t* data);
+  // Broadcast adapter data to all peers.
+  // deliverLocally: also hand the built message to externalRecvCallback, the
+  // same delivery path used for messages received from the mesh. Needed so
+  // master-originated, server-bound data (currently: health reports) reaches
+  // this node's own serial adapter — broadcastToAllPeers() explicitly skips
+  // self, so without this the master could never answer for itself.
+  void broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally = false);
 
   // Serial adapter helper (optional broadcast)
   static void broadcastAdapterDataStatic(adapter_types type, const uint8_t* data);
