@@ -131,8 +131,18 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
     return;
   }
 
-  // Normal per-adapter dispatch
-  if (message.data_type != _adapterType)
+  // Normal per-adapter dispatch.
+  //
+  // The SerialAdapter is the master's uplink to the server: its onMeshDataImpl
+  // encodes the frame and writes it out over serial. The master must forward
+  // EVERY adapter-data frame it receives from the mesh (PIR motion, LED acks,
+  // any node telemetry) to the server -- regardless of the frame's data_type --
+  // so it must never be filtered out here. Without this, a master running the
+  // SerialAdapter (data_type SERIAL_ADAPTER) silently dropped all sensor
+  // telemetry whose data_type differed from its own, and node data never
+  // reached the server. Every other adapter type only handles frames matching
+  // its own data_type.
+  if (_adapterType != adapter_types::SERIAL_ADAPTER && message.data_type != _adapterType)
     return;
   onMeshDataImpl(message);
 }
