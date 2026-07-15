@@ -74,7 +74,7 @@ void Enrollment::processRequest(const mesh_message& msg) {
 }
 
 void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*deviceMac*/,
-                                RegisterPeerFn /*registerFn*/) {
+                                RegisterPeerFn registerFn) {
   // Called only when msg.target_mac_address == deviceMacAddress (Mesh checks this before calling)
   if (memcmp(msg.data, devicePublicKey, 4) != 0) {
     Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
@@ -82,6 +82,14 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   }
   Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
   EepromManager::getInstance().saveEnrolledFlag(true);
+
+  // Register the approving master as a routable peer. Mesh::findNextHopToMaster()
+  // can only route through PeerRegistry entries, so without this the enrolled
+  // node has no uplink route (adapter data / route reports toward the master).
+  // The JOIN_ACK carries the master's public key in enrollment_public_key
+  // (mirroring how the master registers the node with the node's key).
+  if (registerFn)
+    registerFn(msg.origin_mac_address, msg.enrollment_public_key);
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
   if (!hasMasterMac) {

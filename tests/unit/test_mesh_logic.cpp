@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "mesh/Mesh.h"
+#include "mesh/MeshCrypto.h"
 #include "esp_now_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
@@ -205,7 +206,8 @@ TEST_F(MeshLogicTest, SingleMaster_SecondBeaconFromNewMAC_Rejected_WhenMasterAli
   size_t sendsBefore = espNowSentPackets.size();
   mesh.processMasterBeacon(makeBeacon(unknownMac, 1, 2));
 
-  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, knownMac, 6), 0) << "Known master MAC must not change";
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, knownMac, 6), 0)
+      << "Known master MAC must not change";
   EXPECT_FALSE(mesh.enrollment.hasMasterMacSecondary);
   EXPECT_EQ(espNowSentPackets.size(), sendsBefore);
 }
@@ -266,9 +268,9 @@ TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
   EXPECT_EQ(espNowSentPackets.size(), 2u);
   for (const auto& pkt : espNowSentPackets) {
     const auto& sent = *reinterpret_cast<const mesh_message*>(pkt.data.data());
-    EXPECT_EQ(sent.hop_count, 2u);                              // incremented
+    EXPECT_EQ(sent.hop_count, 2u);                               // incremented
     EXPECT_EQ(memcmp(sent.target_mac_address, kPeer2Mac, 6), 0); // target preserved
-    EXPECT_EQ(memcmp(sent.last_hop_mac_address, kMyMac, 6), 0);   // lastHop = my MAC
+    EXPECT_EQ(memcmp(sent.last_hop_mac_address, kMyMac, 6), 0);  // lastHop = my MAC
   }
 }
 
@@ -371,7 +373,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysUplinkTowardMaster) {
 
   EXPECT_EQ(espNowSentPackets.size(), before + 1);
   const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
-  EXPECT_EQ(sent.hop_count, 2u);                                       // incremented
+  EXPECT_EQ(sent.hop_count, 2u);                                      // incremented
   EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0); // routed via nextHop
 }
 
@@ -553,6 +555,42 @@ TEST_F(JoinAckRelayTest, DoesNotRelayJoinAck_WhenAddressedToSelf) {
   EXPECT_EQ(espNowSentPackets.size(), before); // no relay
 }
 
+TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
+  // An accepted JOIN_ACK must add the approving master (origin MAC + the
+  // master public key carried in enrollment_public_key) to the node's own
+  // PeerRegistry — findNextHopToMaster() can only route through registry
+  // entries, so without this the enrolled node has no uplink route at all.
+  Mesh mesh = makeIntermediateNode();
+  ASSERT_EQ(mesh.peers.find(kMasterMac), nullptr) << "precondition: master not yet a peer";
+
+  // Real Curve25519 keypairs: registration derives an ESP-NOW LMK via ECDH,
+  // which rejects a zeroed private key / arbitrary public-key bytes.
+  uint8_t nodePriv[32], nodePub[32], masterPriv[32], masterKey[32];
+  lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
+  lattice::mesh::crypto::generateKeypair(masterPriv, masterKey);
+  memcpy(mesh.enrollment.devicePrivateKey, nodePriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, nodePub, 32);
+
+  auto msg = makeJoinAck(kMyMac);
+  memcpy(msg.data, nodePub, 4); // fingerprint = first 4 bytes of node pubkey
+  memcpy(msg.enrollment_public_key, masterKey, 32);
+
+  mesh.processJoinAck(msg);
+
+  PeerInfo* master = mesh.peers.find(kMasterMac);
+  ASSERT_NE(master, nullptr) << "master must be registered in the node's PeerRegistry";
+  EXPECT_EQ(memcmp(master->publicKey, masterKey, 32), 0)
+      << "master's public key from the JOIN_ACK must be stored";
+
+  // And the route must actually resolve once a beacon establishes the topology
+  // (nextHop = master, one hop) — the end goal of registering the master.
+  memcpy(mesh.currentMaster.mac, kMasterMac, 6);
+  memcpy(mesh.currentMaster.nextHop, kMasterMac, 6);
+  mesh.currentMaster.distance = 1;
+  EXPECT_NE(mesh.findNextHopToMaster(), nullptr)
+      << "uplink route must resolve through the newly registered master peer";
+}
+
 // ─── drainRecvQueue: replay protection ───────────────────────────────────────
 // Relay dedup is drainRecvQueue's responsibility; relay paths no longer call
 // isReplay directly. These tests verify that the production path (drainRecvQueue
@@ -669,7 +707,7 @@ static void captureRelayFn(const uint8_t mac[6], const uint8_t pubKey[32]) {
 }
 
 class EnrollmentRelayCallbackTest : public ::testing::Test {
- protected:
+protected:
   void SetUp() override {
     g_capturedMac = nullptr;
     g_capturedKey = nullptr;
@@ -683,11 +721,10 @@ TEST_F(EnrollmentRelayCallbackTest, DrainCallsRegisteredCallback) {
   mesh.setEnrollmentRelayFn(captureRelayFn);
 
   static constexpr uint8_t kMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
-  static constexpr uint8_t kKey[32] = {
-      0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-      0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
-      0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-      0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
+  static constexpr uint8_t kKey[32] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                                       0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+                                       0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                                       0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
   memcpy(mesh.enrollment._pendingEnrollmentMac, kMac, 6);
   memcpy(mesh.enrollment._pendingEnrollmentPubKey, kKey, 32);

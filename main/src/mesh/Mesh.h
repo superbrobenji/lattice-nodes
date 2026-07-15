@@ -106,6 +106,12 @@ private:
   // Enrollment helper (relay dispatch only — "addressed to us" branch is in Enrollment)
   void processJoinAck(const mesh_message& msg);
 
+  // Add (or key-update) a peer in the registry, persist, and register it with
+  // ESP-NOW encryption. Shared by enrollPeer() (master registers the enrolling
+  // node) and processJoinAck() (node registers the approving master).
+  // Returns false if the registry is full and the peer could not be added.
+  bool registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32);
+
   // Replay protection (composed)
   ReplayCache replay;
 

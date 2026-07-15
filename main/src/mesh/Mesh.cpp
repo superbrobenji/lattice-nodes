@@ -478,6 +478,12 @@ void Mesh::checkMasterTimeout() {
 // ---------- Tiger Style helper implementations ----------
 
 void Mesh::processMasterBeacon(const mesh_message& msg) {
+  // Guard: ignore echoes of our own beacon relayed back by neighbours (relays are
+  // broadcast, so the originating master hears them too). Without this the master
+  // would TOFU-learn itself as knownMasterMac and record a bogus route to itself.
+  if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
+    return;
+
   // Guard: drop beacon if hop count would overflow uint8_t or exceed limit
   if (msg.hop_count >= lattice::config::MAX_HOPS) {
     Logger::logln("MESH", "Beacon hop count exceeded MAX_HOPS, dropping relay", LogLevel::LOG_WARN);
@@ -638,7 +644,9 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     relayDownlink(msg);
     return;
   }
-  enrollment.processJoinAck(msg, deviceMacAddress, nullptr);
+  enrollment.processJoinAck(
+      msg, deviceMacAddress,
+      [this](const uint8_t* mac, const uint8_t* pubKey32) { registerPeerWithKey(mac, pubKey32); });
 }
 
 void Mesh::addPeer(const uint8_t* mac) {
@@ -651,26 +659,33 @@ void Mesh::addPeer(const uint8_t* mac) {
   }
 }
 
-void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
+bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32) {
   PeerInfo* p = peers.find(mac);
   if (p) {
     // Update existing peer's public key
     memcpy(p->publicKey, publicKey32, 32);
+    p->lastSeenMillis = millis();
   } else {
     if (peers.peerCount >= MAX_PEERS) {
       Logger::logln("MESH", "Peer list full, cannot enroll", LogLevel::LOG_WARN);
-      return;
+      return false;
     }
     PeerInfo newPeer;
     memcpy(newPeer.mac, mac, 6);
     memcpy(newPeer.publicKey, publicKey32, 32);
-    newPeer.lastSeenMillis = 0;
+    newPeer.lastSeenMillis = millis();
     peers.append(newPeer);
   }
   peers.saveToEEPROM();
 
   // Re-register with encryption now that we have the public key (mbedtls-heavy via Enrollment)
   enrollment.enrollPeer(mac, publicKey32, nullptr, _dualMasterMode);
+  return true;
+}
+
+void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
+  if (!registerPeerWithKey(mac, publicKey32))
+    return; // registry full — do not ACK an enrollment we could not record
 
   // Send JOIN_ACK unicast to new node
   mesh_message ack = {};
@@ -682,6 +697,9 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
   ack.hop_count = 0;
   // Include first 4 bytes of approved node's pubkey as fingerprint
   memcpy(ack.data, publicKey32, 4);
+  // Include OUR public key so the enrolling node can register this master as
+  // an encrypted, routable peer in its own registry (see Enrollment::processJoinAck).
+  memcpy(ack.enrollment_public_key, enrollment.getPublicKey(), 32);
   // Broadcast via the registered FF:FF:… peer so the new node receives the ACK
   // even before it is individually registered as a unicast peer.
   static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -756,10 +774,19 @@ void Mesh::loop() {
 
   // Deferred beacon relay with jitter: dispatch once the per-node jitter window expires.
   // This spreads relay transmissions across all non-master nodes to avoid collision bursts.
+  // Beacons propagate AWAY from the master for route discovery, so the relay must be a
+  // broadcast: routing it through transmitCore()/findNextHopToMaster() sent it back toward
+  // the master (backwards — nodes 2+ hops out never heard it) and raised a spurious
+  // err::fail every beacon interval on any node without a route (e.g. pre-enrollment).
   if (relayPending && millis() >= relayPendingAt) {
     relayPending = false;
-    transmitCore(static_cast<adapter_types>(relayPendingMsg.data_type), relayPendingMsg.data,
-                 MESH_TYPE_MASTER_BEACON, &relayPendingMsg);
+    static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_err_t res = esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&relayPendingMsg),
+                                 sizeof(relayPendingMsg));
+    if (res != ESP_OK) {
+      Logger::logln("MESH", String("Beacon relay broadcast failed: ") + esp_err_to_name(res),
+                    LogLevel::LOG_WARN);
+    }
   }
 
   // Master beacon — broadcastMasterBeacon() guards timing internally via lastBeaconMillis
