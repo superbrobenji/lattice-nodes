@@ -822,6 +822,72 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   EXPECT_EQ(deliveredCount, 1); // callback not invoked again
 }
 
+// Task 9c R1: an enrollment request seen twice within one drain window (e.g. the
+// direct broadcast plus a neighbour's relayed copy, same origin/epoch/seq) must
+// be forwarded to the server only once — the master enqueues one pending relay.
+TEST_F(DrainRecvQueueTest, DropsReplayedEnrollmentRequestBeforeRelay) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = true;
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ENROLLMENT;
+  memcpy(msg.origin_mac_address, kOriginMac, 6);
+  msg.epoch_num = 1;
+  msg.seq_num = 7;
+
+  injectAndDrain(mesh, msg); // first: enqueued for relay-to-server
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 1u);
+  injectAndDrain(mesh, msg); // duplicate (same epoch/seq): dropped before processRequest
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 1u) << "duplicate must not enqueue a second relay";
+}
+
+// Task 9c R1 (retry preservation): a legitimate re-request in a LATER retry round
+// carries a fresh seq, so dedup must NOT suppress it — it enqueues again.
+TEST_F(DrainRecvQueueTest, ForwardsEnrollmentRetryWithFreshSeq) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = true;
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ENROLLMENT;
+  memcpy(msg.origin_mac_address, kOriginMac, 6);
+  msg.epoch_num = 1;
+
+  msg.seq_num = 7;
+  injectAndDrain(mesh, msg);
+  msg.seq_num = 8; // next 10s retry round — distinct seq
+  injectAndDrain(mesh, msg);
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 2u) << "retry must still be forwarded";
+}
+
+// Task 9c R2: a node re-broadcasts a given JOIN_ACK at most once. A reflected copy
+// (same origin/epoch/seq) is dropped by ReplayCache before processJoinAck, so no
+// second broadcast — preventing combinatorial breadth amplification.
+TEST_F(DrainRecvQueueTest, DoesNotReBroadcastReplayedJoinAck) {
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  static constexpr uint8_t kDistant[6] = {0x99, 0x88, 0x77, 0x66, 0x55, 0x44};
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = false;
+
+  mesh_message ack{};
+  ack.proto_version = PROTO_VERSION;
+  ack.message_type = MESH_TYPE_JOIN_ACK;
+  memcpy(ack.origin_mac_address, kMasterMac, 6); // originated by master, not us
+  memcpy(ack.target_mac_address, kDistant, 6);   // addressed elsewhere -> relay branch
+  ack.hop_count = 1;
+  ack.epoch_num = 1;
+  ack.seq_num = 9;
+
+  size_t before = espNowSentPackets.size();
+  injectAndDrain(mesh, ack); // first: re-broadcast once
+  injectAndDrain(mesh, ack); // reflected duplicate: dropped before processJoinAck
+  EXPECT_EQ(espNowSentPackets.size(), before + 1) << "same JOIN_ACK re-broadcast at most once";
+}
+
 // ─── EnrollmentTest ──────────────────────────────────────────────────────────
 
 class EnrollmentTest : public ::testing::Test {
@@ -852,6 +918,25 @@ TEST_F(EnrollmentTest, SendsSingleEspNowMessage) {
   EXPECT_EQ(sent->message_type, MESH_TYPE_ENROLLMENT);
   EXPECT_EQ(memcmp(sent->enrollment_public_key, kPubKey, 32), 0)
       << "Full public key must be present in a single message";
+}
+
+// Task 9c R1: the enrollment request must carry proto_version + (epoch, seq) so
+// the master's ReplayCache dedups relayed copies; and each retry round must use a
+// FRESH seq so a legitimate re-request is not permanently suppressed.
+TEST_F(EnrollmentTest, EnrollmentRequestCarriesReplayFieldsWithFreshSeqPerRetry) {
+  Mesh mesh;
+  mesh.replay.init(5); // bootEpoch = 5 (> 0, so the drainRecvQueue replay gate applies)
+
+  mesh.sendEnrollmentRequest();
+  mesh.sendEnrollmentRequest(); // next retry round
+
+  ASSERT_EQ(espNowSentPackets.size(), 2u);
+  const auto* m1 = reinterpret_cast<const mesh_message*>(espNowSentPackets[0].data.data());
+  const auto* m2 = reinterpret_cast<const mesh_message*>(espNowSentPackets[1].data.data());
+  EXPECT_EQ(m1->proto_version, PROTO_VERSION);
+  EXPECT_EQ(m1->epoch_num, 5u);
+  EXPECT_GT(m1->seq_num, 0u);
+  EXPECT_NE(m1->seq_num, m2->seq_num) << "each retry round must use a fresh seq";
 }
 
 TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {

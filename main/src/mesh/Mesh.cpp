@@ -755,6 +755,13 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
 
   // Send JOIN_ACK unicast to new node
   mesh_message ack = {};
+  // Stamp proto_version + (epoch, seq) so the existing ReplayCache dedups
+  // re-broadcast copies of this ACK (Task 9c R2): each relay node re-broadcasts a
+  // given JOIN_ACK at most once (the reflected copy is dropped by isReplay before
+  // processJoinAck), preventing combinatorial broadcast amplification.
+  ack.proto_version = PROTO_VERSION;
+  ack.epoch_num = replay.bootEpoch;
+  ack.seq_num = replay.nextSeq();
   ack.message_type = MESH_TYPE_JOIN_ACK;
   ack.data_type = adapter_types::UNKNOWN_ADAPTER;
   memcpy(ack.origin_mac_address, deviceMacAddress, 6);

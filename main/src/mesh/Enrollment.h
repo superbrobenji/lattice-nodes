@@ -8,7 +8,6 @@ namespace lattice {
 namespace mesh {
 
 using EnrollmentRelayFn = void (*)(const uint8_t* mac, const uint8_t* pubKey);
-using SendMessageFn = std::function<void(const uint8_t* target, const mesh_message&)>;
 // Returns false if the peer could not be registered (e.g. registry full).
 using RegisterPeerFn = std::function<bool(const uint8_t* mac, const uint8_t* pubKey32)>;
 
@@ -27,7 +26,8 @@ public:
   const uint8_t* getPublicKey() const { return devicePublicKey; }
   const uint8_t* getPrivateKey() const { return devicePrivateKey; }
 
-  void sendRequest(const uint8_t* deviceMac, SendMessageFn sendFn);
+  void sendRequest(const uint8_t* deviceMac, uint8_t protoVersion, uint32_t epochNum,
+                   uint16_t seqNum);
   void processRequest(const mesh_message& msg);
   void processJoinAck(const mesh_message& msg, const uint8_t* deviceMac, RegisterPeerFn registerFn);
   void enrollPeer(const uint8_t* mac, const uint8_t* pubKey32, RegisterPeerFn registerFn,

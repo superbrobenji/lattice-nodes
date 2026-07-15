@@ -217,9 +217,9 @@ public:
 
   // Enrollment protocol
   void sendEnrollmentRequest() {
-    enrollment.sendRequest(deviceMacAddress, [this](const uint8_t* t, const mesh_message& m) {
-      this->sendMessage(t, m);
-    });
+    // Pass proto_version + a fresh (epoch, seq) so ReplayCache can dedup relayed
+    // copies of this request while still allowing the deliberate 10s retry.
+    enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, replay.bootEpoch, replay.nextSeq());
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
   void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);

@@ -48,8 +48,17 @@ bool Enrollment::isEnrolled() const {
   return EepromManager::getInstance().loadEnrolledFlag();
 }
 
-void Enrollment::sendRequest(const uint8_t* deviceMac, SendMessageFn /*sendFn*/) {
+void Enrollment::sendRequest(const uint8_t* deviceMac, uint8_t protoVersion, uint32_t epochNum,
+                             uint16_t seqNum) {
   mesh_message msg = {};
+  // Stamp proto_version + (epoch, seq) so the existing ReplayCache dedups
+  // relayed/reflected copies of this request (Task 9c R1): a node broadcasts the
+  // SAME (origin, epoch, seq) once per retry round, so the master drops the copy
+  // it also hears relayed by a neighbour. A fresh seq on each 10s retry keeps
+  // legitimate re-requests from being suppressed.
+  msg.proto_version = protoVersion;
+  msg.epoch_num = epochNum;
+  msg.seq_num = seqNum;
   msg.message_type = MESH_TYPE_ENROLLMENT;
   msg.data_type = adapter_types::UNKNOWN_ADAPTER;
   memcpy(msg.origin_mac_address, deviceMac, 6);

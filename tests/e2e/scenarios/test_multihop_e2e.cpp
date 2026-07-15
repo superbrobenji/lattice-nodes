@@ -15,6 +15,48 @@
 //            instead of latching a single slot, so two nodes enrolling at once
 //            no longer starve each other.
 #include "harness/MeshSimTest.h"
+#include "src/adapter/Adapter.h"
+#include "mesh/Mesh.h"
+
+namespace {
+// Count enrollment-relay frames the hub received for a given origin MAC.
+size_t hubEnrollmentFrames(sim::FakeHub* hub, const uint8_t* mac) {
+  size_t n = 0;
+  for (const auto& m : hub->received)
+    if (m.message_type == MESH_TYPE_ENROLLMENT && memcmp(m.origin_mac_address, mac, 6) == 0)
+      ++n;
+  return n;
+}
+} // namespace
+
+// Task 9c R1: in a relay-path topology the master hears one logical enrollment
+// request both directly AND re-relayed by a neighbour, but must forward it to the
+// hub exactly once (ReplayCache dedups the relayed copy by origin/epoch/seq).
+// Both nodes are enrolled first so neither auto-retries — this isolates a SINGLE
+// request round deterministically (the existing triangle test cannot, since it
+// never counts hub enrollment frames).
+TEST_F(MeshSimTest, EnrollmentRequestNotDuplicatedToHubViaRelayPath) {
+  addMaster();
+  auto* a = addSensor(MAC_NODE_A);
+  auto* b = addSensor(MAC_NODE_B);
+  world.bus.link(master, a);
+  world.bus.link(master, b);
+  world.bus.link(a, b);
+  enroll(a);
+  enroll(b); // both enrolled -> no auto-retry broadcasts interfere below
+
+  size_t before = hubEnrollmentFrames(hub.get(), b->mac());
+  // Fire exactly ONE fresh enrollment request from b. The master hears it
+  // directly and also re-relayed by the (enrolled) neighbour a.
+  b->with([](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    m.sendEnrollmentRequest();
+    return 0;
+  });
+  runPolled(1500);
+  size_t after = hubEnrollmentFrames(hub.get(), b->mac());
+  EXPECT_EQ(after - before, 1u)
+      << "one logical enrollment request must reach the hub exactly once (relayed copy deduped)";
+}
 
 // Full sensor-out-of-master-range chain: leaf enrolls THROUGH the relay (Bug #5
 // uplink relay + JOIN_ACK re-broadcast) and its PIR event travels
