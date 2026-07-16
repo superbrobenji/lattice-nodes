@@ -91,7 +91,6 @@ TEST(SimNodeTest, MasterBootsAndBeacons) {
 }
 
 TEST(SimNodeTest, RebootPreservesEeprom) {
-  sim::SimClock clock;
   sim::SimNode master(masterCfg());
   master.boot();
   auto imageBefore = master.ctx().eepromData;
