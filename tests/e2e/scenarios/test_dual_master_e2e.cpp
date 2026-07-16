@@ -2,11 +2,12 @@
 //
 // In dual-master mode a node TOFU-learns a SECOND master's beacon as its
 // secondary, and (route-wise) adopts whichever master is currently beaconing.
-// The route-adoption failover works; full DATA failover does not, because a
-// node enrolls with — and is ECDH-keyed to — only ONE master, so it has no
-// encrypted link to the secondary. That keying gap is documented in
-// docs/design-gaps/multihop-data-uplink.md ("Related gap: dual-master data
-// failover"). See the DISABLED_ test below.
+// Both scenarios below are enabled: route-adoption failover works and is
+// tested. Full DATA failover does not work — a node enrolls with, and is
+// ECDH-keyed to, only ONE master, so it has no encrypted link to the secondary;
+// its post-failover uplink is dropped (quietly, since #9). That keying gap is
+// documented in docs/design-gaps/multihop-data-uplink.md ("Related gap:
+// dual-master data failover"); these tests assert route adoption, not delivery.
 #include "harness/MeshSimTest.h"
 #include "src/mesh/Mesh.h"
 #include "src/adapter/Adapter.h"
