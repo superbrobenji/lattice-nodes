@@ -108,19 +108,19 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
                         " (stub — no RGB driver)",
                     LogLevel::LOG_INFO);
       // Send OP_COMMAND_ACK back through the mesh
-      uint8_t ackData[12] = {0};
+      uint8_t ackData[64] = {0};
       ackData[0] = OP_COMMAND_ACK;
       ackData[1] = op; // echo the handled opcode as the command ID
       sendDataThroughMesh(adapter_types::SERIAL_ADAPTER, ackData);
     } else if (op == OP_LED_OFF) {
       Logger::logln("ADAPTER", "OP_LED_OFF (stub — no RGB driver)", LogLevel::LOG_INFO);
-      uint8_t ackData[12] = {0};
+      uint8_t ackData[64] = {0};
       ackData[0] = OP_COMMAND_ACK;
       ackData[1] = op;
       sendDataThroughMesh(adapter_types::SERIAL_ADAPTER, ackData);
     } else if (op == OP_LED_BLINK) {
       Logger::logln("ADAPTER", "OP_LED_BLINK (stub — no RGB driver)", LogLevel::LOG_INFO);
-      uint8_t ackData[12] = {0};
+      uint8_t ackData[64] = {0};
       ackData[0] = OP_COMMAND_ACK;
       ackData[1] = op;
       sendDataThroughMesh(adapter_types::SERIAL_ADAPTER, ackData);

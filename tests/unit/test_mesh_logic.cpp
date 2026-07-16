@@ -107,6 +107,7 @@ TEST_F(MeshLogicTest, BeaconRelay_SameEpochSeq_SuppressedRelay) {
   mesh.processMasterBeacon(makeBeacon(masterMac, 1, 5));
   // Relay should NOT fire — same epoch+seq
   EXPECT_FALSE(mesh.relayPending);
+  EXPECT_EQ(espNowSentPackets.size(), sendsBefore);
 }
 
 TEST_F(MeshLogicTest, BeaconRelay_NewerSeq_AllowsRelay) {

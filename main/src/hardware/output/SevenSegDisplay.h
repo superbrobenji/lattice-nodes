@@ -22,7 +22,7 @@ public:
   void showWithDP(int value, bool leadingZeros = false);
 
   // Low-level: write raw segment data (LSB=A, bit6=DP)
-  void setSegments(const uint8_t segs[4]);
+  void setSegments(const uint8_t (&segs)[4]);
 
   void clear();
 

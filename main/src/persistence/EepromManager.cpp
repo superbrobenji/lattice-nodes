@@ -538,7 +538,7 @@ lattice::config::TxPowerPreset EepromManager::loadTxPowerPreset() {
   if (!ensureInitialized())
     return lattice::config::DEFAULT_TX_POWER_PRESET;
   uint8_t val = EEPROM.read(EEPROM_ADDRESSES::TX_POWER_PRESET);
-  if (val > 2 || val == 0xFF)
+  if (val > 2) // covers the 0xFF erased-EEPROM sentinel
     return lattice::config::DEFAULT_TX_POWER_PRESET;
   return static_cast<lattice::config::TxPowerPreset>(val);
 }
