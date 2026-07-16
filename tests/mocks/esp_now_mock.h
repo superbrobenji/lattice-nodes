@@ -2,6 +2,10 @@
 #include <cstdint>
 #include <vector>
 #include <functional>
+// Real esp_now.h transitively pulls in wifi_tx_info_t / esp_now_send_status_t
+// (from esp_wifi_types.h) — mirror that here so esp_now_register_send_cb's
+// signature is available regardless of whether the caller included WiFi.h yet.
+#include "WiFi.h"
 
 #define ESP_OK    0
 #define ESP_FAIL -1
@@ -29,6 +33,12 @@ extern std::vector<EspNowSend>          espNowSentPackets;
 extern std::vector<esp_now_peer_info_t> espNowRegisteredPeers;
 extern bool                             espNowSendFails;
 
+// Registered esp_now recv callback — exposed so the e2e harness can swap it
+// per-node (each simulated node registers its own via esp_now_register_recv_cb).
+using EspNowRecvCb = void (*)(const esp_now_recv_info*, const uint8_t*, int);
+EspNowRecvCb getEspNowRecvCb();
+void         setEspNowRecvCb(EspNowRecvCb cb);
+
 // Reset between tests
 void resetEspNowMock();
 
@@ -39,6 +49,7 @@ void simulateReceive(const uint8_t* srcMac, const uint8_t* data, int len);
 esp_err_t esp_now_init();
 esp_err_t esp_now_deinit();
 esp_err_t esp_now_register_recv_cb(void (*cb)(const esp_now_recv_info*, const uint8_t*, int));
+esp_err_t esp_now_register_send_cb(void (*cb)(const wifi_tx_info_t*, esp_now_send_status_t));
 esp_err_t esp_now_send(const uint8_t* peer_addr, const uint8_t* data, size_t len);
 esp_err_t esp_now_add_peer(const esp_now_peer_info_t* peer);
 esp_err_t esp_now_del_peer(const uint8_t* peer_addr);

@@ -6,9 +6,20 @@
 #include "../logging/Logger.h"
 #include <esp_err.h>
 #include <cstdint>
+#ifdef UNIT_TEST
+#include <stdexcept>
+extern int lattice_test_errFailCount;
+#endif
 
 namespace lattice {
 namespace err {
+
+#ifdef UNIT_TEST
+class FatalError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+#endif
 
 // Helper: map legacy ErrorType to ErrorTypeDigit
 inline ::lattice::core::ErrorTypeDigit toDigit(utils::ErrorType t) {
@@ -34,6 +45,9 @@ inline ::lattice::core::ErrorTypeDigit toDigit(utils::ErrorType t) {
 // Primary fail overload using digit components
 inline bool fail(::lattice::core::ErrorTypeDigit t, ::lattice::core::ModuleDigit m, uint8_t sub,
                  const char* msg) {
+#ifdef UNIT_TEST
+  ++::lattice_test_errFailCount;
+#endif
   utils::Logger::logln("ERROR", msg, utils::LogLevel::LOG_ERROR);
   utils::ErrorCore::getInstance().signalError(t, m, sub, msg);
   return false;
@@ -47,11 +61,16 @@ inline bool fail(utils::ErrorType type, const char* msg) {
                                uint8_t sub, const char* msg) {
   utils::Logger::logln("FATAL", msg, utils::LogLevel::LOG_ERROR);
   utils::ErrorCore::getInstance().signalError(t, m, sub, msg);
+#ifdef UNIT_TEST
+  throw FatalError(msg ? msg : "fatal");
+#else
   while (true) {
   }
+#endif
 }
 [[noreturn]] inline void fatal(utils::ErrorType type, const char* msg) {
   fatal(toDigit(type), ::lattice::core::ModuleDigit::CORE, 0, msg);
+  // Unreachable, but keep for clarity
 }
 inline bool check(bool condition, utils::ErrorType type, const char* msg) {
   return condition ? true : fail(type, msg);

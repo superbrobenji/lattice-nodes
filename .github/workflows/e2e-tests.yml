@@ -1,0 +1,43 @@
+name: E2E Tests
+
+# Runs the multi-node mesh simulation suite (ctest label "e2e") on every PR to
+# main and on pushes to main/develop; also available on demand from the Actions
+# tab. Kept a separate job from unit-tests so the label split stays explicit and
+# either can be re-scoped independently.
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+
+      - name: Install CMake
+        run: sudo apt-get install -y cmake
+
+      - name: Configure
+        run: cmake -B tests/build tests/ -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        # Only the e2e target is needed; --parallel 2 keeps peak memory bounded
+        # on the 2-core runner (the full firmware + mbedtls compile is heavy).
+        run: cmake --build tests/build --target lattice_e2e --parallel 2
+
+      - name: Run e2e tests
+        run: ctest --test-dir tests/build --output-on-failure --label-regex e2e
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-test-results
+          path: tests/build/Testing/

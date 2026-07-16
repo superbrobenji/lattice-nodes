@@ -29,6 +29,25 @@ TEST(SerialFramingTest, EncodeDecodeRoundTrip) {
   EXPECT_EQ(memcmp(decoded.origin_mac_address, mockMac, 6), 0);
 }
 
+// Test that decode() round-trips the full 64-byte data field (proto v2), not just
+// the first 12 bytes (a stale proto-v1 cap left over from before data[12] -> data[64]).
+TEST(SerialFramingTest, EncodeDecodeRoundTrip_Full64ByteData) {
+  lattice::mesh::mesh_message original{};
+  original.message_type = MESH_TYPE_ADAPTER_DATA;
+  for (size_t i = 0; i < sizeof(original.data); ++i) {
+    original.data[i] = static_cast<uint8_t>(i + 1); // 1..64, all non-zero
+  }
+
+  uint8_t buf[256];
+  size_t len = SerialFraming::encode(original, buf, sizeof(buf));
+  ASSERT_GT(len, 0u);
+
+  lattice::mesh::mesh_message decoded{};
+  EXPECT_TRUE(SerialFraming::decode(buf, len, decoded));
+  EXPECT_EQ(memcmp(decoded.data, original.data, sizeof(original.data)), 0)
+      << "decode() must copy the full 64-byte data field, not truncate at 12 bytes";
+}
+
 // Test injectByte state machine: feed length-prefixed framed bytes one at a time
 TEST(SerialFramingTest, InjectByteReassemblesFrame) {
   lattice::mesh::mesh_message original{};

@@ -6,7 +6,10 @@ std::vector<EspNowSend>          espNowSentPackets;
 std::vector<esp_now_peer_info_t> espNowRegisteredPeers;
 bool                             espNowSendFails = false;
 
-static void (*recvCallback)(const esp_now_recv_info*, const uint8_t*, int) = nullptr;
+static EspNowRecvCb recvCallback = nullptr;
+
+EspNowRecvCb getEspNowRecvCb() { return recvCallback; }
+void         setEspNowRecvCb(EspNowRecvCb cb) { recvCallback = cb; }
 
 void resetEspNowMock() {
   espNowSentPackets.clear();
@@ -26,6 +29,13 @@ esp_err_t esp_now_deinit() { return ESP_OK; }
 
 esp_err_t esp_now_register_recv_cb(void (*cb)(const esp_now_recv_info*, const uint8_t*, int)) {
   recvCallback = cb;
+  return ESP_OK;
+}
+
+static void (*sendCallback)(const wifi_tx_info_t*, esp_now_send_status_t) = nullptr;
+
+esp_err_t esp_now_register_send_cb(void (*cb)(const wifi_tx_info_t*, esp_now_send_status_t)) {
+  sendCallback = cb;
   return ESP_OK;
 }
 

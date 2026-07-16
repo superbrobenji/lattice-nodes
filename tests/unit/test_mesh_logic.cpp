@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
+#include <array>
+#include <vector>
 #include "mesh/Mesh.h"
+#include "mesh/MeshCrypto.h"
 #include "esp_now_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
@@ -205,7 +208,8 @@ TEST_F(MeshLogicTest, SingleMaster_SecondBeaconFromNewMAC_Rejected_WhenMasterAli
   size_t sendsBefore = espNowSentPackets.size();
   mesh.processMasterBeacon(makeBeacon(unknownMac, 1, 2));
 
-  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, knownMac, 6), 0) << "Known master MAC must not change";
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, knownMac, 6), 0)
+      << "Known master MAC must not change";
   EXPECT_FALSE(mesh.enrollment.hasMasterMacSecondary);
   EXPECT_EQ(espNowSentPackets.size(), sendsBefore);
 }
@@ -266,9 +270,9 @@ TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
   EXPECT_EQ(espNowSentPackets.size(), 2u);
   for (const auto& pkt : espNowSentPackets) {
     const auto& sent = *reinterpret_cast<const mesh_message*>(pkt.data.data());
-    EXPECT_EQ(sent.hop_count, 2u);                              // incremented
+    EXPECT_EQ(sent.hop_count, 2u);                               // incremented
     EXPECT_EQ(memcmp(sent.target_mac_address, kPeer2Mac, 6), 0); // target preserved
-    EXPECT_EQ(memcmp(sent.last_hop_mac_address, kMyMac, 6), 0);   // lastHop = my MAC
+    EXPECT_EQ(memcmp(sent.last_hop_mac_address, kMyMac, 6), 0);  // lastHop = my MAC
   }
 }
 
@@ -371,7 +375,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysUplinkTowardMaster) {
 
   EXPECT_EQ(espNowSentPackets.size(), before + 1);
   const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
-  EXPECT_EQ(sent.hop_count, 2u);                                       // incremented
+  EXPECT_EQ(sent.hop_count, 2u);                                      // incremented
   EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0); // routed via nextHop
 }
 
@@ -477,6 +481,49 @@ TEST_F(AdapterDataRelayTest, BroadcastAdapterData_UsesBroadcastTargetMAC) {
   }
 }
 
+// Bug #5 regression: a non-master node that hears an ENROLLMENT broadcast from a
+// node further from the master must relay it one hop toward the master, so a leaf
+// out of direct RF range of the master can still enroll.
+TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysEnrollmentTowardMaster) {
+  Mesh mesh = makeIntermediateNode();
+
+  mesh_message req{};
+  req.message_type = MESH_TYPE_ENROLLMENT;
+  req.data_type = adapter_types::UNKNOWN_ADAPTER;
+  memcpy(req.origin_mac_address, kSensorMac, 6); // originated by a distant leaf
+  memset(req.target_mac_address, 0xFF, 6);       // enrollment is broadcast
+  memcpy(req.last_hop_mac_address, kSensorMac, 6);
+  req.hop_count = 0;
+
+  size_t before = espNowSentPackets.size();
+  mesh.relayEnrollmentUplink(req);
+
+  ASSERT_EQ(espNowSentPackets.size(), before + 1) << "must relay one hop toward master";
+  EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0)
+      << "relay must be routed to the next hop toward master";
+  const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
+  EXPECT_EQ(sent.message_type, MESH_TYPE_ENROLLMENT);
+  EXPECT_EQ(sent.hop_count, 1u) << "hop_count incremented on relay";
+  EXPECT_EQ(memcmp(sent.origin_mac_address, kSensorMac, 6), 0) << "origin preserved";
+  EXPECT_EQ(memcmp(sent.last_hop_mac_address, kMyMac, 6), 0) << "last hop stamped as relay";
+}
+
+TEST_F(AdapterDataRelayTest, IntermediateNode_DoesNotRelayOwnEnrollment) {
+  Mesh mesh = makeIntermediateNode();
+
+  mesh_message req{};
+  req.message_type = MESH_TYPE_ENROLLMENT;
+  memcpy(req.origin_mac_address, kMyMac, 6); // our OWN outbound request echoed back
+  memset(req.target_mac_address, 0xFF, 6);
+  memcpy(req.last_hop_mac_address, kMyMac, 6);
+  req.hop_count = 0;
+
+  size_t before = espNowSentPackets.size();
+  mesh.relayEnrollmentUplink(req);
+
+  EXPECT_EQ(espNowSentPackets.size(), before) << "must not relay our own request";
+}
+
 // ─── processJoinAck: relay ───────────────────────────────────────────────────
 
 class JoinAckRelayTest : public ::testing::Test {
@@ -531,11 +578,29 @@ TEST_F(JoinAckRelayTest, RelaysJoinAck_WhenNotAddressedToSelf) {
   size_t before = espNowSentPackets.size();
   mesh.processJoinAck(msg);
 
-  EXPECT_GT(espNowSentPackets.size(), before); // relayed to kPeerMac
-  EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kPeerMac, 6), 0);
+  // Task 9b: re-broadcast (not unicast-to-peers) so the still-unenrolled distant
+  // node — which is not yet a registered unicast peer — can hear the ACK.
+  ASSERT_EQ(espNowSentPackets.size(), before + 1);
+  static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kBroadcast, 6), 0)
+      << "JOIN_ACK relay must be broadcast";
   const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
   EXPECT_EQ(sent.hop_count, 2u);
   EXPECT_EQ(memcmp(sent.target_mac_address, kDistantNode, 6), 0); // target preserved
+  EXPECT_EQ(memcmp(sent.last_hop_mac_address, kMyMac, 6), 0);     // last hop stamped as us
+}
+
+TEST_F(JoinAckRelayTest, DoesNotRelayJoinAck_WeOriginated) {
+  // Loop safety: a node (a master) must never re-broadcast a JOIN_ACK it emitted.
+  Mesh mesh = makeIntermediateNode();
+
+  auto msg = makeJoinAck(kDistantNode);
+  memcpy(msg.origin_mac_address, kMyMac, 6); // we originated it
+
+  size_t before = espNowSentPackets.size();
+  mesh.processJoinAck(msg);
+
+  EXPECT_EQ(espNowSentPackets.size(), before) << "must not relay our own JOIN_ACK";
 }
 
 TEST_F(JoinAckRelayTest, DoesNotRelayJoinAck_WhenAddressedToSelf) {
@@ -551,6 +616,159 @@ TEST_F(JoinAckRelayTest, DoesNotRelayJoinAck_WhenAddressedToSelf) {
   mesh.processJoinAck(msg);
 
   EXPECT_EQ(espNowSentPackets.size(), before); // no relay
+}
+
+TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
+  // An accepted JOIN_ACK must add the approving master (origin MAC + the
+  // master public key carried in enrollment_public_key) to the node's own
+  // PeerRegistry — findNextHopToMaster() can only route through registry
+  // entries, so without this the enrolled node has no uplink route at all.
+  Mesh mesh = makeIntermediateNode();
+  ASSERT_EQ(mesh.peers.find(kMasterMac), nullptr) << "precondition: master not yet a peer";
+
+  // Real Curve25519 keypairs: registration derives an ESP-NOW LMK via ECDH,
+  // which rejects a zeroed private key / arbitrary public-key bytes.
+  uint8_t nodePriv[32], nodePub[32], masterPriv[32], masterKey[32];
+  lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
+  lattice::mesh::crypto::generateKeypair(masterPriv, masterKey);
+  memcpy(mesh.enrollment.devicePrivateKey, nodePriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, nodePub, 32);
+
+  auto msg = makeJoinAck(kMyMac);
+  memcpy(msg.data, nodePub, 4); // fingerprint = first 4 bytes of node pubkey
+  memcpy(msg.enrollment_public_key, masterKey, 32);
+
+  mesh.processJoinAck(msg);
+
+  PeerInfo* master = mesh.peers.find(kMasterMac);
+  ASSERT_NE(master, nullptr) << "master must be registered in the node's PeerRegistry";
+  EXPECT_EQ(memcmp(master->publicKey, masterKey, 32), 0)
+      << "master's public key from the JOIN_ACK must be stored";
+
+  // And the route must actually resolve once a beacon establishes the topology
+  // (nextHop = master, one hop) — the end goal of registering the master.
+  memcpy(mesh.currentMaster.mac, kMasterMac, 6);
+  memcpy(mesh.currentMaster.nextHop, kMasterMac, 6);
+  mesh.currentMaster.distance = 1;
+  EXPECT_NE(mesh.findNextHopToMaster(), nullptr)
+      << "uplink route must resolve through the newly registered master peer";
+}
+
+// ─── JOIN_ACK forgery resistance ─────────────────────────────────────────────
+// JOIN_ACKs travel over the unencrypted broadcast peer, and everything a forger
+// needs is observable over the air: the victim's pubkey prefix (broadcast in its
+// own ENROLLMENT requests) and the master's MAC + pubkey (broadcast in every
+// legitimate JOIN_ACK). The fingerprint check alone therefore does NOT
+// authenticate the sender — the registration path must additionally be gated by
+// TOFU origin and must never replace established key material.
+
+class JoinAckForgeryTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    EEPROM.reset();
+    resetMillis();
+    resetEspNowMock();
+    lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
+    lattice::mesh::crypto::generateKeypair(masterPriv, masterKey);
+    lattice::mesh::crypto::generateKeypair(attackerPriv, attackerKey);
+  }
+
+  static constexpr uint8_t kMyMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  static constexpr uint8_t kAttackerMac[6] = {0xBA, 0xDB, 0xAD, 0xBA, 0xDB, 0xAD};
+
+  uint8_t nodePriv[32], nodePub[32];
+  uint8_t masterPriv[32], masterKey[32];
+  uint8_t attackerPriv[32], attackerKey[32];
+
+  // A node that already trusts kMasterMac: TOFU MAC recorded, master registered
+  // as a peer with an established (non-zero) key.
+  Mesh makeEnrolledNode() {
+    Mesh mesh;
+    memcpy(mesh.deviceMacAddress, kMyMac, 6);
+    mesh.isMaster = false;
+    memcpy(mesh.enrollment.devicePrivateKey, nodePriv, 32);
+    memcpy(mesh.enrollment.devicePublicKey, nodePub, 32);
+    mesh.enrollment.hasMasterMac = true;
+    memcpy(mesh.enrollment.knownMasterMac, kMasterMac, 6);
+    PeerInfo master{};
+    memcpy(master.mac, kMasterMac, 6);
+    memcpy(master.publicKey, masterKey, 32);
+    master.lastSeenMillis = 0;
+    mesh.peers.append(master);
+    return mesh;
+  }
+
+  // Forged JOIN_ACK addressed to the victim, carrying the victim's (observable)
+  // fingerprint and attacker-chosen key material.
+  mesh_message makeForgedAck(const uint8_t origin[6]) {
+    mesh_message m{};
+    m.proto_version = 1;
+    m.message_type = MESH_TYPE_JOIN_ACK;
+    m.data_type = adapter_types::UNKNOWN_ADAPTER;
+    memcpy(m.origin_mac_address, origin, 6);
+    memcpy(m.target_mac_address, kMyMac, 6);
+    memcpy(m.last_hop_mac_address, origin, 6);
+    m.hop_count = 1;
+    m.epoch_num = 1;
+    m.seq_num = 1;
+    memcpy(m.data, nodePub, 4); // victim fingerprint — observable over the air
+    memcpy(m.enrollment_public_key, attackerKey, 32);
+    return m;
+  }
+};
+
+constexpr uint8_t JoinAckForgeryTest::kMyMac[];
+constexpr uint8_t JoinAckForgeryTest::kMasterMac[];
+constexpr uint8_t JoinAckForgeryTest::kAttackerMac[];
+
+TEST_F(JoinAckForgeryTest, UnexpectedOrigin_DroppedEntirely) {
+  Mesh mesh = makeEnrolledNode();
+
+  mesh.processJoinAck(makeForgedAck(kAttackerMac));
+
+  EXPECT_EQ(mesh.peers.find(kAttackerMac), nullptr)
+      << "a JOIN_ACK from a non-master origin must not register that origin as a peer";
+  PeerInfo* master = mesh.peers.find(kMasterMac);
+  ASSERT_NE(master, nullptr);
+  EXPECT_EQ(memcmp(master->publicKey, masterKey, 32), 0)
+      << "known master's established key must be untouched";
+  EXPECT_FALSE(mesh.enrollment.isEnrolled())
+      << "a JOIN_ACK from an unexpected origin must not mark the node enrolled";
+  EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, kMasterMac, 6), 0)
+      << "TOFU master MAC must be untouched";
+}
+
+TEST_F(JoinAckForgeryTest, SpoofedMasterOrigin_DoesNotRekeyEstablishedMasterPeer) {
+  Mesh mesh = makeEnrolledNode();
+
+  // Attacker spoofs the (observable) known-master MAC as origin, supplying its
+  // own key: the origin gate alone cannot catch this — the registration path
+  // must refuse to replace already-established key material.
+  mesh.processJoinAck(makeForgedAck(kMasterMac));
+
+  PeerInfo* master = mesh.peers.find(kMasterMac);
+  ASSERT_NE(master, nullptr);
+  EXPECT_EQ(memcmp(master->publicKey, masterKey, 32), 0)
+      << "an over-the-air JOIN_ACK must never re-key an established master peer";
+}
+
+TEST_F(JoinAckForgeryTest, MasterNode_IgnoresJoinAckAddressedToItself) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = true;
+  memcpy(mesh.enrollment.devicePrivateKey, nodePriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, nodePub, 32);
+  // A fresh master has no TOFU master MAC — without an isMaster guard a forged
+  // ACK could TOFU-poison it and register attacker key material.
+
+  mesh.processJoinAck(makeForgedAck(kAttackerMac));
+
+  EXPECT_EQ(mesh.peers.find(kAttackerMac), nullptr)
+      << "a master must not peer-register from a JOIN_ACK addressed to itself";
+  EXPECT_FALSE(mesh.enrollment.hasMasterMac)
+      << "a master must not TOFU-learn a 'master' from a forged JOIN_ACK";
+  EXPECT_FALSE(mesh.enrollment.isEnrolled()) << "masters never enroll via JOIN_ACK";
 }
 
 // ─── drainRecvQueue: replay protection ───────────────────────────────────────
@@ -604,6 +822,72 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   EXPECT_EQ(deliveredCount, 1); // callback not invoked again
 }
 
+// Task 9c R1: an enrollment request seen twice within one drain window (e.g. the
+// direct broadcast plus a neighbour's relayed copy, same origin/epoch/seq) must
+// be forwarded to the server only once — the master enqueues one pending relay.
+TEST_F(DrainRecvQueueTest, DropsReplayedEnrollmentRequestBeforeRelay) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = true;
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ENROLLMENT;
+  memcpy(msg.origin_mac_address, kOriginMac, 6);
+  msg.epoch_num = 1;
+  msg.seq_num = 7;
+
+  injectAndDrain(mesh, msg); // first: enqueued for relay-to-server
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 1u);
+  injectAndDrain(mesh, msg); // duplicate (same epoch/seq): dropped before processRequest
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 1u) << "duplicate must not enqueue a second relay";
+}
+
+// Task 9c R1 (retry preservation): a legitimate re-request in a LATER retry round
+// carries a fresh seq, so dedup must NOT suppress it — it enqueues again.
+TEST_F(DrainRecvQueueTest, ForwardsEnrollmentRetryWithFreshSeq) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = true;
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ENROLLMENT;
+  memcpy(msg.origin_mac_address, kOriginMac, 6);
+  msg.epoch_num = 1;
+
+  msg.seq_num = 7;
+  injectAndDrain(mesh, msg);
+  msg.seq_num = 8; // next 10s retry round — distinct seq
+  injectAndDrain(mesh, msg);
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 2u) << "retry must still be forwarded";
+}
+
+// Task 9c R2: a node re-broadcasts a given JOIN_ACK at most once. A reflected copy
+// (same origin/epoch/seq) is dropped by ReplayCache before processJoinAck, so no
+// second broadcast — preventing combinatorial breadth amplification.
+TEST_F(DrainRecvQueueTest, DoesNotReBroadcastReplayedJoinAck) {
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  static constexpr uint8_t kDistant[6] = {0x99, 0x88, 0x77, 0x66, 0x55, 0x44};
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = false;
+
+  mesh_message ack{};
+  ack.proto_version = PROTO_VERSION;
+  ack.message_type = MESH_TYPE_JOIN_ACK;
+  memcpy(ack.origin_mac_address, kMasterMac, 6); // originated by master, not us
+  memcpy(ack.target_mac_address, kDistant, 6);   // addressed elsewhere -> relay branch
+  ack.hop_count = 1;
+  ack.epoch_num = 1;
+  ack.seq_num = 9;
+
+  size_t before = espNowSentPackets.size();
+  injectAndDrain(mesh, ack); // first: re-broadcast once
+  injectAndDrain(mesh, ack); // reflected duplicate: dropped before processJoinAck
+  EXPECT_EQ(espNowSentPackets.size(), before + 1) << "same JOIN_ACK re-broadcast at most once";
+}
+
 // ─── EnrollmentTest ──────────────────────────────────────────────────────────
 
 class EnrollmentTest : public ::testing::Test {
@@ -636,6 +920,25 @@ TEST_F(EnrollmentTest, SendsSingleEspNowMessage) {
       << "Full public key must be present in a single message";
 }
 
+// Task 9c R1: the enrollment request must carry proto_version + (epoch, seq) so
+// the master's ReplayCache dedups relayed copies; and each retry round must use a
+// FRESH seq so a legitimate re-request is not permanently suppressed.
+TEST_F(EnrollmentTest, EnrollmentRequestCarriesReplayFieldsWithFreshSeqPerRetry) {
+  Mesh mesh;
+  mesh.replay.init(5); // bootEpoch = 5 (> 0, so the drainRecvQueue replay gate applies)
+
+  mesh.sendEnrollmentRequest();
+  mesh.sendEnrollmentRequest(); // next retry round
+
+  ASSERT_EQ(espNowSentPackets.size(), 2u);
+  const auto* m1 = reinterpret_cast<const mesh_message*>(espNowSentPackets[0].data.data());
+  const auto* m2 = reinterpret_cast<const mesh_message*>(espNowSentPackets[1].data.data());
+  EXPECT_EQ(m1->proto_version, PROTO_VERSION);
+  EXPECT_EQ(m1->epoch_num, 5u);
+  EXPECT_GT(m1->seq_num, 0u);
+  EXPECT_NE(m1->seq_num, m2->seq_num) << "each retry round must use a fresh seq";
+}
+
 TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
   Mesh mesh;
   mesh.isMaster = true;
@@ -652,9 +955,10 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
 
   mesh.enrollment.processRequest(msg);
 
-  EXPECT_TRUE(mesh.enrollment._pendingEnrollmentRelay);
-  EXPECT_EQ(memcmp(mesh.enrollment._pendingEnrollmentMac, kMac, 6), 0);
-  EXPECT_EQ(memcmp(mesh.enrollment._pendingEnrollmentPubKey, kKey, 32), 0)
+  ASSERT_EQ(mesh.enrollment._pendingRelayCount, 1u);
+  const auto& e = mesh.enrollment._pendingRelayQueue[mesh.enrollment._pendingRelayHead];
+  EXPECT_EQ(memcmp(e.mac, kMac, 6), 0);
+  EXPECT_EQ(memcmp(e.pubKey, kKey, 32), 0)
       << "Full 32-byte key must be copied without chunk reassembly";
 }
 
@@ -669,7 +973,7 @@ static void captureRelayFn(const uint8_t mac[6], const uint8_t pubKey[32]) {
 }
 
 class EnrollmentRelayCallbackTest : public ::testing::Test {
- protected:
+protected:
   void SetUp() override {
     g_capturedMac = nullptr;
     g_capturedKey = nullptr;
@@ -683,19 +987,16 @@ TEST_F(EnrollmentRelayCallbackTest, DrainCallsRegisteredCallback) {
   mesh.setEnrollmentRelayFn(captureRelayFn);
 
   static constexpr uint8_t kMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
-  static constexpr uint8_t kKey[32] = {
-      0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-      0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
-      0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-      0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
+  static constexpr uint8_t kKey[32] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                                       0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+                                       0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                                       0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
-  memcpy(mesh.enrollment._pendingEnrollmentMac, kMac, 6);
-  memcpy(mesh.enrollment._pendingEnrollmentPubKey, kKey, 32);
-  mesh.enrollment._pendingEnrollmentRelay = true;
+  mesh.enrollment.setPendingRelay(kMac, kKey);
 
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_FALSE(mesh.enrollment._pendingEnrollmentRelay) << "flag must clear after drain";
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u) << "queue must be empty after drain";
   ASSERT_NE(g_capturedMac, nullptr) << "callback was not called";
   EXPECT_EQ(memcmp(g_capturedMac, kMac, 6), 0) << "wrong MAC passed to callback";
   EXPECT_EQ(memcmp(g_capturedKey, kKey, 32), 0) << "wrong pubKey passed to callback";
@@ -706,9 +1007,50 @@ TEST_F(EnrollmentRelayCallbackTest, DrainWithNoCallbackClearsFlag) {
   mesh.isMaster = true;
   // No callback registered.
 
-  mesh.enrollment._pendingEnrollmentRelay = true;
+  static constexpr uint8_t kMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  static constexpr uint8_t kKey[32] = {0};
+  mesh.enrollment.setPendingRelay(kMac, kKey);
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_FALSE(mesh.enrollment._pendingEnrollmentRelay) << "flag must clear even with no callback";
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u) << "queue must clear even with no callback";
   EXPECT_EQ(g_capturedMac, nullptr) << "callback must not fire when unregistered";
+}
+
+// Bug #6 regression: two enrollment requests queued before a single drain must
+// BOTH be relayed. The old single-slot latch dropped the first (only the last
+// survived), starving a concurrently-enrolling node.
+TEST_F(EnrollmentRelayCallbackTest, QueueHoldsAndDrainsMultipleConcurrentRelays) {
+  Mesh mesh;
+  mesh.isMaster = true;
+
+  static std::vector<std::array<uint8_t, 6>> drained;
+  drained.clear();
+  mesh.setEnrollmentRelayFn(
+      [](const uint8_t mac[6], const uint8_t /*pubKey*/[32]) {
+        std::array<uint8_t, 6> m{};
+        memcpy(m.data(), mac, 6);
+        drained.push_back(m);
+      });
+
+  static constexpr uint8_t kMacA[6] = {0xA0, 0, 0, 0, 0, 0x0A};
+  static constexpr uint8_t kMacB[6] = {0xB0, 0, 0, 0, 0, 0x0B};
+  uint8_t key[32] = {0x11};
+
+  mesh_message reqA{};
+  reqA.message_type = MESH_TYPE_ENROLLMENT;
+  memcpy(reqA.origin_mac_address, kMacA, 6);
+  memcpy(reqA.enrollment_public_key, key, 32);
+  mesh_message reqB = reqA;
+  memcpy(reqB.origin_mac_address, kMacB, 6);
+
+  mesh.enrollment.processRequest(reqA);
+  mesh.enrollment.processRequest(reqB); // second request must NOT overwrite the first
+  ASSERT_EQ(mesh.enrollment._pendingRelayCount, 2u);
+
+  mesh.enrollment.drainPendingRelay();
+
+  ASSERT_EQ(drained.size(), 2u) << "both queued relays must fire (Bug #6 starvation)";
+  EXPECT_EQ(memcmp(drained[0].data(), kMacA, 6), 0) << "FIFO order: A first";
+  EXPECT_EQ(memcmp(drained[1].data(), kMacB, 6), 0) << "FIFO order: B second";
+  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u);
 }

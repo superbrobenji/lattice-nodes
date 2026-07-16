@@ -131,9 +131,16 @@ void PirAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& /*message*/) 
 
 #if SIMULATE_MODE
 void PirAdapter::simulateMotion() {
-  // Directly signal motion without requiring hardware interrupt
+  // Drive the SAME path the hardware interrupt would (detectMotionTrampoline ->
+  // detectMotion) instead of poking the sensor directly. detectMotion() honours
+  // the _interruptEnabled gate and detaches the interrupt -- which is precisely
+  // how the device enforces its post-trigger cooldown: while _timerActive, the
+  // interrupt stays detached (re-armed only by loop() once _cooldownSeconds has
+  // elapsed), so a real PIR firing again mid-cooldown is physically ignored.
+  // Calling _pir.signalMotion() directly bypassed that gate and let a simulated
+  // re-trigger inject motion the hardware never could, masking the cooldown.
   Logger::logln("PIR_Adapter", "SIM: Injecting fake PIR motion event", LogLevel::LOG_WARN);
-  _pir.signalMotion();
+  detectMotion();
 }
 #endif
 

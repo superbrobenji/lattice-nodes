@@ -177,6 +177,13 @@ public:
 
   // Destructor
   ~EepromManager();
+
+#ifdef UNIT_TEST
+  // Test-only accessor: exposes internal init state so the e2e harness can verify
+  // a fresh NodeContext's swapIn restores pristine singleton state rather than
+  // silently inheriting a previous node's initialized flag.
+  bool isInitializedForTest() const { return isInitialized; }
+#endif
 };
 
 } // namespace utils

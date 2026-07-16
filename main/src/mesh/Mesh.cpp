@@ -253,6 +253,8 @@ void Mesh::drainRecvQueue() {
     case MESH_TYPE_ENROLLMENT:
       if (isMaster)
         enrollment.processRequest(msg);
+      else
+        relayEnrollmentUplink(msg);
       break;
     case MESH_TYPE_JOIN_ACK:
       processJoinAck(msg);
@@ -326,11 +328,24 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
       lattice::utils::MacAddress(nextHop->mac) != lattice::utils::MacAddress(deviceMacAddress)) {
     sendMessage(nextHop->mac, msg);
   } else {
+    // No route to master is a routine, self-healing transient: a node that has
+    // just booted (or whose master went stale) legitimately has no next hop
+    // until it hears the next beacon. Drop the frame quietly rather than
+    // escalating to err::fail — escalation here drives the error LED and
+    // reboot-reason tracking, and turns every such gap (see
+    // docs/design-gaps/multihop-data-uplink.md) into an error loop instead of a
+    // silent drop. The upstream sender retries on its own timer.
     Logger::logln("MESH", "No next hop to master — message dropped. Master timeout or unreachable.",
                   LogLevel::LOG_WARN);
-    lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 8,
-                       "MESH: message dropped, no route to master");
   }
+}
+
+void Mesh::transmitDispatch(const adapter_types type, const uint8_t* data, bool selfOriginated) {
+  if (isMaster) {
+    broadcastAdapterData(type, data, selfOriginated);
+    return;
+  }
+  transmitCore(type, data, MESH_TYPE_ADAPTER_DATA, nullptr);
 }
 
 void Mesh::transmit(const adapter_types type, const uint8_t* data) {
@@ -338,11 +353,15 @@ void Mesh::transmit(const adapter_types type, const uint8_t* data) {
     Logger::logln("MESH", "transmit() called before init", LogLevel::LOG_WARN);
     return;
   }
-  if (instance->isMaster) {
-    instance->broadcastAdapterData(type, data);
+  instance->transmitDispatch(type, data, false);
+}
+
+void Mesh::transmitSelfOriginated(const adapter_types type, const uint8_t* data) {
+  if (!instance) {
+    Logger::logln("MESH", "transmitSelfOriginated() called before init", LogLevel::LOG_WARN);
     return;
   }
-  instance->transmitCore(type, data, MESH_TYPE_ADAPTER_DATA, nullptr);
+  instance->transmitDispatch(type, data, true);
 }
 
 void Mesh::linkDataRecvCallback(std::function<void(const mesh_message&)> recvCallback) {
@@ -419,10 +438,13 @@ bool Mesh::meshKeyIsSet() const {
   return false;
 }
 
-void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data) {
+void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally) {
   mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
   memset(msg.target_mac_address, 0xFF, 6); // broadcast indicator — relayed by intermediate nodes
   broadcastToAllPeers(msg);
+  if (deliverLocally && externalRecvCallback) {
+    externalRecvCallback(msg);
+  }
 }
 
 void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t* data) {
@@ -463,6 +485,12 @@ void Mesh::checkMasterTimeout() {
 // ---------- Tiger Style helper implementations ----------
 
 void Mesh::processMasterBeacon(const mesh_message& msg) {
+  // Guard: ignore echoes of our own beacon relayed back by neighbours (relays are
+  // broadcast, so the originating master hears them too). Without this the master
+  // would TOFU-learn itself as knownMasterMac and record a bogus route to itself.
+  if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
+    return;
+
   // Guard: drop beacon if hop count would overflow uint8_t or exceed limit
   if (msg.hop_count >= lattice::config::MAX_HOPS) {
     Logger::logln("MESH", "Beacon hop count exceeded MAX_HOPS, dropping relay", LogLevel::LOG_WARN);
@@ -617,13 +645,59 @@ void Mesh::relayDownlink(const mesh_message& msg) {
   }
 }
 
+void Mesh::relayEnrollmentUplink(const mesh_message& msg) {
+  // Never relay our own outbound request echoed back to us over the air.
+  if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
+    return;
+  // Bound relay depth (mirrors the ADAPTER_DATA uplink guard).
+  if (msg.hop_count >= lattice::config::MAX_HOPS)
+    return;
+  // Can only relay toward the master if we actually have a route to it.
+  if (!findNextHopToMaster())
+    return;
+  // Relay one hop toward the master, exactly like the ADAPTER_DATA uplink path:
+  // bump hop_count, stamp ourselves as last hop, and route via findNextHopToMaster
+  // (transmitCore does NOT rewrite target for non-ADAPTER_DATA types, so the
+  // request's broadcast target is preserved for the master to process).
+  mesh_message relay = msg;
+  relay.hop_count++;
+  memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+  transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ENROLLMENT,
+               &relay);
+}
+
 void Mesh::processJoinAck(const mesh_message& msg) {
-  // Relay outward if not addressed to us (multi-hop enrollment)
+  // Relay outward if not addressed to us (multi-hop enrollment, Task 9b Bug #5
+  // downlink counterpart). The target node is still mid-enrollment and is NOT
+  // yet a registered unicast peer of ours, so — exactly as the master does when
+  // it first emits the ACK (see enrollPeer: broadcast via the FF:FF peer) — we
+  // RE-BROADCAST rather than unicast to known peers via relayDownlink(). Loop
+  // safety: never re-broadcast a JOIN_ACK we originated (only masters originate
+  // them, so this stops the master looping on its own echo), and bound depth by
+  // MAX_HOPS as a backstop for cyclic topologies.
   if (memcmp(msg.target_mac_address, deviceMacAddress, 6) != 0) {
-    relayDownlink(msg);
+    if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
+      return;
+    if (msg.hop_count >= lattice::config::MAX_HOPS)
+      return;
+    mesh_message relay = msg;
+    relay.hop_count++;
+    memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+    static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&relay), sizeof(relay));
     return;
   }
-  enrollment.processJoinAck(msg, deviceMacAddress, nullptr);
+  // Masters issue JOIN_ACKs; they never enroll via one. Without this guard a
+  // forged ACK addressed to the master (fingerprint is observable over the
+  // air) could TOFU-poison it and register attacker key material.
+  if (isMaster) {
+    Logger::logln("MESH", "JOIN_ACK addressed to master — ignoring", LogLevel::LOG_WARN);
+    return;
+  }
+  enrollment.processJoinAck(msg, deviceMacAddress,
+                            [this](const uint8_t* mac, const uint8_t* pubKey32) {
+                              return registerPeerWithKey(mac, pubKey32, /*allowRekey=*/false);
+                            });
 }
 
 void Mesh::addPeer(const uint8_t* mac) {
@@ -636,29 +710,63 @@ void Mesh::addPeer(const uint8_t* mac) {
   }
 }
 
-void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
+bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, bool allowRekey) {
   PeerInfo* p = peers.find(mac);
   if (p) {
+    if (!allowRekey) {
+      // Established (non-zero) key material must never be replaced from this
+      // path — an over-the-air JOIN_ACK with a spoofed trusted origin would
+      // otherwise re-key the link to attacker-chosen material. An all-zero
+      // stored key is a pre-enrollment placeholder (e.g. DEFAULT_PEERS), not
+      // an established key, so upgrading it is allowed.
+      bool keyEstablished = false;
+      for (int i = 0; i < 32; ++i) {
+        if (p->publicKey[i] != 0) {
+          keyEstablished = true;
+          break;
+        }
+      }
+      if (keyEstablished) {
+        Logger::logln("MESH", "Peer already registered — keeping established key",
+                      LogLevel::LOG_DEBUG);
+        p->lastSeenMillis = millis();
+        return true; // already routable; nothing to change
+      }
+    }
     // Update existing peer's public key
     memcpy(p->publicKey, publicKey32, 32);
+    p->lastSeenMillis = millis();
   } else {
     if (peers.peerCount >= MAX_PEERS) {
       Logger::logln("MESH", "Peer list full, cannot enroll", LogLevel::LOG_WARN);
-      return;
+      return false;
     }
     PeerInfo newPeer;
     memcpy(newPeer.mac, mac, 6);
     memcpy(newPeer.publicKey, publicKey32, 32);
-    newPeer.lastSeenMillis = 0;
+    newPeer.lastSeenMillis = millis();
     peers.append(newPeer);
   }
   peers.saveToEEPROM();
 
   // Re-register with encryption now that we have the public key (mbedtls-heavy via Enrollment)
   enrollment.enrollPeer(mac, publicKey32, nullptr, _dualMasterMode);
+  return true;
+}
+
+void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
+  if (!registerPeerWithKey(mac, publicKey32, /*allowRekey=*/true))
+    return; // registry full — do not ACK an enrollment we could not record
 
   // Send JOIN_ACK unicast to new node
   mesh_message ack = {};
+  // Stamp proto_version + (epoch, seq) so the existing ReplayCache dedups
+  // re-broadcast copies of this ACK (Task 9c R2): each relay node re-broadcasts a
+  // given JOIN_ACK at most once (the reflected copy is dropped by isReplay before
+  // processJoinAck), preventing combinatorial broadcast amplification.
+  ack.proto_version = PROTO_VERSION;
+  ack.epoch_num = replay.bootEpoch;
+  ack.seq_num = replay.nextSeq();
   ack.message_type = MESH_TYPE_JOIN_ACK;
   ack.data_type = adapter_types::UNKNOWN_ADAPTER;
   memcpy(ack.origin_mac_address, deviceMacAddress, 6);
@@ -667,6 +775,9 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
   ack.hop_count = 0;
   // Include first 4 bytes of approved node's pubkey as fingerprint
   memcpy(ack.data, publicKey32, 4);
+  // Include OUR public key so the enrolling node can register this master as
+  // an encrypted, routable peer in its own registry (see Enrollment::processJoinAck).
+  memcpy(ack.enrollment_public_key, enrollment.getPublicKey(), 32);
   // Broadcast via the registered FF:FF:… peer so the new node receives the ACK
   // even before it is individually registered as a unicast peer.
   static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -741,10 +852,19 @@ void Mesh::loop() {
 
   // Deferred beacon relay with jitter: dispatch once the per-node jitter window expires.
   // This spreads relay transmissions across all non-master nodes to avoid collision bursts.
+  // Beacons propagate AWAY from the master for route discovery, so the relay must be a
+  // broadcast: routing it through transmitCore()/findNextHopToMaster() sent it back toward
+  // the master (backwards — nodes 2+ hops out never heard it) and raised a spurious
+  // err::fail every beacon interval on any node without a route (e.g. pre-enrollment).
   if (relayPending && millis() >= relayPendingAt) {
     relayPending = false;
-    transmitCore(static_cast<adapter_types>(relayPendingMsg.data_type), relayPendingMsg.data,
-                 MESH_TYPE_MASTER_BEACON, &relayPendingMsg);
+    static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_err_t res = esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&relayPendingMsg),
+                                 sizeof(relayPendingMsg));
+    if (res != ESP_OK) {
+      Logger::logln("MESH", String("Beacon relay broadcast failed: ") + esp_err_to_name(res),
+                    LogLevel::LOG_WARN);
+    }
   }
 
   // Master beacon — broadcastMasterBeacon() guards timing internally via lastBeaconMillis

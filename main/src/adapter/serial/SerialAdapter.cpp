@@ -46,7 +46,11 @@ void SerialAdapter::sendHealthReport() {
                 LogLevel::LOG_DEBUG);
 
   if (lattice::mesh::Mesh::transmit) {
-    lattice::mesh::Mesh::transmit(adapter_types::SERIAL_ADAPTER, data);
+    // This report is ABOUT this node, so use transmitSelfOriginated(): on a
+    // master node, plain transmit() would only broadcast it to mesh peers
+    // (who don't need it) and never deliver it to the master's own serial
+    // port — the only place the server can ever see it.
+    lattice::mesh::Mesh::transmitSelfOriginated(adapter_types::SERIAL_ADAPTER, data);
     Logger::logln("Serial_Adapter", "Health report sent via mesh", LogLevel::LOG_DEBUG);
   } else {
     Logger::logln("Serial_Adapter", "Mesh transmit function not available for health report",

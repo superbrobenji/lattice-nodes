@@ -91,7 +91,8 @@ bool SerialFraming::decode(const uint8_t* data, size_t len, lattice::mesh::mesh_
   memcpy(outMsg.target_mac_address, pbMsg.targetMacAddress, 6);
 
   if (pbMsg.has_data) {
-    size_t dataToCopy = pbMsg.data.size < 12u ? pbMsg.data.size : 12u;
+    size_t dataToCopy =
+        pbMsg.data.size < sizeof(outMsg.data) ? pbMsg.data.size : sizeof(outMsg.data);
     memcpy(outMsg.data, pbMsg.data.bytes, dataToCopy);
   }
 

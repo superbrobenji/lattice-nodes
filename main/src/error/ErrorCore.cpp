@@ -1,4 +1,5 @@
 #include "ErrorCore.h"
+#include "Error.h"
 #include "../logging/Logger.h"
 #include <esp_system.h>
 using lattice::core::ErrorTypeDigit;
@@ -98,7 +99,11 @@ bool ErrorCore::shouldRestart(ErrorType t) const {
 }
 [[noreturn]] void ErrorCore::restartDevice() {
   Logger::logln("ErrorCore", "Restarting device...", LogLevel::LOG_WARN);
+#ifdef UNIT_TEST
+  throw lattice::err::FatalError("ErrorCore::restartDevice");
+#else
   ESP.restart();
+#endif
 }
 } // namespace utils
 } // namespace lattice

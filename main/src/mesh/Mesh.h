@@ -85,6 +85,9 @@ private:
                     MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA,
                     const mesh_message* msgOverride = nullptr);
 
+  // Shared body for transmit()/transmitSelfOriginated() — see their comments.
+  void transmitDispatch(const adapter_types type, const uint8_t* data, bool selfOriginated);
+
   void loadMeshKeyFromEEPROM();
   void saveMeshKeyToEEPROM(const uint8_t* key);
   void generateRandomMeshKey();
@@ -94,6 +97,9 @@ private:
   void processMasterBeacon(const mesh_message& msg);
   void processAdapterData(const mesh_message& msg);
   void relayDownlink(const mesh_message& msg);
+  // Relay an enrollment (JOIN_REQUEST) broadcast one hop toward the master so a
+  // node out of direct RF range of the master can still enroll (Task 9b Bug #5).
+  void relayEnrollmentUplink(const mesh_message& msg);
 
   // Setup helpers (Tiger Style refactor)
   bool setupWiFi();
@@ -102,6 +108,16 @@ private:
 
   // Enrollment helper (relay dispatch only — "addressed to us" branch is in Enrollment)
   void processJoinAck(const mesh_message& msg);
+
+  // Add (or key-update) a peer in the registry, persist, and register it with
+  // ESP-NOW encryption. Shared by enrollPeer() (master registers the enrolling
+  // node; allowRekey=true — the hub-approved serial path may legitimately
+  // re-key a re-enrolling node) and processJoinAck() (node registers the
+  // approving master; allowRekey=false — an over-the-air JOIN_ACK must never
+  // replace established key material, only set it on first contact or upgrade
+  // a placeholder all-zero key). Returns false if the registry is full and the
+  // peer could not be added.
+  bool registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, bool allowRekey);
 
   // Replay protection (composed)
   ReplayCache replay;
@@ -140,8 +156,21 @@ public:
   Mesh();
   bool init();
 
-  // Static trampoline for Adapter usage
+  // Static trampoline for Adapter usage. NOTE: keep this exact 2-arg
+  // signature — it's assigned by address to Adapter::TransmitPtr
+  // (mesh_transmit_fn), which is a plain function pointer type; adding a
+  // (even defaulted) parameter here changes that pointer's type and breaks
+  // that assignment. Forwarding/relay callers (e.g. relaying server-issued
+  // commands onward through the mesh) should use this.
   static void transmit(const adapter_types type, const uint8_t* data);
+
+  // Use instead of transmit() when this node is originating data ABOUT
+  // itself that must reach the server (currently: the master's own health
+  // report). On a master node, transmit() only reaches OTHER mesh peers —
+  // broadcastToAllPeers() explicitly skips self — so self-originated data
+  // would otherwise never reach the server. This delivers the built message
+  // locally via externalRecvCallback in addition to the normal broadcast.
+  static void transmitSelfOriginated(const adapter_types type, const uint8_t* data);
 
   void linkDataRecvCallback(std::function<void(const mesh_message&)> recvCallback);
 
@@ -166,8 +195,13 @@ public:
   const PeerInfo* getPeerList() const { return peers.peerMacs; }
   size_t getPeerCount() const { return peers.peerCount; }
 
-  // Broadcast adapter data to all peers
-  void broadcastAdapterData(adapter_types type, const uint8_t* data);
+  // Broadcast adapter data to all peers.
+  // deliverLocally: also hand the built message to externalRecvCallback, the
+  // same delivery path used for messages received from the mesh. Needed so
+  // master-originated, server-bound data (currently: health reports) reaches
+  // this node's own serial adapter — broadcastToAllPeers() explicitly skips
+  // self, so without this the master could never answer for itself.
+  void broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally = false);
 
   // Serial adapter helper (optional broadcast)
   static void broadcastAdapterDataStatic(adapter_types type, const uint8_t* data);
@@ -183,9 +217,9 @@ public:
 
   // Enrollment protocol
   void sendEnrollmentRequest() {
-    enrollment.sendRequest(deviceMacAddress, [this](const uint8_t* t, const mesh_message& m) {
-      this->sendMessage(t, m);
-    });
+    // Pass proto_version + a fresh (epoch, seq) so ReplayCache can dedup relayed
+    // copies of this request while still allowing the deliberate 10s retry.
+    enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, replay.bootEpoch, replay.nextSeq());
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
   void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);
