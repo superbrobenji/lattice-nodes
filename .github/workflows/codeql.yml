@@ -32,9 +32,14 @@ jobs:
         run: sudo apt-get install -y cmake
 
       - name: Build for CodeQL
+        # Build only the lattice_e2e target: it compiles the full firmware
+        # (FIRMWARE_SOURCES) once, which is all CodeQL needs to analyze main/src.
+        # Building all 9 test executables re-compiles the firmware + mbedtls +
+        # gtest per target and, fully parallel, OOM-kills the 2-core runner
+        # (SIGTERM 143). Cap parallelism to 2 to keep peak memory bounded.
         run: |
           cmake -B tests/build tests/ -DCMAKE_BUILD_TYPE=Release
-          cmake --build tests/build --parallel
+          cmake --build tests/build --target lattice_e2e --parallel 2
 
       - uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
         with:
