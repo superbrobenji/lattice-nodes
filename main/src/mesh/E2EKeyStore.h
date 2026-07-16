@@ -11,8 +11,15 @@ namespace mesh {
 // Derivation costs an X25519 exchange (~ms on ESP32) — cache so the periodic
 // uplink path never re-derives. Round-robin overwrite when full; wrong evictions
 // only cost a re-derivation.
+//
+// IMPORTANT: Pointers returned via kUpOut/kDownOut are invalidated by any
+// subsequent getKeys() call that causes an eviction. Callers must use them
+// immediately and must NOT cache them across getKeys() calls.
 class E2EKeyStore {
 public:
+  E2EKeyStore() = default;
+  E2EKeyStore(const E2EKeyStore&) = delete;
+  E2EKeyStore& operator=(const E2EKeyStore&) = delete;
   bool getKeys(const uint8_t mac[6], const uint8_t* ownPriv32, const uint8_t* peerPub32,
                const uint8_t** kUpOut, const uint8_t** kDownOut) {
     for (size_t i = 0; i < config::LATTICE_E2E_KEYCACHE_MAX; ++i) {
