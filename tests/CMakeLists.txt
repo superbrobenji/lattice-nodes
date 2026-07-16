@@ -93,6 +93,7 @@ add_unit_test(test_mesh_logic         unit/test_mesh_logic.cpp)
 add_unit_test(test_pir_adapter        unit/test_pir_adapter.cpp)
 add_unit_test(test_route_report       unit/test_route_report.cpp)
 add_unit_test(test_mocks              unit/test_mocks.cpp)
+add_unit_test(test_e2e_crypto         unit/test_e2e_crypto.cpp)
 
 # ---- E2E simulation target — SIMULATE_MODE recompiles all firmware sources ----
 add_executable(lattice_e2e
