@@ -155,7 +155,29 @@ Replaces the single `currentMaster.nextHop` as route source.
 - Unit tests: AEAD known-answer vectors; nonce construction including seq
   wrap; NeighborTable eviction ordering; `route_path` parse bounds/fuzz.
 
-## 8. Phasing (each phase = its own plan + PR)
+## 8. Cross-repo changes — lattice-protocol
+
+The wire format lives in the `lattice-protocol` repo (worked on at
+`../lattice-protocol`, vendored here as the `main/lib/lattice-protocol`
+submodule). Protocol v3 changes land there first, then the submodule is
+bumped here.
+
+- `c/mesh_message.h`: v3 header — `route_len` + `route_path[MAX_HOPS × 6]`,
+  AEAD tag/ciphertext payload layout, `PROTO_VERSION = 3`.
+- `c/mesh_message.h` (JOIN_ACK): `secondary_master_mac(6)` +
+  `secondary_public_key(32)` fields (Section 5).
+- `c/opcodes.h`: unchanged opcodes, but route-report path encoding moves
+  from payload to header (Section 4) — payload doc/comments updated.
+- Go side (`message/`, `proto/`): v3 struct fields, route-path parsing, and
+  whatever the hub needs for enrolled-peer sync to both masters
+  (Section 5). AEAD encrypt/decrypt happens on master firmware, not the
+  server, so no crypto lands in Go beyond field pass-through — but the
+  server composes JOIN_ACK content including the secondary master's pubkey.
+- Each firmware phase that changes wire format (1, 3, 4) pairs with a
+  lattice-protocol release + submodule bump PR here (same pattern as
+  PR #30).
+
+## 9. Phasing (each phase = its own plan + PR)
 
 1. **Protocol v3 + E2E AEAD**, direct-range only — crypto core, flag day.
 2. **NeighborTable + multi-hop data uplink** — closes gap #7.
