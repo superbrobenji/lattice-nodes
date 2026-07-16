@@ -32,7 +32,8 @@ Header stays plaintext (relays need it to forward):
 ```
 proto_version=3 | message_type | origin_mac(6) | target_mac(6) | last_hop_mac(6)
 | hop_count(u8) | epoch_num(u32) | seq_num(u16)
-| route_len(u8) + route_path[route_len × 6B]    // NEW; downlink only, 0 on uplink
+| route_len(u8) + route_path[route_len × 6B]    // NEW; downlink source route,
+                                                 //      or uplink path accumulator
 | payload ciphertext + 16B Poly1305 tag          // NEW; sealed
 ```
 
@@ -62,6 +63,10 @@ proto_version=3 | message_type | origin_mac(6) | target_mac(6) | last_hop_mac(6)
   layer. Per-peer LMK encryption is **dropped for the data path** — E2E AEAD
   is the security boundary. Data frames travel as unencrypted ESP-NOW
   unicast to auto-added forwarding neighbors (20-peer cap, LRU-evicted).
+  The per-peer LMK derivation path (`MeshCrypto::derivePeerLMK`,
+  `registerPeerWithEspNow` encrypt branch) becomes dead code and is removed
+  in Phase 1; the ECDH keypair and pubkey exchange remain — they now feed
+  HKDF instead.
 - **Trust split:**
   - `PeerRegistry` — identity + key material. The enrollment-only add rule
     (`PeerRegistry.cpp:67`) is **unchanged**.
@@ -94,9 +99,17 @@ Replaces the single `currentMaster.nextHop` as route source.
 
 ## 4. Downlink — source routing, stateless relays
 
-- Nodes send route reports (existing `OP_ROUTE_REPORT`; path accumulates
-  relay MACs in flight) periodically **and on next-hop change**. Route
-  reports are AEAD-sealed like all payloads.
+- Nodes send route reports (existing `OP_ROUTE_REPORT`) periodically **and
+  on next-hop change**. The report's payload (opcode etc.) is AEAD-sealed
+  like all payloads; the relay path accumulates in the plaintext
+  `route_path` header field (relays append their MAC in flight — possible
+  precisely because that field is mutable and excluded from AAD). The
+  current in-payload path encoding (`[opcode][path_len][MACs…]`,
+  `Mesh.cpp:806-840`) migrates to the header field.
+- Consequence: the path a master learns is relay-asserted, not
+  E2E-authenticated. A malicious relay could falsify it — yielding at worst
+  misrouted downlinks (DoS-equivalent, same class as the accepted blackhole
+  risk in Section 2). Uplink data integrity is unaffected.
 - Master keeps a route table: node MAC → latest path. RAM-only, rebuilt
   from reports. Size: compile-time `LATTICE_ROUTE_TABLE_MAX` (default 32;
   raise for large deployments — master is hub-side with headroom).
