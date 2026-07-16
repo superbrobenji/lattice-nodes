@@ -201,8 +201,25 @@ Protobuf schema, control opcodes, and enrollment flow.
 ```bash
 cmake -B tests/build tests/ -DCMAKE_BUILD_TYPE=Release
 cmake --build tests/build --parallel
-ctest --test-dir tests/build --output-on-failure
+ctest --test-dir tests/build --output-on-failure --label-exclude e2e
 ```
+
+### End-to-End Simulation Suite
+
+`tests/e2e/` runs the whole mesh on the host — multiple firmware nodes over a
+virtual ESP-NOW bus with a scripted server on the master's serial port — so
+enrollment, relay, replay protection, dual-master failover, adapter hotswap,
+PIR data flow, and serial framing can be tested without hardware. These tests
+carry the ctest label `e2e`:
+
+```bash
+ctest --test-dir tests/build --label-regex e2e --output-on-failure
+```
+
+They run on demand via the **E2E Tests** GitHub Action (`workflow_dispatch`),
+not on every PR; the per-PR CI excludes the `e2e` label. A few scenarios are
+committed disabled where they depend on unimplemented multi-hop data routing —
+see [`docs/design-gaps/multihop-data-uplink.md`](docs/design-gaps/multihop-data-uplink.md).
 
 ### Adding a New Adapter
 
