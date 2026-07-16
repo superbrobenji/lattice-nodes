@@ -104,6 +104,7 @@ add_executable(lattice_e2e
   e2e/scenarios/test_route_report_e2e.cpp
   e2e/scenarios/test_replay_e2e.cpp
   e2e/scenarios/test_dual_master_e2e.cpp
+  e2e/scenarios/test_hotswap_e2e.cpp
   e2e/harness/NodeContext.cpp
   e2e/harness/SimNode.cpp
   e2e/harness/VirtualBus.cpp
