@@ -31,7 +31,7 @@ using ::mesh_message;
 using ::MeshMessageType;
 using lattice::adapter::adapter_types;
 
-static constexpr uint8_t PROTO_VERSION = 2;
+static constexpr uint8_t PROTO_VERSION = 3;
 
 class Mesh {
 #ifdef UNIT_TEST

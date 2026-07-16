@@ -808,7 +808,7 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   mesh.linkDataRecvCallback([&](const mesh_message&) { ++deliveredCount; });
 
   mesh_message msg{};
-  msg.proto_version = 2;
+  msg.proto_version = PROTO_VERSION;
   msg.message_type = MESH_TYPE_ADAPTER_DATA;
   msg.data_type = adapter_types::PIR_ADAPTER;
   memcpy(msg.origin_mac_address, kOriginMac, 6);
