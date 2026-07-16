@@ -51,3 +51,23 @@ jobs:
       - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           category: '/language:cpp'
+          upload: failure-only
+          output: sarif-results
+
+      # paths-ignore in the init config does not filter RESULTS for compiled
+      # languages — CodeQL extracts everything the build compiles, including
+      # FetchContent deps (googletest, mbedtls) and vendored code. Strip those
+      # from the SARIF before upload so third-party alerts never open.
+      - name: Filter vendored paths from SARIF
+        uses: advanced-security/filter-sarif@2da736ff05ef065cb2894ac6892e47b5eac2c3c0 # v1.1
+        with:
+          patterns: |
+            -tests/build/**
+            -main/src/mesh/serialization/nanopb/**
+            -main/lib/lattice-protocol/**
+          input: sarif-results/cpp.sarif
+          output: sarif-results/cpp.sarif
+
+      - uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: sarif-results/cpp.sarif

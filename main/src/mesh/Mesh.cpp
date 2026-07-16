@@ -48,7 +48,7 @@ void Mesh::readMacAddress() {
 }
 
 void Mesh::printMeshMessage(const mesh_message& msg) {
-  auto macToStr = [](const uint8_t mac[6]) { return lattice::utils::MacAddress(mac).toString(); };
+  auto macToStr = [](const uint8_t (&mac)[6]) { return lattice::utils::MacAddress(mac).toString(); };
 
   Logger::logln("MESH", "------ Mesh Message ------", LogLevel::LOG_DEBUG);
   Logger::logln("MESH", "Origin:    " + macToStr(msg.origin_mac_address), LogLevel::LOG_DEBUG);
@@ -147,7 +147,11 @@ bool Mesh::init() {
 }
 
 bool Mesh::setupWiFi() {
-  WiFi.mode(WIFI_STA);
+  if (!WiFi.mode(WIFI_STA)) {
+    lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 6,
+                       "MESH: Failed to set WiFi mode STA");
+    return false;
+  }
   lattice::err::checkEsp(esp_wifi_set_channel(lattice::config::WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE),
                          lattice::utils::ErrorType::HARDWARE_FAILURE, "Failed to set WiFi channel");
 
@@ -175,7 +179,8 @@ bool Mesh::setupEspNow() {
                        (String("MESH: esp_now_init failed: ") + esp_err_to_name(res)).c_str());
     return false;
   }
-  esp_now_set_pmk(meshKey);
+  lattice::err::checkEsp(esp_now_set_pmk(meshKey), lattice::utils::ErrorType::HARDWARE_FAILURE,
+                         "Failed to set ESP-NOW PMK");
 
   // Register the broadcast MAC so esp_now_send(broadcastMac, ...) reaches all
   // nodes — including unregistered ones. esp_now_send(nullptr, ...) only delivers
@@ -295,7 +300,7 @@ void Mesh::sendMessage(const uint8_t* target, const mesh_message& msg) {
   }
 }
 
-void Mesh::broadcastToAllPeers(mesh_message msg) {
+void Mesh::broadcastToAllPeers(const mesh_message& msg) {
   if (peers.peerCount == 0) {
     Logger::logln("MESH", "WARNING: No peers to broadcast to!", LogLevel::LOG_WARN);
     return;
