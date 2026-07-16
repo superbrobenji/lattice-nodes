@@ -111,6 +111,9 @@ constexpr TxPowerPreset DEFAULT_TX_POWER_PRESET = TxPowerPreset::OUTDOOR;
 // =====================
 // 9. Global Limits (Tiger Style)
 // =====================
+// E2E AEAD derived-key cache entries (spec §2). One entry per (peer, master) pair;
+// masters need one per enrolled node, leaves need one per master. Default: MAX_PEERS.
+inline constexpr size_t LATTICE_E2E_KEYCACHE_MAX = 10; // = MAX_PEERS
 // Maximum allowed routing hops in the mesh network
 constexpr uint8_t MAX_HOPS = 10;
 // Maximum relay hops in a route report path; bounded by data[2..61] = 60 bytes / 6 bytes per MAC
