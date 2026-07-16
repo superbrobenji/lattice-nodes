@@ -26,8 +26,9 @@ jobs:
         run: cmake --build tests/build --parallel
 
       - name: Run tests
-        # Exclude the e2e simulation suite (label "e2e") — it runs on demand via
-        # the manual "E2E Tests" workflow, not on every PR (see e2e-tests.yml).
+        # Exclude the e2e simulation suite (label "e2e") — it runs in its own
+        # "E2E Tests" workflow (see e2e-tests.yml) so the two stay independently
+        # scoped; this job stays unit-only.
         run: ctest --test-dir tests/build --output-on-failure --parallel 4 --label-exclude e2e
 
       - name: Upload test results

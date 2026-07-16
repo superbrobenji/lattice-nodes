@@ -1,9 +1,14 @@
 name: E2E Tests
 
-# Manual-only for now: the multi-node mesh simulation suite (ctest label "e2e")
-# is run on demand from the Actions tab. Move to per-PR once runtime and
-# stability are proven; the unit-test CI already excludes this label.
+# Runs the multi-node mesh simulation suite (ctest label "e2e") on every PR to
+# main and on pushes to main/develop; also available on demand from the Actions
+# tab. Kept a separate job from unit-tests so the label split stays explicit and
+# either can be re-scoped independently.
 on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -23,7 +28,9 @@ jobs:
         run: cmake -B tests/build tests/ -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build tests/build --parallel
+        # Only the e2e target is needed; --parallel 2 keeps peak memory bounded
+        # on the 2-core runner (the full firmware + mbedtls compile is heavy).
+        run: cmake --build tests/build --target lattice_e2e --parallel 2
 
       - name: Run e2e tests
         run: ctest --test-dir tests/build --output-on-failure --label-regex e2e

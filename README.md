@@ -216,9 +216,10 @@ carry the ctest label `e2e`:
 ctest --test-dir tests/build --label-regex e2e --output-on-failure
 ```
 
-They run on demand via the **E2E Tests** GitHub Action (`workflow_dispatch`),
-not on every PR; the per-PR CI excludes the `e2e` label. A few scenarios are
-committed disabled where they depend on unimplemented multi-hop data routing —
+They run on every PR to `main` in their own **E2E Tests** GitHub Action (and on
+demand via its `workflow_dispatch`); the unit-test job stays unit-only via
+`--label-exclude e2e`. A few scenarios are committed disabled where they depend
+on unimplemented multi-hop data routing —
 see [`docs/design-gaps/multihop-data-uplink.md`](docs/design-gaps/multihop-data-uplink.md).
 
 ### Adding a New Adapter
