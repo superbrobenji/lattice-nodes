@@ -79,7 +79,7 @@ private:
   PeerInfo* findNextHopToMaster();
 
   void sendMessage(const uint8_t* target, const mesh_message& msg);
-  void broadcastToAllPeers(mesh_message msg);
+  void broadcastToAllPeers(const mesh_message& msg);
 
   void transmitCore(const adapter_types type, const uint8_t* data,
                     MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA,
