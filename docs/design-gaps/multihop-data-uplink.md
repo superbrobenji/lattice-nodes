@@ -104,6 +104,25 @@ than an obviously-unenrolled one.
 5. **Failure/repair.** What happens when a relay goes offline — re-discovery,
    timeout, fallback to the secondary master (dual-master, Task 12)?
 
+## Related gap: dual-master data failover
+
+The same "a node is only keyed to the master it enrolled with" constraint blocks
+dual-master **data** failover (Task 12). In dual-master mode a node correctly
+TOFU-learns a secondary master's beacon and *adopts* it as `currentMaster` when
+the primary goes silent (route-adoption failover works — see
+`tests/e2e/scenarios/test_dual_master_e2e.cpp`
+`LearnsSecondaryMasterInDualMode`, enabled). But the node enrolled with, and ran
+ECDH with, only the **primary**, so it has no encrypted link to the secondary:
+its first uplink after failover raises
+`err::fail(COMM, MESH, 8, "no route to master")`. The full failover scenario is
+committed as `DISABLED_FailsOverToSecondaryMasterWhenPrimaryGoesSilent`.
+
+A solution must give a node key material for **every master it may fail over
+to** — e.g. the server provisioning both masters' keys at enrollment, or a
+shared group key. This is the same keying-model design question as above (Q1),
+just applied to the master set rather than intermediate hops, and should be
+solved together with it.
+
 ## Related work already landed
 
 - Multi-hop **enrollment** relay: commit `a35be64`.
