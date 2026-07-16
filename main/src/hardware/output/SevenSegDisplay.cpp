@@ -130,7 +130,7 @@ uint8_t SevenSegDisplay::encodeDigit(int d) {
   return 0x00;
 }
 
-void SevenSegDisplay::setSegments(const uint8_t segs[4]) {
+void SevenSegDisplay::setSegments(const uint8_t (&segs)[4]) {
   start();
   writeByte(0x40); // automatic address increment mode
   stop();
@@ -170,7 +170,7 @@ void SevenSegDisplay::show(int value, bool leadingZeros) {
 
   uint8_t segs[4];
   for (int i = 0; i < 4; ++i) {
-    if (!leadingZeros && digits[i] == 0 && i < 3 && !negative)
+    if (!leadingZeros && i < 3 && digits[i] == 0 && !negative)
       segs[i] = 0x00;
     else
       segs[i] = encodeDigit(digits[i]);
@@ -202,7 +202,7 @@ void SevenSegDisplay::showWithDP(int value, bool leadingZeros) {
 
   uint8_t segs[4];
   for (int i = 0; i < 4; ++i) {
-    if (!leadingZeros && digits[i] == 0 && i < 3 && !negative)
+    if (!leadingZeros && i < 3 && digits[i] == 0 && !negative)
       segs[i] = 0x00;
     else
       segs[i] = encodeDigit(digits[i]);
