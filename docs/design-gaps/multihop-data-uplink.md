@@ -109,13 +109,15 @@ than an obviously-unenrolled one.
 The same "a node is only keyed to the master it enrolled with" constraint blocks
 dual-master **data** failover (Task 12). In dual-master mode a node correctly
 TOFU-learns a secondary master's beacon and *adopts* it as `currentMaster` when
-the primary goes silent (route-adoption failover works — see
-`tests/e2e/scenarios/test_dual_master_e2e.cpp`
-`LearnsSecondaryMasterInDualMode`, enabled). But the node enrolled with, and ran
-ECDH with, only the **primary**, so it has no encrypted link to the secondary:
-its first uplink after failover raises
-`err::fail(COMM, MESH, 8, "no route to master")`. The full failover scenario is
-committed as `DISABLED_FailsOverToSecondaryMasterWhenPrimaryGoesSilent`.
+the primary goes silent (route-adoption failover works and is tested — see
+`tests/e2e/scenarios/test_dual_master_e2e.cpp`,
+`LearnsSecondaryMasterInDualMode` and
+`FailsOverToSecondaryMasterWhenPrimaryGoesSilent`, both enabled). But the node
+enrolled with, and ran ECDH with, only the **primary**, so it has no encrypted
+link to the secondary: its uplink after failover has no usable route and is
+dropped (quietly, since the no-route transient no longer escalates to
+`err::fail` — see finding #9). So a failed-over node adopts the secondary as its
+route but its data does not actually reach the secondary.
 
 A solution must give a node key material for **every master it may fail over
 to** — e.g. the server provisioning both masters' keys at enrollment, or a

@@ -328,10 +328,15 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
       lattice::utils::MacAddress(nextHop->mac) != lattice::utils::MacAddress(deviceMacAddress)) {
     sendMessage(nextHop->mac, msg);
   } else {
+    // No route to master is a routine, self-healing transient: a node that has
+    // just booted (or whose master went stale) legitimately has no next hop
+    // until it hears the next beacon. Drop the frame quietly rather than
+    // escalating to err::fail — escalation here drives the error LED and
+    // reboot-reason tracking, and turns every such gap (see
+    // docs/design-gaps/multihop-data-uplink.md) into an error loop instead of a
+    // silent drop. The upstream sender retries on its own timer.
     Logger::logln("MESH", "No next hop to master — message dropped. Master timeout or unreachable.",
                   LogLevel::LOG_WARN);
-    lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 8,
-                       "MESH: message dropped, no route to master");
   }
 }
 

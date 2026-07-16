@@ -42,14 +42,15 @@ protected:
   }
 };
 
-// The route-adoption + data path after primary loss. DISABLED: the node adopts
-// the secondary as currentMaster correctly, but then err::fails on its next
-// uplink because the secondary is not an ECDH-keyed peer (the node enrolled
-// with the primary only). Closing this needs the node to hold key material for
-// every master it may fail over to — the dual-master facet of the keying gap in
-// docs/design-gaps/multihop-data-uplink.md. Assertions are the intended
-// behavior; drop DISABLED_ once that gap is closed.
-TEST_F(DualMasterTest, DISABLED_FailsOverToSecondaryMasterWhenPrimaryGoesSilent) {
+// Route-adoption failover: when the primary goes silent, the node adopts the
+// secondary as currentMaster. This asserts route adoption only, which works.
+// DATA delivery to the secondary still needs the node to be ECDH-keyed to it
+// (it enrolled with the primary only) — the dual-master facet of the keying gap
+// in docs/design-gaps/multihop-data-uplink.md — but that is a separate concern
+// this test does not exercise. (Enabled once no-route transients stopped
+// escalating to err::fail; the node's post-failover uplink to the unkeyed
+// secondary is now a quiet drop rather than an error.)
+TEST_F(DualMasterTest, FailsOverToSecondaryMasterWhenPrimaryGoesSilent) {
   addMaster();
   auto* sensor = addSensor(MAC_NODE_A);
   world.bus.link(master, sensor);

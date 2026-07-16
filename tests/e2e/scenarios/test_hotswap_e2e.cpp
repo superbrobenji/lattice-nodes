@@ -38,18 +38,10 @@ TEST_F(MeshSimTest, ConfigSetForOtherNodeIsIgnored) {
 }
 
 // Hot-swapped adapter type persists across a subsequent plain power cycle.
-//
-// DISABLED: the swap itself applies and persists correctly (both EXPECTs below
-// pass), but hot-swapping a sensor to SERIAL_ADAPTER makes it a *non-master*
-// SERIAL node, and such a node's SerialAdapter::loop attempts a health report
-// on its first tick after the config-reboot — before it has re-heard a master
-// beacon — which raises err::fail(COMM, MESH, 8, "no route to master"). That
-// tripping of the fixture's zero-err invariant is the real finding, not a test
-// bug: a routine "no route yet, just booted" transient should be a quiet drop,
-// not an escalated error (the same escalation makes the #7/#8 gaps error-loop).
-// Re-enable once no-route transients no longer err::fail. Tracked alongside
-// docs/design-gaps/multihop-data-uplink.md.
-TEST_F(MeshSimTest, DISABLED_HotSwappedAdapterTypeSurvivesPlainReboot) {
+// (Enabled once no-route transients stopped escalating to err::fail — a
+// hot-swapped non-master SERIAL node's first post-reboot health report finds no
+// route yet and is now dropped quietly instead of tripping the error path.)
+TEST_F(MeshSimTest, HotSwappedAdapterTypeSurvivesPlainReboot) {
   addMaster();
   auto* sensor = addSensor(MAC_NODE_A); // boots as PIR
   world.bus.link(master, sensor);
