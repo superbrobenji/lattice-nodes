@@ -20,6 +20,14 @@ public:
   E2EKeyStore() = default;
   E2EKeyStore(const E2EKeyStore&) = delete;
   E2EKeyStore& operator=(const E2EKeyStore&) = delete;
+  // Move is fine (and needed so composing types — e.g. Mesh, which now holds
+  // one of these — stay returnable-by-value/relocatable, notably in test
+  // factory helpers). The cache holds no pointers or owned resources, only
+  // fixed-size POD entries; any raw pointer a caller obtained from getKeys()
+  // is already documented above as invalidated by any subsequent structural
+  // change, so a move is no riskier than an eviction.
+  E2EKeyStore(E2EKeyStore&&) = default;
+  E2EKeyStore& operator=(E2EKeyStore&&) = default;
   bool getKeys(const uint8_t mac[6], const uint8_t* ownPriv32, const uint8_t* peerPub32,
                const uint8_t** kUpOut, const uint8_t** kDownOut) {
     for (size_t i = 0; i < config::LATTICE_E2E_KEYCACHE_MAX; ++i) {

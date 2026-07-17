@@ -14,6 +14,7 @@
 // the master. That is precisely the tuple ReplayCache recorded on first
 // delivery, so it is the correct replay to test.
 #include "harness/MeshSimTest.h"
+#include "mesh/Mesh.h"
 #include <cstring>
 
 TEST_F(MeshSimTest, ReplayedFrameIsDropped) {
@@ -23,31 +24,50 @@ TEST_F(MeshSimTest, ReplayedFrameIsDropped) {
   enroll(sensor);
 
   sensor->simulatePirMotion();
+  // One step: PirAdapter::loop() detects the armed motion and sends. The bus's
+  // deliver() call inside this step moves the send into VirtualBus's pending
+  // queue but does NOT yet deliver it (delivery happens on the NEXT step) —
+  // this is the one-step window where the sealed, in-flight frame can be
+  // captured. See VirtualBus::lastPendingOfType's comment for why.
+  world.step(1);
+
+  // Task 6 (E2E AEAD): capture the SEALED frame exactly as it sits in flight
+  // so replaying it preserves a valid auth tag. Reconstructing from the hub's
+  // already-OPENED/plaintext copy (the old approach) would carry a stale tag
+  // bound to the original ciphertext and fail auth for an unrelated reason,
+  // making the "replay dropped" assertion below vacuous.
+  mesh_message* pendingSealed = world.bus.lastPendingOfType(MESH_TYPE_ADAPTER_DATA);
+  ASSERT_NE(pendingSealed, nullptr) << "sensor must have a sealed ADAPTER_DATA uplink frame in flight";
+  mesh_message sealed = *pendingSealed;
+
   runPolled(2000);
 
   auto legitFrames = hub->adapterDataFromOrigin(sensor->mac());
   ASSERT_GE(legitFrames.size(), 1u) << "the genuine motion frame must reach the hub first";
   size_t legit = legitFrames.size();
 
-  // Reconstruct the raw frame the master already processed (same origin/epoch/seq)
-  // and replay it directly at the master.
-  mesh_message replayed = legitFrames.back();
+  // Replay the exact sealed bytes the master already processed (same origin/epoch/seq)
+  // directly at the master.
   sim::swapIn(master->ctx());
-  simulateReceive(sensor->mac(), reinterpret_cast<const uint8_t*>(&replayed), sizeof(replayed));
+  simulateReceive(sensor->mac(), reinterpret_cast<const uint8_t*>(&sealed), sizeof(sealed));
   sim::swapOut(master->ctx());
   runPolled(2000);
 
   EXPECT_EQ(hub->adapterDataFromOrigin(sensor->mac()).size(), legit)
       << "replayed (origin,epoch,seq) must be dropped by ReplayCache, not re-forwarded";
 
-  // Positive control (guards against a vacuous pass): the SAME injection path
-  // with a fresh seq must be forwarded — proving the replay above was dropped
-  // by dedup specifically, not silently ignored for some unrelated reason.
-  mesh_message fresh = replayed;
-  fresh.seq_num = static_cast<uint16_t>(replayed.seq_num + 1);
-  sim::swapIn(master->ctx());
-  simulateReceive(sensor->mac(), reinterpret_cast<const uint8_t*>(&fresh), sizeof(fresh));
-  sim::swapOut(master->ctx());
+  // Positive control (guards against a vacuous pass): a genuinely fresh uplink
+  // (new seq, freshly sealed) from the sensor must be forwarded — proving the
+  // replay above was dropped by dedup specifically, not silently ignored for
+  // some unrelated reason (e.g. a broken AEAD open). Drives the real Mesh
+  // uplink path directly (buildMessage -> seal -> send), bypassing only
+  // PirAdapter's cooldown gate, which is an adapter-layer concern unrelated to
+  // mesh replay protection.
+  sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
+    uint8_t data[64] = {1};
+    mesh.transmitCore(lattice::adapter::PIR_ADAPTER, data, MESH_TYPE_ADAPTER_DATA);
+    return 0;
+  });
   runPolled(2000);
 
   EXPECT_EQ(hub->adapterDataFromOrigin(sensor->mac()).size(), legit + 1)

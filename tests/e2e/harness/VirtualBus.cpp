@@ -36,6 +36,17 @@ size_t VirtualBus::framesInFlight() const {
   return pending_.size();
 }
 
+mesh_message* VirtualBus::lastPendingOfType(MeshMessageType type) {
+  for (auto it = pending_.rbegin(); it != pending_.rend(); ++it) {
+    if (it->data.size() != sizeof(mesh_message))
+      continue;
+    auto* msg = reinterpret_cast<mesh_message*>(it->data.data());
+    if (msg->message_type == type)
+      return msg;
+  }
+  return nullptr;
+}
+
 SimNode* VirtualBus::findByMac(const uint8_t* mac) const {
   for (SimNode* n : nodes_) {
     if (memcmp(n->mac(), mac, 6) == 0) return n;

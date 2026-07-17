@@ -16,6 +16,7 @@
 #include "ReplayCache.h"
 #include "PeerRegistry.h"
 #include "Enrollment.h"
+#include "E2EKeyStore.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -151,6 +152,15 @@ private:
 
   // Enrollment state (composed — mbedtls-heavy methods stubbed in test builds)
   Enrollment enrollment;
+
+  // E2E AEAD (spec §1/§2): per-peer derived key cache + lookup helpers.
+  E2EKeyStore e2eKeys;
+  // Returns k_up/k_down for the current master (leaf side); false if not enrolled
+  // or master pubkey unknown.
+  bool masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown);
+  // Returns keys for an enrolled origin peer (master side); false if unknown peer.
+  bool peerE2EKeys(const uint8_t* originMac, const uint8_t** kUp, const uint8_t** kDown);
+  static bool isSealedType(uint8_t messageType);
 
 public:
   Mesh();
