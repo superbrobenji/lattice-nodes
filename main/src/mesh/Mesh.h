@@ -123,6 +123,10 @@ private:
   // Replay protection (composed)
   ReplayCache replay;
 
+#ifdef UNIT_TEST
+  ReplayCache& testReplay() { return replay; }
+#endif
+
   // Relay jitter: deferred relay pending fields (Task 3)
   mesh_message relayPendingMsg;
   uint32_t relayPendingAt;

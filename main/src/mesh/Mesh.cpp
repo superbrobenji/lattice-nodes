@@ -106,8 +106,16 @@ mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMes
   if (data)
     memcpy(msg.data, data, sizeof(msg.data));
   msg.hop_count = 0;
-  msg.epoch_num = replay.bootEpoch;
   msg.seq_num = replay.nextSeq();
+  if (msg.seq_num == 0) {
+    // seq wrapped (spec §2): a reused (epoch, seq) pair would reuse an AEAD nonce.
+    // Advance the persisted epoch and restart the sequence.
+    uint32_t epoch = EepromManager::getInstance().loadBootEpoch() + 1;
+    EepromManager::getInstance().saveBootEpoch(epoch);
+    replay.bootEpoch = epoch;
+    msg.seq_num = replay.nextSeq();
+  }
+  msg.epoch_num = replay.bootEpoch;
   return msg;
 }
 
