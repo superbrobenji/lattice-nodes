@@ -73,3 +73,66 @@ TEST_F(MeshSimTest, SeqWrapBumpsEpochAndKeepsSealing) {
       << "the bumped epoch must be persisted to EEPROM, not just held in RAM — "
          "otherwise a reboot right after the wrap would replay the old epoch's seq range";
 }
+
+// Regression for the finding that the seq-wrap guard originally lived ONLY in
+// Mesh::buildMessage — sendEnrollmentRequest() and enrollPeer() (JOIN_ACK) draw
+// from the very same ReplayCache::txSeqNum via a raw replay.nextSeq() call, so
+// a wrap landing on either of those un-sealed paths would silently resume
+// seq 1,2,3... under the OLD (un-bumped) epoch; any later sealed buildMessage
+// frame in the same boot would then reuse an AEAD nonce already used by
+// pre-wrap traffic. Both call sites now route through the same
+// Mesh::nextSeqGuarded() choke point as buildMessage(); this proves the
+// enrollment-request path specifically.
+//
+// NOTE: the master's serial relay of an ENROLLMENT frame to the hub
+// (SerialAdapter::relayEnrollmentToServer) rebuilds a brand-new message
+// carrying only (mac, pubKey) — it does not forward the leaf's original
+// seq_num/epoch_num — so hub->enrollmentFrom() can't observe the value this
+// test cares about. Instead, inspect the raw over-the-air broadcast directly
+// via VirtualBus::lastPendingOfType(), the same technique test_replay_e2e.cpp
+// uses to capture an in-flight sealed frame before it's delivered.
+TEST_F(MeshSimTest, EnrollmentRequestSeqWrapBumpsEpoch) {
+  addMaster();
+  auto* sensor = addSensor(MAC_NODE_A);
+  world.bus.link(master, sensor);
+
+  // Force the very next draw from the leaf's txSeqNum to wrap: unlike the
+  // buildMessage scenario above (which needs 0xFFFE -> two draws), a single
+  // nextSeq() call against 0xFFFF wraps immediately, so the node's first
+  // periodic ENROLLMENT broadcast (not yet approved -- still unenrolled) is
+  // the one that must observe and apply the guard.
+  sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
+    mesh.testReplay().txSeqNum = 0xFFFF;
+    return 0;
+  });
+  uint32_t epochBefore = sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
+    return mesh.testReplay().bootEpoch;
+  });
+
+  ASSERT_FALSE(sensor->isEnrolled());
+
+  // Single-ms steps (mirrors main.ino's `millis() - lastEnrollmentBroadcast >
+  // 10000` gate) so we can catch the ENROLLMENT broadcast in VirtualBus's
+  // one-step in-flight window and read its seq_num before the next step
+  // delivers and clears it.
+  uint16_t sentSeq = 0;
+  bool sawRequest = false;
+  for (uint32_t t = 0; t < 10500 && !sawRequest; ++t) {
+    world.step(1);
+    if (const mesh_message* pending = world.bus.lastPendingOfType(MESH_TYPE_ENROLLMENT)) {
+      sentSeq = pending->seq_num;
+      sawRequest = true;
+    }
+  }
+  ASSERT_TRUE(sawRequest) << "enrollment request never sent within the retry window";
+  EXPECT_NE(sentSeq, 0)
+      << "the wrapped seq_num (0) must never reach the wire — sendEnrollmentRequest() "
+         "must draw through the same guarded choke point as buildMessage()";
+
+  uint32_t epochAfter = sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
+    return mesh.testReplay().bootEpoch;
+  });
+  EXPECT_EQ(epochAfter, epochBefore + 1)
+      << "the boot epoch must bump exactly once when the enrollment-request path "
+         "hits the seq wrap, same as the sealed buildMessage() path";
+}

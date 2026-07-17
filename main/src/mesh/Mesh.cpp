@@ -91,6 +91,22 @@ PeerInfo* Mesh::findNextHopToMaster() {
   return nullptr;
 }
 
+uint16_t Mesh::nextSeqGuarded() {
+  uint16_t seq = replay.nextSeq();
+  if (seq == 0) {
+    // seq wrapped (spec §2): a reused (epoch, seq) pair would reuse an AEAD nonce.
+    // Advance the persisted epoch and restart the sequence. replay.bootEpoch is
+    // already the currently active epoch (kept in sync with EEPROM by init()
+    // and by this method), so bump from it directly rather than re-reading
+    // EEPROM.
+    uint32_t epoch = replay.bootEpoch + 1;
+    EepromManager::getInstance().saveBootEpoch(epoch);
+    replay.bootEpoch = epoch;
+    seq = replay.nextSeq();
+  }
+  return seq;
+}
+
 mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType) {
   mesh_message msg = {};
   msg.proto_version = PROTO_VERSION;
@@ -106,15 +122,7 @@ mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMes
   if (data)
     memcpy(msg.data, data, sizeof(msg.data));
   msg.hop_count = 0;
-  msg.seq_num = replay.nextSeq();
-  if (msg.seq_num == 0) {
-    // seq wrapped (spec §2): a reused (epoch, seq) pair would reuse an AEAD nonce.
-    // Advance the persisted epoch and restart the sequence.
-    uint32_t epoch = EepromManager::getInstance().loadBootEpoch() + 1;
-    EepromManager::getInstance().saveBootEpoch(epoch);
-    replay.bootEpoch = epoch;
-    msg.seq_num = replay.nextSeq();
-  }
+  msg.seq_num = nextSeqGuarded();
   msg.epoch_num = replay.bootEpoch;
   return msg;
 }
@@ -822,8 +830,11 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
   // given JOIN_ACK at most once (the reflected copy is dropped by isReplay before
   // processJoinAck), preventing combinatorial broadcast amplification.
   ack.proto_version = PROTO_VERSION;
+  // Draw seq via the guarded choke point FIRST — it may bump replay.bootEpoch
+  // on wrap — then stamp epoch_num from the (possibly just-bumped) value so
+  // the ACK's epoch always matches the epoch its seq_num was drawn under.
+  ack.seq_num = nextSeqGuarded();
   ack.epoch_num = replay.bootEpoch;
-  ack.seq_num = replay.nextSeq();
   ack.message_type = MESH_TYPE_JOIN_ACK;
   ack.data_type = adapter_types::UNKNOWN_ADAPTER;
   memcpy(ack.origin_mac_address, deviceMacAddress, 6);
