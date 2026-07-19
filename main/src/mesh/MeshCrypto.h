@@ -5,7 +5,6 @@
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/ecp.h>
-#include <mbedtls/sha256.h>
 #include <esp_now.h>
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
