@@ -213,8 +213,7 @@ bool Mesh::setupEspNow() {
   }
 
   for (size_t i = 0; i < peers.peerCount; ++i) {
-    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[i].mac, enrollment.getPrivateKey(),
-                                                  peers.peerMacs[i].publicKey);
+    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[i].mac);
   }
   esp_now_register_send_cb(onDataSentCallback);
   esp_now_register_recv_cb(Mesh::dataRecvTrampoline);
@@ -769,9 +768,7 @@ void Mesh::addPeer(const uint8_t* mac) {
   size_t before = peers.peerCount;
   peers.addAndPersist(mac);
   if (peers.peerCount > before) {
-    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[peers.peerCount - 1].mac,
-                                                  enrollment.getPrivateKey(),
-                                                  peers.peerMacs[peers.peerCount - 1].publicKey);
+    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[peers.peerCount - 1].mac);
   }
 }
 

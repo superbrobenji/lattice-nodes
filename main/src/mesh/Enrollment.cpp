@@ -138,7 +138,7 @@ void Enrollment::enrollPeer(const uint8_t* mac, const uint8_t* pubKey32, Registe
   if (esp_now_is_peer_exist(mac)) {
     esp_now_del_peer(mac);
   }
-  crypto::registerPeerWithEspNow(mac, devicePrivateKey, pubKey32);
+  crypto::registerPeerWithEspNow(mac);
   if (registerFn)
     registerFn(mac, pubKey32);
 }

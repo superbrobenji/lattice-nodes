@@ -647,8 +647,10 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
   Mesh mesh = makeIntermediateNode();
   ASSERT_EQ(mesh.peers.find(kMasterMac), nullptr) << "precondition: master not yet a peer";
 
-  // Real Curve25519 keypairs: registration derives an ESP-NOW LMK via ECDH,
-  // which rejects a zeroed private key / arbitrary public-key bytes.
+  // Real Curve25519 keypairs: ESP-NOW peer registration no longer derives a
+  // per-peer LMK (Task 8 — link layer is unencrypted; E2E AEAD is the security
+  // boundary), but the stored public key still feeds E2E key derivation
+  // elsewhere, so keep using real (non-zeroed) keys here.
   uint8_t nodePriv[32], nodePub[32], masterPriv[32], masterKey[32];
   lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
   lattice::mesh::crypto::generateKeypair(masterPriv, masterKey);
