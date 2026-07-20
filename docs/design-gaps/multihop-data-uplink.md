@@ -3,6 +3,9 @@
 # Design Gap: Multi-Hop Data Uplink
 
 **Status:** Open — needs its own design/brainstorming session.
+**Update 2026-07-19:** Phase 1 (protocol v3 + E2E payload AEAD, spec
+`docs/superpowers/specs/2026-07-16-multihop-routing-e2e-crypto-design.md`) landed —
+keying groundwork done; the routing gap itself closes in Phase 2.
 **Discovered:** 2026-07-15, while building the e2e mesh simulation suite (Task 9).
 **Executable spec:** `tests/e2e/scenarios/test_multihop_e2e.cpp` →
 `DISABLED_SensorOutOfMasterRangeRelaysThroughMiddleNode` (committed disabled;
