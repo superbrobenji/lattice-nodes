@@ -77,18 +77,30 @@ void Mesh::printMeshMessage(const mesh_message& msg) {
 }
 
 PeerInfo* Mesh::findNextHopToMaster() {
-  // For this mesh: nextHop == currentMaster.nextHop
   if (currentMaster.distance == 0xFF)
     return nullptr;
-  for (size_t i = 0; i < peers.peerCount; ++i) {
-    if (lattice::utils::MacAddress(peers.peerMacs[i].mac) ==
-            lattice::utils::MacAddress(currentMaster.nextHop) &&
-        peers.isPeerInRange(peers.peerMacs[i].mac) &&
-        lattice::utils::MacAddress(peers.peerMacs[i].mac) !=
-            lattice::utils::MacAddress(deviceMacAddress))
-      return &peers.peerMacs[i];
-  }
-  return nullptr;
+
+  // Prefer an enrolled peer that is the direct master and in range (distance 1,
+  // the common single-hop case) — keeps the existing behavior and E2E peering.
+  PeerInfo* direct = peers.find(currentMaster.mac);
+  if (direct && currentMaster.distance == 1 && peers.isPeerInRange(direct->mac) &&
+      lattice::utils::MacAddress(direct->mac) != lattice::utils::MacAddress(deviceMacAddress))
+    return direct;
+
+  // Multi-hop (spec §3): pick the freshest neighbor strictly closer to the
+  // master from the NeighborTable. The relay need not be an enrolled peer.
+  uint8_t hopMac[6];
+  if (!neighbors.selectNextHop(currentMaster.distance, millis(), hopMac))
+    return nullptr;
+  if (lattice::utils::MacAddress(hopMac) == lattice::utils::MacAddress(deviceMacAddress))
+    return nullptr;
+
+  // Auto-register the chosen next hop as an unencrypted ESP-NOW peer (spec §3).
+  // Idempotent — registerPeerWithEspNow no-ops if the peer already exists.
+  lattice::mesh::crypto::registerPeerWithEspNow(hopMac);
+
+  memcpy(nextHopScratch.mac, hopMac, 6);
+  return &nextHopScratch;
 }
 
 uint16_t Mesh::nextSeqGuarded() {

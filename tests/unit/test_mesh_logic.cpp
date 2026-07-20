@@ -677,6 +677,23 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
       << "uplink route must resolve through the newly registered master peer";
 }
 
+TEST_F(JoinAckRelayTest, NextHopThroughRelayIsRegisteredAsEspNowPeer) {
+  Mesh mesh = makeIntermediateNode(); // distance/enrollment set up by fixture
+  // Node is distance 2; a relay at distance 1 is known ONLY via the NeighborTable
+  // (never enrolled → never in PeerRegistry).
+  const uint8_t relayMac[6] = {0x02, 0, 0, 0, 0, 0x77};
+  mesh.currentMaster.distance = 2;
+  mesh.testNeighbors().observe(relayMac, 1, mesh.testMillisNow());
+
+  resetEspNowMock(); // clear recorded peers (mirror the mock's reset used elsewhere)
+  PeerInfo* hop = mesh.findNextHopToMaster();
+
+  ASSERT_NE(hop, nullptr) << "distance-2 node must route through the distance-1 relay";
+  EXPECT_EQ(memcmp(hop->mac, relayMac, 6), 0);
+  EXPECT_TRUE(esp_now_is_peer_exist(relayMac))
+      << "relay must be auto-registered as an ESP-NOW peer";
+}
+
 // ─── JOIN_ACK forgery resistance ─────────────────────────────────────────────
 // JOIN_ACKs travel over the unencrypted broadcast peer, and everything a forger
 // needs is observable over the air: the victim's pubkey prefix (broadcast in its

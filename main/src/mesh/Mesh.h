@@ -173,6 +173,10 @@ private:
   // Forwarding candidates toward the master, learned from overheard master
   // beacons (spec §3). Routing only — never consulted for E2E crypto.
   NeighborTable neighbors;
+  // Holds a NeighborTable-resolved next hop (not an enrolled peer) so
+  // findNextHopToMaster() can return a stable PeerInfo* for a pure relay,
+  // which is never added to `peers` (enrollment-only rule).
+  PeerInfo nextHopScratch{};
   // Returns k_up/k_down for the current master (leaf side); false if not enrolled
   // or master pubkey unknown.
   bool masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown);
