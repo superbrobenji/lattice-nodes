@@ -66,6 +66,10 @@ inline void computeSharedSecret(const uint8_t* ownPrivateKey32, const uint8_t* p
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 25,
                         "MESH: computeSharedSecret — ecdh_calc_secret failed");
   }
+  if (outLen != 32) {
+    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 27,
+                        "MESH: computeSharedSecret — unexpected shared-secret length");
+  }
   mbedtls_ecdh_free(&ecdh);
   mbedtls_ctr_drbg_free(&ctr_drbg);
   mbedtls_entropy_free(&entropy);

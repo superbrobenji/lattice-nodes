@@ -253,8 +253,13 @@ void Mesh::drainRecvQueue() {
 
     const mesh_message& msg = entry.msg;
 
-    // Proto version check
-    if (msg.proto_version != 0 && msg.proto_version != PROTO_VERSION) {
+    // Proto version check: drop anything that isn't exactly the current wire
+    // version. There is no legitimate proto_version==0 case — buildMessage(),
+    // Enrollment::sendRequest(), and the JOIN_ACK path all stamp PROTO_VERSION
+    // unconditionally — so a zero value only ever means a forged/malformed
+    // frame that would otherwise bypass both this flag-day drop and the replay
+    // gate below (which is itself keyed on proto_version == PROTO_VERSION).
+    if (msg.proto_version != PROTO_VERSION) {
       Logger::logln("MESH", "Unsupported proto version, dropping", LogLevel::LOG_WARN);
       continue;
     }
@@ -662,6 +667,21 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     return;
   }
 
+  // Security gate: at the master, a sealed-type frame (ADAPTER_DATA/ROUTE_REPORT)
+  // that is NOT addressed to self must never reach local delivery unopened. No
+  // leaf ever originates a broadcast-target (FF:FF:FF:FF:FF:FF) sealed uplink —
+  // only the master's own downlink broadcast (broadcastAdapterData, which delivers
+  // locally directly and never re-enters this function) and beacons use FF:FF. So
+  // a broadcast-target (or otherwise not-self-addressed) sealed frame arriving here
+  // over the air at the master is either a stale self-echo or a forgery — drop it
+  // rather than deliver it to externalRecvCallback without E2E authentication.
+  if (isMaster && !addressedToSelf && isSealedType(msg.message_type)) {
+    Logger::logln("MESH",
+                   "Master: sealed-type frame not addressed to self rejected (unauthenticated)",
+                   LogLevel::LOG_WARN);
+    return;
+  }
+
   // Local delivery
   // E2E open (spec §2): master unseals self-targeted uplink before local delivery.
   mesh_message opened = msg;
@@ -683,10 +703,9 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;
   }
-  // Warn if master receives adapter data not addressed to itself — unexpected topology
-  if (isMaster && !addressedToSelf && !isBroadcastTarget) {
-    Logger::logln("MESH", "Master received ADAPTER_DATA not addressed to self", LogLevel::LOG_WARN);
-  }
+  // Note: the "master received ADAPTER_DATA not addressed to self" case is now
+  // handled (and rejected) by the security gate above — ADAPTER_DATA is always a
+  // sealed type, so isMaster && !addressedToSelf never reaches this point.
   if (externalRecvCallback)
     externalRecvCallback(opened);
 

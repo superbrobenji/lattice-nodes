@@ -98,3 +98,55 @@ TEST_F(MeshSimTest, ForgedFrameWithoutValidTagIsDropped) {
   EXPECT_EQ(hub->adapterDataFromOrigin(sensor->mac()).size(), before)
       << "a forged frame with an invalid auth tag must be dropped, not delivered to the hub";
 }
+
+// Final-review fix: a broadcast-target (FF:FF:FF:FF:FF:FF) ADAPTER_DATA frame
+// delivered at the master over the air must NOT reach the hub. No leaf ever
+// originates a broadcast-target ADAPTER_DATA uplink — only the master's own
+// downlink broadcast (Mesh::broadcastAdapterData, which delivers locally
+// directly and never round-trips through processAdapterData) and beacons use
+// FF:FF. Because addressedToSelf is false for a broadcast target, the old code
+// skipped E2E open (needsOpen required addressedToSelf) and delivered the raw,
+// unauthenticated frame straight to the serial/hub path — an RF attacker could
+// forge arbitrary "sensor data" to the hub without ever enrolling or knowing
+// any key material. Mirrors ForgedFrameWithoutValidTagIsDropped above, but
+// targets FF:FF instead of the master's own MAC, uses a fresh seq, and plain
+// (unsealed) attacker-controlled bytes with no valid auth tag at all.
+TEST_F(MeshSimTest, ForgedBroadcastTargetFrameNeverReachesHub) {
+  addMaster();
+  auto* sensor = addSensor(MAC_NODE_A);
+  world.bus.link(master, sensor);
+  enroll(sensor);
+
+  sensor->simulatePirMotion();
+  world.step(1);
+  mesh_message* onWire = world.bus.lastPendingOfType(MESH_TYPE_ADAPTER_DATA);
+  ASSERT_NE(onWire, nullptr) << "sensor must have a sealed ADAPTER_DATA uplink frame in flight";
+  // Correct/plausible header fields (origin MAC, proto_version, epoch) — exactly
+  // what an attacker could observe/replay off the air.
+  mesh_message legit = *onWire;
+
+  runPolled(2000);
+  size_t before = hub->received.size();
+  ASSERT_GT(hub->adapterDataFromOrigin(sensor->mac()).size(), 0u)
+      << "the legit frame must be delivered first (baseline for the check below)";
+
+  // Forge: same origin/epoch, broadcast target instead of the master's MAC, a
+  // FRESH seq (so ReplayCache dedup can't be the reason it's dropped),
+  // arbitrary attacker-chosen plaintext, and no valid auth tag whatsoever.
+  mesh_message forged = legit;
+  memset(forged.target_mac_address, 0xFF, 6);
+  forged.seq_num = static_cast<uint16_t>(legit.seq_num + 2000);
+  for (auto& b : forged.data)
+    b = 0x41; // arbitrary forged "sensor data"
+  for (auto& b : forged.auth_tag)
+    b = 0xAA;
+
+  sim::swapIn(master->ctx());
+  simulateReceive(sensor->mac(), reinterpret_cast<const uint8_t*>(&forged), sizeof(forged));
+  sim::swapOut(master->ctx());
+  runPolled(1000);
+
+  EXPECT_EQ(hub->received.size(), before)
+      << "a broadcast-target frame arriving at the master over the air must be dropped "
+         "entirely — the hub must receive nothing new from it";
+}

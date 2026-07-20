@@ -862,6 +862,46 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   EXPECT_EQ(deliveredCount, 1); // callback not invoked again
 }
 
+// Final-review fix: proto_version == 0 must not bypass the flag-day version
+// drop, and (since the replay gate is keyed on proto_version == PROTO_VERSION)
+// must also not bypass replay dedup. Everything else about this frame is
+// otherwise valid (properly sealed, addressed to self, fresh epoch/seq) so the
+// only reason it can be rejected is the version check itself.
+TEST_F(DrainRecvQueueTest, DropsProtoVersionZeroAdapterData) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = true;
+
+  uint8_t masterPriv[32], masterPub[32], originPriv[32], originPub[32];
+  lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+  lattice::mesh::crypto::generateKeypair(originPriv, originPub);
+  memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+  PeerInfo origin{};
+  memcpy(origin.mac, kOriginMac, 6);
+  memcpy(origin.publicKey, originPub, 32);
+  origin.lastSeenMillis = 0;
+  mesh.peers.append(origin);
+  uint8_t kUp[32], kDown[32];
+  lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
+
+  int deliveredCount = 0;
+  mesh.linkDataRecvCallback([&](const mesh_message&) { ++deliveredCount; });
+
+  mesh_message msg{};
+  msg.proto_version = 0; // forged/malformed — must be dropped, not delivered
+  msg.message_type = MESH_TYPE_ADAPTER_DATA;
+  msg.data_type = adapter_types::PIR_ADAPTER;
+  memcpy(msg.origin_mac_address, kOriginMac, 6);
+  memcpy(msg.target_mac_address, kMyMac, 6);
+  msg.epoch_num = 1;
+  msg.seq_num = 99;
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
+
+  injectAndDrain(mesh, msg);
+  EXPECT_EQ(deliveredCount, 0); // dropped by the version check, never reaches dispatch
+}
+
 // Task 9c R1: an enrollment request seen twice within one drain window (e.g. the
 // direct broadcast plus a neighbour's relayed copy, same origin/epoch/seq) must
 // be forwarded to the server only once — the master enqueues one pending relay.
