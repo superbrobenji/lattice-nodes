@@ -16,6 +16,7 @@
 #include "ReplayCache.h"
 #include "PeerRegistry.h"
 #include "Enrollment.h"
+#include "E2EKeyStore.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -31,7 +32,7 @@ using ::mesh_message;
 using ::MeshMessageType;
 using lattice::adapter::adapter_types;
 
-static constexpr uint8_t PROTO_VERSION = 2;
+static constexpr uint8_t PROTO_VERSION = 3;
 
 class Mesh {
 #ifdef UNIT_TEST
@@ -122,6 +123,18 @@ private:
   // Replay protection (composed)
   ReplayCache replay;
 
+  // Single choke point for drawing a tx sequence number from replay.txSeqNum.
+  // ALL sites that need a fresh (epoch, seq) pair for a message we originate
+  // MUST go through this — it is the only place that guards against the
+  // 0xFFFF -> 0 wrap (spec §2): a reused (epoch, seq) pair after a silent
+  // wrap would reuse an AEAD nonce. On wrap, bumps + persists the boot epoch
+  // before redrawing so the new sequence starts under a fresh epoch.
+  uint16_t nextSeqGuarded();
+
+#ifdef UNIT_TEST
+  ReplayCache& testReplay() { return replay; }
+#endif
+
   // Relay jitter: deferred relay pending fields (Task 3)
   mesh_message relayPendingMsg;
   uint32_t relayPendingAt;
@@ -151,6 +164,15 @@ private:
 
   // Enrollment state (composed — mbedtls-heavy methods stubbed in test builds)
   Enrollment enrollment;
+
+  // E2E AEAD (spec §1/§2): per-peer derived key cache + lookup helpers.
+  E2EKeyStore e2eKeys;
+  // Returns k_up/k_down for the current master (leaf side); false if not enrolled
+  // or master pubkey unknown.
+  bool masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown);
+  // Returns keys for an enrolled origin peer (master side); false if unknown peer.
+  bool peerE2EKeys(const uint8_t* originMac, const uint8_t** kUp, const uint8_t** kDown);
+  static bool isSealedType(uint8_t messageType);
 
 public:
   Mesh();
@@ -219,7 +241,13 @@ public:
   void sendEnrollmentRequest() {
     // Pass proto_version + a fresh (epoch, seq) so ReplayCache can dedup relayed
     // copies of this request while still allowing the deliberate 10s retry.
-    enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, replay.bootEpoch, replay.nextSeq());
+    // Draw seq via the guarded choke point FIRST (it may bump replay.bootEpoch
+    // on wrap), then read bootEpoch — reading it as a separate statement after
+    // the draw (rather than in the same call as replay.nextSeq()) avoids
+    // depending on unspecified argument evaluation order for a possibly-mutated
+    // member.
+    uint16_t seq = nextSeqGuarded();
+    enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, replay.bootEpoch, seq);
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
   void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);

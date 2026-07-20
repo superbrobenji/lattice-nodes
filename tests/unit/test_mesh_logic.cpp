@@ -3,6 +3,7 @@
 #include <vector>
 #include "mesh/Mesh.h"
 #include "mesh/MeshCrypto.h"
+#include "mesh/E2ECrypto.h"
 #include "esp_now_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
@@ -384,11 +385,30 @@ TEST_F(AdapterDataRelayTest, Master_DoesNotRelayUplink_DeliversLocally) {
   Mesh mesh = makeIntermediateNode();
   mesh.isMaster = true;
 
+  // Task 6 (E2E AEAD): the master now opens sealed ADAPTER_DATA before local
+  // delivery, so the test frame must be genuinely sealed with keys the master
+  // can actually derive (peerE2EKeys uses the master's own priv + the
+  // registered origin peer's pubkey; ECDH is symmetric, so sealing with the
+  // sensor's priv + the master's pubkey yields the same k_up).
+  uint8_t masterPriv[32], masterPub[32], sensorPriv[32], sensorPub[32];
+  lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+  lattice::mesh::crypto::generateKeypair(sensorPriv, sensorPub);
+  memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+  PeerInfo sensorPeer{};
+  memcpy(sensorPeer.mac, kSensorMac, 6);
+  memcpy(sensorPeer.publicKey, sensorPub, 32);
+  sensorPeer.lastSeenMillis = 0;
+  mesh.peers.append(sensorPeer);
+  uint8_t kUp[32], kDown[32];
+  lattice::mesh::crypto::deriveE2EKeys(sensorPriv, masterPub, kUp, kDown);
+
   bool callbackFired = false;
   mesh.linkDataRecvCallback([&](const mesh_message&) { callbackFired = true; });
 
   auto msg = makeUplinkMsg(1, 1);
   memcpy(msg.target_mac_address, mesh.deviceMacAddress, 6); // addressed to self (master)
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg)); // seal after target is final
 
   size_t before = espNowSentPackets.size();
   mesh.processAdapterData(msg);
@@ -627,8 +647,10 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
   Mesh mesh = makeIntermediateNode();
   ASSERT_EQ(mesh.peers.find(kMasterMac), nullptr) << "precondition: master not yet a peer";
 
-  // Real Curve25519 keypairs: registration derives an ESP-NOW LMK via ECDH,
-  // which rejects a zeroed private key / arbitrary public-key bytes.
+  // Real Curve25519 keypairs: ESP-NOW peer registration no longer derives a
+  // per-peer LMK (Task 8 — link layer is unencrypted; E2E AEAD is the security
+  // boundary), but the stored public key still feeds E2E key derivation
+  // elsewhere, so keep using real (non-zeroed) keys here.
   uint8_t nodePriv[32], nodePub[32], masterPriv[32], masterKey[32];
   lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
   lattice::mesh::crypto::generateKeypair(masterPriv, masterKey);
@@ -804,23 +826,80 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   Mesh mesh;
   memcpy(mesh.deviceMacAddress, kMyMac, 6);
   mesh.isMaster = true; // master: delivers locally, no relay — clean baseline
+
+  // Task 6 (E2E AEAD): master opens sealed ADAPTER_DATA before dispatch, so
+  // this frame must be sealed with keys the master can actually derive.
+  uint8_t masterPriv[32], masterPub[32], originPriv[32], originPub[32];
+  lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+  lattice::mesh::crypto::generateKeypair(originPriv, originPub);
+  memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+  PeerInfo origin{};
+  memcpy(origin.mac, kOriginMac, 6);
+  memcpy(origin.publicKey, originPub, 32);
+  origin.lastSeenMillis = 0;
+  mesh.peers.append(origin);
+  uint8_t kUp[32], kDown[32];
+  lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
+
   int deliveredCount = 0;
   mesh.linkDataRecvCallback([&](const mesh_message&) { ++deliveredCount; });
 
   mesh_message msg{};
-  msg.proto_version = 2;
+  msg.proto_version = PROTO_VERSION;
   msg.message_type = MESH_TYPE_ADAPTER_DATA;
   msg.data_type = adapter_types::PIR_ADAPTER;
   memcpy(msg.origin_mac_address, kOriginMac, 6);
   memcpy(msg.target_mac_address, kMyMac, 6);
   msg.epoch_num = 1;
   msg.seq_num = 42;
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
 
   injectAndDrain(mesh, msg); // first: not replay — delivered
   EXPECT_EQ(deliveredCount, 1);
 
   injectAndDrain(mesh, msg);    // replay: drainRecvQueue drops before dispatch
   EXPECT_EQ(deliveredCount, 1); // callback not invoked again
+}
+
+// Final-review fix: proto_version == 0 must not bypass the flag-day version
+// drop, and (since the replay gate is keyed on proto_version == PROTO_VERSION)
+// must also not bypass replay dedup. Everything else about this frame is
+// otherwise valid (properly sealed, addressed to self, fresh epoch/seq) so the
+// only reason it can be rejected is the version check itself.
+TEST_F(DrainRecvQueueTest, DropsProtoVersionZeroAdapterData) {
+  Mesh mesh;
+  memcpy(mesh.deviceMacAddress, kMyMac, 6);
+  mesh.isMaster = true;
+
+  uint8_t masterPriv[32], masterPub[32], originPriv[32], originPub[32];
+  lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+  lattice::mesh::crypto::generateKeypair(originPriv, originPub);
+  memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+  PeerInfo origin{};
+  memcpy(origin.mac, kOriginMac, 6);
+  memcpy(origin.publicKey, originPub, 32);
+  origin.lastSeenMillis = 0;
+  mesh.peers.append(origin);
+  uint8_t kUp[32], kDown[32];
+  lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
+
+  int deliveredCount = 0;
+  mesh.linkDataRecvCallback([&](const mesh_message&) { ++deliveredCount; });
+
+  mesh_message msg{};
+  msg.proto_version = 0; // forged/malformed — must be dropped, not delivered
+  msg.message_type = MESH_TYPE_ADAPTER_DATA;
+  msg.data_type = adapter_types::PIR_ADAPTER;
+  memcpy(msg.origin_mac_address, kOriginMac, 6);
+  memcpy(msg.target_mac_address, kMyMac, 6);
+  msg.epoch_num = 1;
+  msg.seq_num = 99;
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
+
+  injectAndDrain(mesh, msg);
+  EXPECT_EQ(deliveredCount, 0); // dropped by the version check, never reaches dispatch
 }
 
 // Task 9c R1: an enrollment request seen twice within one drain window (e.g. the

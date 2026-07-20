@@ -3,6 +3,9 @@
 # Design Gap: Multi-Hop Data Uplink
 
 **Status:** Open — needs its own design/brainstorming session.
+**Update 2026-07-19:** Phase 1 (protocol v3 + E2E payload AEAD, spec
+`docs/superpowers/specs/2026-07-16-multihop-routing-e2e-crypto-design.md`) landed —
+keying groundwork done; the routing gap itself closes in Phase 2.
 **Discovered:** 2026-07-15, while building the e2e mesh simulation suite (Task 9).
 **Executable spec:** `tests/e2e/scenarios/test_multihop_e2e.cpp` →
 `DISABLED_SensorOutOfMasterRangeRelaysThroughMiddleNode` (committed disabled;
@@ -56,12 +59,17 @@ Three mechanisms combine so that a distance-2 node has no route:
    hop is the relay, which is not a registered peer, so the lookup returns
    `nullptr`.
 
-Underlying constraint: ESP-NOW links are encrypted with a **per-peer LMK derived
-by Curve25519 ECDH** (`MeshCrypto.h`), and there is **no shared mesh-wide key**.
-A node can only send an encrypted frame to a peer it has performed the ECDH
-handshake with. It has done so with the master, not with the relay — so even if
-the relay were added to the registry, there is no key material to encrypt the
-hop to it.
+Underlying constraint (updated post-Task 8/Phase 1): the ESP-NOW link layer is
+now **unencrypted** — per-peer LMK link encryption was removed, and end-to-end
+AEAD (proto v3, Phase 1) is the security boundary instead, sealing payloads
+node→master and master→node with keys derived per (node, master) ECDH pair.
+That removes the "no key material for the hop" problem, but it does not by
+itself give a distance-2 leaf a route: the leaf's E2E keys are still derived
+against the *master's* public key, not the relay's, and the relay is still not
+a registered peer of the leaf. The remaining gap is **next-hop peer
+registration / route establishment** — the leaf needs a way to discover and
+register its next hop toward the master (or an equivalent per-hop authenticated
+relationship), not new key material for the link itself.
 
 ## Side effect introduced by the Task 9b enrollment-relay fix
 

@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include "mesh/Mesh.h"
+#include "mesh/MeshCrypto.h"
+#include "mesh/E2ECrypto.h"
 #include "esp_now_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
@@ -13,9 +15,18 @@ protected:
     EEPROM.reset();
     resetMillis();
     resetEspNowMock();
+    // Task 6 (E2E AEAD): self-originated ADAPTER_DATA/ROUTE_REPORT uplinks are
+    // now sealed in transmitCore(), which requires a real (non-zero) master
+    // pubkey to derive a key with — generate real Curve25519 keypairs once per
+    // test so setupRelayNode() below can register a properly keyed master peer.
+    lattice::mesh::crypto::generateKeypair(myPriv, myPub);
+    lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
   }
 
-  // Set up mesh as non-master with a reachable master peer
+  uint8_t myPriv[32], myPub[32];
+  uint8_t masterPriv[32], masterPub[32];
+
+  // Set up mesh as non-master with a reachable, E2E-keyed master peer.
   void setupRelayNode(Mesh& mesh, const uint8_t masterMac[6]) {
     static const uint8_t myMac[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01};
     memcpy(mesh.deviceMacAddress, myMac, 6);
@@ -25,10 +36,14 @@ protected:
     memcpy(mesh.currentMaster.mac, masterMac, 6);
     mesh.currentMaster.distance = 1;
     memcpy(mesh.currentMaster.nextHop, masterMac, 6);
+    memcpy(mesh.enrollment.devicePrivateKey, myPriv, 32);
+    memcpy(mesh.enrollment.devicePublicKey, myPub, 32);
 
-    // Register master as a live peer so findNextHopToMaster() returns it
+    // Register master as a live, keyed peer so findNextHopToMaster() AND E2E
+    // sealing (Mesh::masterE2EKeys) both succeed.
     PeerInfo peer{};
     memcpy(peer.mac, masterMac, 6);
+    memcpy(peer.publicKey, masterPub, 32);
     peer.lastSeenMillis = millis();
     mesh.peers.append(peer);
   }
@@ -39,6 +54,15 @@ protected:
       return {};
     }
     return *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
+  }
+
+  // The k_up this node uses to seal uplinks to the master set up by
+  // setupRelayNode() — ECDH is symmetric, so deriving from our own priv + the
+  // master's pubkey matches what the master derives from its priv + our pubkey
+  // (mirrors Mesh::masterE2EKeys).
+  void deriveUpKey(uint8_t kUpOut[32]) {
+    uint8_t kDown[32];
+    lattice::mesh::crypto::deriveE2EKeys(myPriv, masterPub, kUpOut, kDown);
   }
 };
 
@@ -62,7 +86,14 @@ TEST_F(RouteReportTest, SendRouteReport_PayloadStructure) {
 
   mesh.sendRouteReport();
 
+  // The wire payload is now E2E-sealed (Task 6) — open it with the same k_up
+  // the master would derive before asserting on its plaintext structure.
   mesh_message sent = lastSentMsg();
+  uint8_t kUp[32];
+  deriveUpKey(kUp);
+  ASSERT_TRUE(lattice::mesh::crypto::openPayload(kUp, sent))
+      << "sent frame must open with the k_up derived the same way the master would";
+
   EXPECT_EQ(sent.data[0], OP_ROUTE_REPORT);  // 0xB3
   EXPECT_EQ(sent.data[1], 0);                // path_len = 0 on origin
   // data[2..63] should be zeroed
@@ -83,7 +114,14 @@ TEST_F(RouteReportTest, SendRouteReport_NotSentByMaster) {
   EXPECT_EQ(espNowSentPackets.size(), before);
 }
 
-TEST_F(RouteReportTest, ProcessRouteReport_RelayAppendsMAC) {
+// Task 6 (spec §4): the payload is E2E-sealed end-to-end (origin -> master),
+// so an intermediate relay can no longer read or mutate it — path
+// accumulation via msg.data is removed (it moves to the header route_path
+// field in a future phase). A relay now forwards the sealed frame
+// byte-for-byte, only updating routing metadata (hop_count/last_hop).
+// Replaces the old ProcessRouteReport_RelayAppendsMAC, which asserted the
+// pre-AEAD path-accumulation behavior this task intentionally removes.
+TEST_F(RouteReportTest, ProcessRouteReport_RelayForwardsSealedFrameUnmodified) {
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   const uint8_t myMac[6]     = {0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x01};
@@ -91,17 +129,17 @@ TEST_F(RouteReportTest, ProcessRouteReport_RelayAppendsMAC) {
   setupRelayNode(mesh, masterMac);
   memcpy(mesh.deviceMacAddress, myMac, 6); // set after setupRelayNode (which overwrites it)
 
-  // Build a route report with path_len=1 (one relay MAC already written)
+  // Foreign origin (not this relay) standing in for an already-sealed frame —
+  // a relay never re-seals, only forwards. The bytes are opaque on purpose:
+  // a relay must not need to interpret them.
   mesh_message msg{};
   msg.proto_version = PROTO_VERSION;
   msg.message_type = MESH_TYPE_ROUTE_REPORT;
   msg.data_type = 0;
   msg.hop_count = 1;
   memcpy(msg.origin_mac_address, originMac, 6);
-  msg.data[0] = OP_ROUTE_REPORT;
-  msg.data[1] = 1; // one relay already written
-  // data[2..7] = some relay MAC
-  memset(&msg.data[2], 0xAB, 6);
+  for (int i = 0; i < 64; ++i)
+    msg.data[i] = static_cast<uint8_t>(0xC0 + i);
 
   size_t before = espNowSentPackets.size();
   mesh.processRouteReport(msg);
@@ -109,16 +147,31 @@ TEST_F(RouteReportTest, ProcessRouteReport_RelayAppendsMAC) {
   ASSERT_EQ(espNowSentPackets.size(), before + 1);
   mesh_message sent = lastSentMsg();
   EXPECT_EQ(sent.message_type, MESH_TYPE_ROUTE_REPORT);
-  EXPECT_EQ(sent.data[1], 2); // path_len incremented to 2
-
-  // Our device MAC should be at data[8..13] (index 1 = second relay slot)
-  EXPECT_EQ(memcmp(&sent.data[8], myMac, 6), 0);
+  EXPECT_EQ(memcmp(sent.data, msg.data, sizeof(sent.data)), 0)
+      << "relay must forward the sealed payload byte-for-byte, unmodified (spec §4)";
+  EXPECT_EQ(memcmp(sent.last_hop_mac_address, myMac, 6), 0);
   EXPECT_EQ(sent.hop_count, 2);
 }
 
 TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
+  const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   Mesh mesh;
   mesh.isMaster = true;
+
+  // Task 6 (E2E AEAD): master opens the sealed payload before delivering to
+  // the callback — register the origin as a keyed peer and seal accordingly.
+  uint8_t originPriv[32], originPub[32];
+  lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+  lattice::mesh::crypto::generateKeypair(originPriv, originPub);
+  memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+  PeerInfo origin{};
+  memcpy(origin.mac, originMac, 6);
+  memcpy(origin.publicKey, originPub, 32);
+  origin.lastSeenMillis = 0;
+  mesh.peers.append(origin);
+  uint8_t kUp[32], kDown[32];
+  lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
 
   bool callbackFired = false;
   mesh_message received{};
@@ -130,8 +183,10 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
   mesh_message msg{};
   msg.proto_version = PROTO_VERSION;
   msg.message_type = MESH_TYPE_ROUTE_REPORT;
+  memcpy(msg.origin_mac_address, originMac, 6);
   msg.data[0] = OP_ROUTE_REPORT;
   msg.data[1] = 1;
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
 
   mesh.processRouteReport(msg);
 
@@ -139,38 +194,65 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
   EXPECT_EQ(received.data[0], OP_ROUTE_REPORT);
 }
 
-TEST_F(RouteReportTest, ProcessRouteReport_PathFullDropsMessage) {
+// Replaces the old ProcessRouteReport_PathFullDropsMessage: the path-length
+// guard was part of the relay-side path-accumulation feature this task
+// removes (spec §4 — a relay can no longer read msg.data at all). The
+// remaining relay-side guard is the pre-existing hop-count limit.
+TEST_F(RouteReportTest, ProcessRouteReport_HopLimitDropsMessage) {
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   Mesh mesh;
   setupRelayNode(mesh, masterMac);
 
   mesh_message msg{};
   msg.proto_version = PROTO_VERSION;
   msg.message_type = MESH_TYPE_ROUTE_REPORT;
-  msg.data[0] = OP_ROUTE_REPORT;
-  msg.data[1] = 10; // path full — max 10 relay MACs
+  msg.hop_count = lattice::config::MAX_HOPS; // at limit — relay must not forward further
+  memcpy(msg.origin_mac_address, originMac, 6);
+  for (int i = 0; i < 64; ++i) // opaque payload — relay never reads it
+    msg.data[i] = 0xAB;
 
   size_t before = espNowSentPackets.size();
   mesh.processRouteReport(msg);
 
-  EXPECT_EQ(espNowSentPackets.size(), before); // no message sent
+  EXPECT_EQ(espNowSentPackets.size(), before); // no message sent — hop limit reached
 }
 
-TEST_F(RouteReportTest, ProcessRouteReport_MalformedOpcodeDropsMessage) {
-  const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+// Replaces the old ProcessRouteReport_MalformedOpcodeDropsMessage: opcode
+// validation is no longer possible at a relay (payload is ciphertext to it).
+// It now happens only at the master, after a successful AEAD open.
+TEST_F(RouteReportTest, ProcessRouteReport_MasterDropsOnBadOpcodeAfterOpen) {
+  const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   Mesh mesh;
-  setupRelayNode(mesh, masterMac);
+  mesh.isMaster = true;
+
+  uint8_t originPriv[32], originPub[32];
+  lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+  lattice::mesh::crypto::generateKeypair(originPriv, originPub);
+  memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+  PeerInfo origin{};
+  memcpy(origin.mac, originMac, 6);
+  memcpy(origin.publicKey, originPub, 32);
+  origin.lastSeenMillis = 0;
+  mesh.peers.append(origin);
+  uint8_t kUp[32], kDown[32];
+  lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
+
+  bool callbackFired = false;
+  mesh.linkDataRecvCallback([&](const mesh_message&) { callbackFired = true; });
 
   mesh_message msg{};
   msg.proto_version = PROTO_VERSION;
   msg.message_type = MESH_TYPE_ROUTE_REPORT;
-  msg.data[0] = 0xFF; // wrong opcode
-  msg.data[1] = 0;
+  memcpy(msg.origin_mac_address, originMac, 6);
+  msg.data[0] = 0xFF; // wrong opcode (plaintext) — sealed correctly, auth succeeds
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
 
-  size_t before = espNowSentPackets.size();
   mesh.processRouteReport(msg);
 
-  EXPECT_EQ(espNowSentPackets.size(), before); // no message sent
+  EXPECT_FALSE(callbackFired)
+      << "master must drop a validly-sealed frame carrying an unexpected opcode";
 }
 
 TEST_F(RouteReportTest, DrainRecvQueue_DispatchesRouteReport) {

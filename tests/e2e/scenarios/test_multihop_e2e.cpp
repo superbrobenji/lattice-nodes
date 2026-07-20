@@ -70,10 +70,12 @@ TEST_F(MeshSimTest, EnrollmentRequestNotDuplicatedToHubViaRelayPath) {
 // Mesh::findNextHopToMaster() can only route through a peer that is in the
 // PeerRegistry AND fresh, but a node only ever registers the MASTER as a peer
 // (via JOIN_ACK), never its intermediate next-hop relay. PeerRegistry deliberately
-// refuses to auto-add senders ("Enrollment is the only path for new peers"), and
-// there is no pairwise key with the relay (LMK is per-peer ECDH, no shared mesh
-// key), so the leaf cannot unicast-encrypt to the relay. The leaf therefore has
-// no uplink route and Mesh::transmitCore() calls err::fail (COMM/MESH/8). Enabling
+// refuses to auto-add senders ("Enrollment is the only path for new peers"), so
+// even though the relay could now be added as an unencrypted ESP-NOW peer
+// (per-peer LMK derivation was removed in Task 8 — link-layer confidentiality
+// is no longer pairwise-key-gated), the leaf still has no PeerRegistry entry
+// for the relay to route through. The leaf therefore has no uplink route and
+// Mesh::transmitCore() calls err::fail (COMM/MESH/8). Enabling
 // this needs adjacent-hop key establishment / next-hop peer registration — a
 // separate feature, not a minimal bug fix. Assertions are preserved verbatim as
 // the spec for that future work. Re-enable (drop the DISABLED_ prefix) once the

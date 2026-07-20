@@ -5,7 +5,6 @@
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/ecp.h>
-#include <mbedtls/sha256.h>
 #include <esp_now.h>
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
@@ -14,137 +13,16 @@ namespace lattice {
 namespace mesh {
 namespace crypto {
 
-// Derive a 16-byte LMK for a peer using ECDH + SHA256.
-// LMK = SHA256(ECDH_shared_secret || "lattice-lmk")[0:16]
-inline void derivePeerLMK(const uint8_t* ownPrivateKey32, const uint8_t* peerPublicKey32,
-                          uint8_t* lmk16Out) {
-  mbedtls_ecdh_context ecdh;
-  mbedtls_entropy_context entropy;
-  mbedtls_ctr_drbg_context ctr_drbg;
-  mbedtls_ecdh_init(&ecdh);
-  mbedtls_entropy_init(&entropy);
-  mbedtls_ctr_drbg_init(&ctr_drbg);
-
-  int ret = 0;
-
-  const char* pers = "lattice_ecdh";
-  ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                              reinterpret_cast<const uint8_t*>(pers), strlen(pers));
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 10,
-                        "MESH: derivePeerLMK — ctr_drbg_seed failed");
-  }
-
-  ret = mbedtls_ecdh_setup(&ecdh, MBEDTLS_ECP_DP_CURVE25519);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 11,
-                        "MESH: derivePeerLMK — ecdh_setup failed");
-  }
-
-  // Load own private key and peer public key (X coordinate only for Curve25519)
-  ret = mbedtls_mpi_read_binary(
-      &ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(d), ownPrivateKey32,
-      32);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 12,
-                        "MESH: derivePeerLMK — mpi_read_binary (private key) failed");
-  }
-
-  ret = mbedtls_mpi_read_binary(
-      &ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(X),
-      peerPublicKey32, 32);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 13,
-                        "MESH: derivePeerLMK — mpi_read_binary (peer public key) failed");
-  }
-
-  ret = mbedtls_mpi_lset(
-      &ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(Z),
-      1);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 14,
-                        "MESH: derivePeerLMK — mpi_lset (Qp.Z) failed");
-  }
-
-  uint8_t sharedSecret[32] = {};
-  size_t outLen = 0;
-  ret = mbedtls_ecdh_calc_secret(&ecdh, &outLen, sharedSecret, sizeof(sharedSecret),
-                                 mbedtls_ctr_drbg_random, &ctr_drbg);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 15,
-                        "MESH: derivePeerLMK — ecdh_calc_secret failed");
-  }
-
-  mbedtls_ecdh_free(&ecdh);
-  mbedtls_ctr_drbg_free(&ctr_drbg);
-  mbedtls_entropy_free(&entropy);
-
-  // KDF: SHA256(sharedSecret || "lattice-lmk"), take first 16 bytes
-  mbedtls_sha256_context sha;
-  mbedtls_sha256_init(&sha);
-
-  ret = mbedtls_sha256_starts(&sha, 0); // 0 = SHA-256, not SHA-224
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 16,
-                        "MESH: derivePeerLMK — sha256_starts failed");
-  }
-
-  ret = mbedtls_sha256_update(&sha, sharedSecret, 32);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 17,
-                        "MESH: derivePeerLMK — sha256_update (secret) failed");
-  }
-
-  const uint8_t label[] = "lattice-lmk";
-  ret = mbedtls_sha256_update(&sha, label, sizeof(label) - 1);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 18,
-                        "MESH: derivePeerLMK — sha256_update (label) failed");
-  }
-
-  uint8_t digest[32];
-  ret = mbedtls_sha256_finish(&sha, digest);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 19,
-                        "MESH: derivePeerLMK — sha256_finish failed");
-  }
-
-  mbedtls_sha256_free(&sha);
-
-  memcpy(lmk16Out, digest, 16);
-
-  // Zero sensitive buffers after use (Fix 2)
-  memset(sharedSecret, 0, sizeof(sharedSecret));
-  memset(digest, 0, sizeof(digest));
-}
-
-inline void registerPeerWithEspNow(const uint8_t mac[6], const uint8_t* ownPrivateKey32,
-                                   const uint8_t* peerPublicKey32) {
+// Register an ESP-NOW peer WITHOUT link-layer encryption (spec §2, proto v3):
+// payload confidentiality/integrity is end-to-end (E2ECrypto.h), and unencrypted
+// slots raise the ESP-NOW peer cap from ~6 to 20. The shared PMK stays set.
+inline void registerPeerWithEspNow(const uint8_t mac[6]) {
   if (esp_now_is_peer_exist(mac))
     return;
-  uint8_t lmk[16];
-  bool hasPublicKey = false;
-  if (peerPublicKey32) {
-    // Check that public key is not all-zero (unset)
-    for (int i = 0; i < 32; ++i) {
-      if (peerPublicKey32[i] != 0x00) {
-        hasPublicKey = true;
-        break;
-      }
-    }
-  }
-  if (hasPublicKey && ownPrivateKey32) {
-    derivePeerLMK(ownPrivateKey32, peerPublicKey32, lmk);
-  } else {
-    // Peer public key not yet known (pre-enrollment) — no encryption
-    memset(lmk, 0, 16);
-  }
   esp_now_peer_info_t info = {};
   memcpy(info.peer_addr, mac, 6);
   info.channel = 0;
-  info.encrypt = hasPublicKey;
-  if (hasPublicKey)
-    memcpy(info.lmk, lmk, 16);
+  info.encrypt = false;
   lattice::err::checkEsp(esp_now_add_peer(&info), lattice::utils::ErrorType::COMMUNICATION_FAIL,
                          "registerPeerWithEspNow: add_peer failed");
 }

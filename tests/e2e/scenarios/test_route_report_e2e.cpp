@@ -47,8 +47,16 @@ TEST_F(MeshSimTest, DirectNodeRouteReportReachesHub) {
 // distance >= 2 — sendRouteReport() returns false because findNextHopToMaster()
 // is null when the next hop (the relay) is not a registered, in-range peer.
 // Same root cause as the multi-hop data-uplink gap documented in
-// docs/design-gaps/multihop-data-uplink.md. Assertions below are the intended
-// behavior; drop the DISABLED_ prefix once that gap is closed.
+// docs/design-gaps/multihop-data-uplink.md.
+//
+// Task 6 (E2E AEAD) note: even once multi-hop uplink lands, the path-chain
+// assertions below are now STALE — the payload is E2E-sealed origin->master,
+// so a relay can no longer read/append to msg.data (Mesh::processRouteReport's
+// relay branch just forwards the sealed frame unmodified). Path accumulation
+// moves to the header route_path field in a future phase (spec §4); until
+// then the hub-side expectation is path_len == 0 (empty path) regardless of
+// hop count. Assertions below are stale pre-AEAD intent, kept for history —
+// rewrite them (pathLen == 0, no relay-MAC check) before dropping DISABLED_.
 TEST_F(MeshSimTest, DISABLED_RouteReportCarriesHopChain) {
   addMaster();
   auto* relay = addSensor(MAC_NODE_A);

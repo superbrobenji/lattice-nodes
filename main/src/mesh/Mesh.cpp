@@ -10,6 +10,7 @@
 #include "../../project_config.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "MeshCrypto.h"
+#include "E2ECrypto.h"
 
 namespace lattice {
 namespace mesh {
@@ -90,6 +91,22 @@ PeerInfo* Mesh::findNextHopToMaster() {
   return nullptr;
 }
 
+uint16_t Mesh::nextSeqGuarded() {
+  uint16_t seq = replay.nextSeq();
+  if (seq == 0) {
+    // seq wrapped (spec §2): a reused (epoch, seq) pair would reuse an AEAD nonce.
+    // Advance the persisted epoch and restart the sequence. replay.bootEpoch is
+    // already the currently active epoch (kept in sync with EEPROM by init()
+    // and by this method), so bump from it directly rather than re-reading
+    // EEPROM.
+    uint32_t epoch = replay.bootEpoch + 1;
+    EepromManager::getInstance().saveBootEpoch(epoch);
+    replay.bootEpoch = epoch;
+    seq = replay.nextSeq();
+  }
+  return seq;
+}
+
 mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType) {
   mesh_message msg = {};
   msg.proto_version = PROTO_VERSION;
@@ -105,8 +122,8 @@ mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMes
   if (data)
     memcpy(msg.data, data, sizeof(msg.data));
   msg.hop_count = 0;
+  msg.seq_num = nextSeqGuarded();
   msg.epoch_num = replay.bootEpoch;
-  msg.seq_num = replay.nextSeq();
   return msg;
 }
 
@@ -196,8 +213,7 @@ bool Mesh::setupEspNow() {
   }
 
   for (size_t i = 0; i < peers.peerCount; ++i) {
-    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[i].mac, enrollment.getPrivateKey(),
-                                                  peers.peerMacs[i].publicKey);
+    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[i].mac);
   }
   esp_now_register_send_cb(onDataSentCallback);
   esp_now_register_recv_cb(Mesh::dataRecvTrampoline);
@@ -237,8 +253,13 @@ void Mesh::drainRecvQueue() {
 
     const mesh_message& msg = entry.msg;
 
-    // Proto version check
-    if (msg.proto_version != 0 && msg.proto_version != PROTO_VERSION) {
+    // Proto version check: drop anything that isn't exactly the current wire
+    // version. There is no legitimate proto_version==0 case — buildMessage(),
+    // Enrollment::sendRequest(), and the JOIN_ACK path all stamp PROTO_VERSION
+    // unconditionally — so a zero value only ever means a forged/malformed
+    // frame that would otherwise bypass both this flag-day drop and the replay
+    // gate below (which is itself keyed on proto_version == PROTO_VERSION).
+    if (msg.proto_version != PROTO_VERSION) {
       Logger::logln("MESH", "Unsupported proto version, dropping", LogLevel::LOG_WARN);
       continue;
     }
@@ -312,6 +333,26 @@ void Mesh::broadcastToAllPeers(const mesh_message& msg) {
   }
 }
 
+bool Mesh::isSealedType(uint8_t messageType) {
+  return messageType == MESH_TYPE_ADAPTER_DATA || messageType == MESH_TYPE_ROUTE_REPORT;
+}
+
+bool Mesh::masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown) {
+  if (!enrollment.hasMasterMac)
+    return false;
+  PeerInfo* master = peers.find(currentMaster.mac);
+  if (!master)
+    return false;
+  return e2eKeys.getKeys(master->mac, enrollment.getPrivateKey(), master->publicKey, kUp, kDown);
+}
+
+bool Mesh::peerE2EKeys(const uint8_t* originMac, const uint8_t** kUp, const uint8_t** kDown) {
+  PeerInfo* peer = peers.find(originMac);
+  if (!peer)
+    return false;
+  return e2eKeys.getKeys(peer->mac, enrollment.getPrivateKey(), peer->publicKey, kUp, kDown);
+}
+
 void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessageType msgType,
                         const mesh_message* msgOverride) {
   mesh_message msg;
@@ -325,6 +366,17 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
   if (msgType == MESH_TYPE_ADAPTER_DATA) {
     memcpy(msg.target_mac_address, currentMaster.mac,
            6); // authoritative: overrides relay's original target
+  }
+
+  // E2E seal (spec §1/§2): self-originated uplink payloads only. Relayed frames
+  // (msgOverride with foreign origin) are already sealed — forward untouched.
+  bool selfOriginated = (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0);
+  if (!isMaster && selfOriginated && isSealedType(msg.message_type)) {
+    const uint8_t *kUp, *kDown;
+    if (!masterE2EKeys(&kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kUp, msg)) {
+      Logger::logln("MESH", "E2E seal unavailable — uplink dropped", LogLevel::LOG_WARN);
+      return;
+    }
   }
 
   // Routing: always use next hop if possible
@@ -615,21 +667,47 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     return;
   }
 
+  // Security gate: at the master, a sealed-type frame (ADAPTER_DATA/ROUTE_REPORT)
+  // that is NOT addressed to self must never reach local delivery unopened. No
+  // leaf ever originates a broadcast-target (FF:FF:FF:FF:FF:FF) sealed uplink —
+  // only the master's own downlink broadcast (broadcastAdapterData, which delivers
+  // locally directly and never re-enters this function) and beacons use FF:FF. So
+  // a broadcast-target (or otherwise not-self-addressed) sealed frame arriving here
+  // over the air at the master is either a stale self-echo or a forgery — drop it
+  // rather than deliver it to externalRecvCallback without E2E authentication.
+  if (isMaster && !addressedToSelf && isSealedType(msg.message_type)) {
+    Logger::logln("MESH",
+                  "Master: sealed-type frame not addressed to self rejected (unauthenticated)",
+                  LogLevel::LOG_WARN);
+    return;
+  }
+
   // Local delivery
+  // E2E open (spec §2): master unseals self-targeted uplink before local delivery.
+  mesh_message opened = msg;
+  bool needsOpen = isMaster && addressedToSelf && isSealedType(msg.message_type);
+  if (needsOpen) {
+    const uint8_t *kUp, *kDown;
+    if (!peerE2EKeys(msg.origin_mac_address, &kUp, &kDown) ||
+        !lattice::mesh::crypto::openPayload(kUp, opened)) {
+      Logger::logln("MESH", "E2E open failed — frame dropped", LogLevel::LOG_WARN);
+      return;
+    }
+  }
+
   bool isConfigOpcode =
-      (msg.data_type == adapter_types::SERIAL_ADAPTER && msg.data[0] == OP_CONFIG_SET);
+      (opened.data_type == adapter_types::SERIAL_ADAPTER && opened.data[0] == OP_CONFIG_SET);
   // TODO(dual-master): also allow secondary master MAC for CONFIG_SET
   if (isConfigOpcode && enrollment.hasMasterMac &&
-      memcmp(msg.origin_mac_address, enrollment.knownMasterMac, 6) != 0) {
+      memcmp(opened.origin_mac_address, enrollment.knownMasterMac, 6) != 0) {
     Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
     return;
   }
-  // Warn if master receives adapter data not addressed to itself — unexpected topology
-  if (isMaster && !addressedToSelf && !isBroadcastTarget) {
-    Logger::logln("MESH", "Master received ADAPTER_DATA not addressed to self", LogLevel::LOG_WARN);
-  }
+  // Note: the "master received ADAPTER_DATA not addressed to self" case is now
+  // handled (and rejected) by the security gate above — ADAPTER_DATA is always a
+  // sealed type, so isMaster && !addressedToSelf never reaches this point.
   if (externalRecvCallback)
-    externalRecvCallback(msg);
+    externalRecvCallback(opened);
 
   // Broadcast: also relay so multi-hop nodes receive it (Task 3 test covers this)
   if (isBroadcastTarget && !isMaster) {
@@ -709,9 +787,7 @@ void Mesh::addPeer(const uint8_t* mac) {
   size_t before = peers.peerCount;
   peers.addAndPersist(mac);
   if (peers.peerCount > before) {
-    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[peers.peerCount - 1].mac,
-                                                  enrollment.getPrivateKey(),
-                                                  peers.peerMacs[peers.peerCount - 1].publicKey);
+    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[peers.peerCount - 1].mac);
   }
 }
 
@@ -770,8 +846,11 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
   // given JOIN_ACK at most once (the reflected copy is dropped by isReplay before
   // processJoinAck), preventing combinatorial broadcast amplification.
   ack.proto_version = PROTO_VERSION;
+  // Draw seq via the guarded choke point FIRST — it may bump replay.bootEpoch
+  // on wrap — then stamp epoch_num from the (possibly just-bumped) value so
+  // the ACK's epoch always matches the epoch its seq_num was drawn under.
+  ack.seq_num = nextSeqGuarded();
   ack.epoch_num = replay.bootEpoch;
-  ack.seq_num = replay.nextSeq();
   ack.message_type = MESH_TYPE_JOIN_ACK;
   ack.data_type = adapter_types::UNKNOWN_ADAPTER;
   memcpy(ack.origin_mac_address, deviceMacAddress, 6);
@@ -798,42 +877,44 @@ bool Mesh::sendRouteReport() {
     return false;
   uint8_t data[64] = {};
   data[0] = OP_ROUTE_REPORT;
-  data[1] = 0; // path_len — incremented by each relay hop
+  data[1] = 0; // path_len — reserved; relays no longer accumulate here (spec §4)
   transmitCore(adapter_types::UNKNOWN_ADAPTER, data, MESH_TYPE_ROUTE_REPORT);
   return true;
 }
 
 void Mesh::processRouteReport(const mesh_message& msg) {
-  // Verify opcode
-  if (msg.data[0] != OP_ROUTE_REPORT) {
-    Logger::logln("MESH", "processRouteReport: bad opcode, dropping", LogLevel::LOG_WARN);
-    return;
-  }
-
   if (isMaster) {
+    // E2E open (spec §2): master unseals self-targeted uplink before parsing
+    // the opcode/path bytes — the payload is ciphertext until opened.
+    mesh_message opened = msg;
+    const uint8_t *kUp, *kDown;
+    if (!peerE2EKeys(msg.origin_mac_address, &kUp, &kDown) ||
+        !lattice::mesh::crypto::openPayload(kUp, opened)) {
+      Logger::logln("MESH", "E2E open failed — route report dropped", LogLevel::LOG_WARN);
+      return;
+    }
+    if (opened.data[0] != OP_ROUTE_REPORT) {
+      Logger::logln("MESH", "processRouteReport: bad opcode, dropping", LogLevel::LOG_WARN);
+      return;
+    }
     // Terminal endpoint — deliver to server via external callback
     if (externalRecvCallback)
-      externalRecvCallback(msg);
+      externalRecvCallback(opened);
     return;
   }
 
-  // Relay node: append own MAC to path and forward toward master
-  uint8_t path_len = msg.data[1];
-  if (path_len >= lattice::config::MAX_ROUTE_PATH_LEN) {
-    Logger::logln("MESH", "processRouteReport: path full, dropping", LogLevel::LOG_WARN);
+  // Relay node (spec §4): the payload is E2E-sealed end-to-end (origin -> master)
+  // so a relay cannot read or mutate msg.data — path accumulation via data[] is
+  // removed; it moves to the header route_path field in a future phase. Forward
+  // the frame unmodified except routing metadata (hop_count/last_hop).
+  if (msg.hop_count >= lattice::config::MAX_HOPS) {
+    Logger::logln("MESH", "processRouteReport: hop limit reached, dropping", LogLevel::LOG_WARN);
     return;
   }
 
   mesh_message relay = msg;
-  memcpy(&relay.data[2 + path_len * 6], deviceMacAddress, 6);
-  relay.data[1]++;
   relay.hop_count++;
   memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-
-  if (relay.hop_count >= lattice::config::MAX_HOPS) {
-    Logger::logln("MESH", "processRouteReport: hop limit reached, dropping", LogLevel::LOG_WARN);
-    return;
-  }
 
   transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ROUTE_REPORT,
                &relay);
