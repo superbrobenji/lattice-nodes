@@ -60,8 +60,8 @@ inline void computeSharedSecret(const uint8_t* ownPrivateKey32, const uint8_t* p
                         "MESH: computeSharedSecret — mpi_lset (Qp.Z) failed");
   }
   size_t outLen = 0;
-  ret = mbedtls_ecdh_calc_secret(&ecdh, &outLen, secret32Out, 32, mbedtls_ctr_drbg_random,
-                                 &ctr_drbg);
+  ret =
+      mbedtls_ecdh_calc_secret(&ecdh, &outLen, secret32Out, 32, mbedtls_ctr_drbg_random, &ctr_drbg);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 25,
                         "MESH: computeSharedSecret — ecdh_calc_secret failed");
@@ -86,8 +86,8 @@ inline void deriveE2EKeys(const uint8_t* ownPrivateKey32, const uint8_t* peerPub
   static const uint8_t downLabel[] = "lattice-e2e-down-v3";
   int ret = mbedtls_hkdf(md, nullptr, 0, secret, 32, upLabel, sizeof(upLabel) - 1, kUp32Out, 32);
   if (ret == 0) {
-    ret = mbedtls_hkdf(md, nullptr, 0, secret, 32, downLabel, sizeof(downLabel) - 1, kDown32Out,
-                       32);
+    ret =
+        mbedtls_hkdf(md, nullptr, 0, secret, 32, downLabel, sizeof(downLabel) - 1, kDown32Out, 32);
   }
   memset(secret, 0, sizeof(secret));
   if (ret != 0) {

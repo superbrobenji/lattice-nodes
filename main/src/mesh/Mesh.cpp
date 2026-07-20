@@ -49,7 +49,9 @@ void Mesh::readMacAddress() {
 }
 
 void Mesh::printMeshMessage(const mesh_message& msg) {
-  auto macToStr = [](const uint8_t(&mac)[6]) { return lattice::utils::MacAddress(mac).toString(); };
+  auto macToStr = [](const uint8_t (&mac)[6]) {
+    return lattice::utils::MacAddress(mac).toString();
+  };
 
   Logger::logln("MESH", "------ Mesh Message ------", LogLevel::LOG_DEBUG);
   Logger::logln("MESH", "Origin:    " + macToStr(msg.origin_mac_address), LogLevel::LOG_DEBUG);
@@ -677,8 +679,8 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // rather than deliver it to externalRecvCallback without E2E authentication.
   if (isMaster && !addressedToSelf && isSealedType(msg.message_type)) {
     Logger::logln("MESH",
-                   "Master: sealed-type frame not addressed to self rejected (unauthenticated)",
-                   LogLevel::LOG_WARN);
+                  "Master: sealed-type frame not addressed to self rejected (unauthenticated)",
+                  LogLevel::LOG_WARN);
     return;
   }
 

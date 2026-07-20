@@ -28,7 +28,7 @@ public:
   // change, so a move is no riskier than an eviction.
   E2EKeyStore(E2EKeyStore&&) = default;
   E2EKeyStore& operator=(E2EKeyStore&&) = default;
-  bool getKeys(const uint8_t mac[6], const uint8_t* ownPriv32, const uint8_t* peerPub32,
+  bool getKeys(const uint8_t* mac, const uint8_t* ownPriv32, const uint8_t* peerPub32,
                const uint8_t** kUpOut, const uint8_t** kDownOut) {
     for (size_t i = 0; i < config::LATTICE_E2E_KEYCACHE_MAX; ++i) {
       if (entries[i].valid && memcmp(entries[i].mac, mac, 6) == 0) {
