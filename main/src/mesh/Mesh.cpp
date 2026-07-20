@@ -616,6 +616,15 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
                   LogLevel::LOG_INFO);
   }
 
+  // Multi-hop routing (spec §3): the node we heard this beacon THROUGH
+  // (last_hop) is a forwarding candidate. msg.hop_count is last_hop's OWN
+  // distance to the master (this receiving node's distance is one more, per
+  // `newDistance` above — last_hop is one hop closer), so last_hop's distance
+  // is msg.hop_count, not +1: a direct beacon straight from the master
+  // (hop_count == 0, last_hop == master) must record the master itself as a
+  // distance-0 neighbor. Learned here, not from enrollment — routing only.
+  neighbors.observe(msg.last_hop_mac_address, msg.hop_count, millis());
+
   if (!isMaster) {
     // C10 fix: only relay if this beacon is newer than the last one we relayed
     bool isNewer =

@@ -11,14 +11,22 @@ namespace mesh {
 // never consulted for E2E crypto (spec §2 trust split). Separate from
 // PeerRegistry, whose enrollment-only add rule is unchanged.
 //
-// A neighbor's masterDistance is (beacon.hop_count + 1) of the best beacon heard
-// from it; its mac is that beacon's last_hop_mac_address. Next hop = freshest
+// A neighbor's masterDistance is beacon.hop_count of the best beacon heard from
+// it — hop_count is the SENDER's (last_hop's) own distance to the master, one
+// less than the receiving node's resulting distance (which is hop_count + 1);
+// the neighbor's mac is that beacon's last_hop_mac_address. Next hop = freshest
 // neighbor strictly closer to the master than we are.
 class NeighborTable {
 public:
   NeighborTable() = default;
   NeighborTable(const NeighborTable&) = delete;
   NeighborTable& operator=(const NeighborTable&) = delete;
+  // Move is fine (and needed so composing types — e.g. Mesh, which now holds
+  // one of these — stay returnable-by-value/relocatable, notably in test
+  // factory helpers). The table holds no pointers or owned resources, only
+  // fixed-size POD entries.
+  NeighborTable(NeighborTable&&) = default;
+  NeighborTable& operator=(NeighborTable&&) = default;
 
   // Insert or update the neighbor. On a full table with no existing slot for
   // this mac, evict a stale entry first, else the entry farthest from the master.

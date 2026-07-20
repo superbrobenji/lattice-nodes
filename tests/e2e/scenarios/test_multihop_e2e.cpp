@@ -125,3 +125,27 @@ TEST_F(MeshSimTest, NoDuplicateDeliveryInTriangleTopology) {
   EXPECT_EQ(frames.size(), before + 1)
       << "exactly one copy must reach the hub (replay cache dedups the b-relayed copy)";
 }
+
+// Task 3 (Phase 2 multi-hop uplink plan): a relay one hop from the master must
+// learn the master as a NeighborTable forwarding candidate from the master's
+// own beacons, without any explicit routing action — this is what lets a later
+// leaf pick the relay (and the relay pick the master) as next hop.
+TEST_F(MeshSimTest, RelayLearnsNeighborFromMasterBeacon) {
+  addMaster();
+  auto* relay = addSensor(MAC_NODE_A);
+  world.bus.link(master, relay);
+  enroll(relay);
+  runPolled(4000); // let >=1 master beacon (3s interval) reach the relay
+
+  bool eligible = false;
+  relay->with([&](lattice::mesh::Mesh& m, auto*) {
+    uint8_t out[6];
+    // relay is distance 1 from master; a distance-0 neighbor (the master) must
+    // be selectable as next hop for a hypothetical distance-1 sender.
+    eligible = m.testNeighbors().selectNextHop(1, m.testMillisNow(), out);
+    if (eligible)
+      EXPECT_EQ(memcmp(out, master->mac(), 6), 0) << "master is the distance-0 neighbor";
+    return 0;
+  });
+  EXPECT_TRUE(eligible) << "relay should have learned the master as a neighbor from its beacon";
+}
