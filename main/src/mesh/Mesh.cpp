@@ -797,16 +797,35 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // uplink open above. Failure → drop (finding-#9 pattern). Broadcast (FF:FF)
   // frames are NOT opened — addressedToSelf is false for those, so this never
   // fires for them (they stay plaintext, handled below).
+  bool nodeOpened = false;
   if (!isMaster && addressedToSelf && msg.message_type == MESH_TYPE_ADAPTER_DATA) {
     const uint8_t *kUp, *kDown;
     if (!masterE2EKeys(&kUp, &kDown) || !lattice::mesh::crypto::openPayload(kDown, opened)) {
       Logger::logln("MESH", "downlink open failed — dropped", LogLevel::LOG_WARN);
       return;
     }
+    nodeOpened = true;
   }
 
-  bool isConfigOpcode =
-      (opened.data_type == adapter_types::SERIAL_ADAPTER && opened.data[0] == OP_CONFIG_SET);
+  bool isConfigOpcode = (opened.data_type == adapter_types::SERIAL_ADAPTER &&
+                         (opened.data[0] == OP_CONFIG_SET || opened.data[0] == OP_NODE_ID_SET));
+  // Critical fix: config opcodes (CONFIG_SET / NODE_ID_SET) are state-changing
+  // (adapter-type reconfig + restart, node-identity assignment) and must be
+  // honored ONLY via the sealed, opened path above (needsOpen on the master,
+  // nodeOpened on a node) — never via a broadcast-target or otherwise-unopened
+  // frame. Without this, a forged plaintext BROADCAST (target FF:FF)
+  // ADAPTER_DATA frame is never addressedToSelf, so it is never opened; since
+  // origin_mac is attacker-controlled and the master's real MAC is public in
+  // beacons, such a frame sailed past the origin check below too and reached
+  // externalRecvCallback fully unauthenticated (one plaintext RF frame could
+  // reboot/reconfigure any node). Legitimate non-config broadcast adapter data
+  // (e.g. OP_HEALTH_REQ, OP_TX_POWER_SET) is unaffected — this guard only
+  // fires for CONFIG_SET/NODE_ID_SET.
+  if (isConfigOpcode && !needsOpen && !nodeOpened) {
+    Logger::logln("MESH", "Config opcode via unopened/broadcast path rejected (unauthenticated)",
+                  LogLevel::LOG_WARN);
+    return;
+  }
   // TODO(dual-master): also allow secondary master MAC for CONFIG_SET
   if (isConfigOpcode && enrollment.hasMasterMac &&
       memcmp(opened.origin_mac_address, enrollment.knownMasterMac, 6) != 0) {

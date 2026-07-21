@@ -289,18 +289,29 @@ TEST(FakeHubTest, OriginMacsPreservedAndFiltersWork) {
   EXPECT_TRUE(master->ctx().serialRx.empty())
       << "master must have consumed the sendConfigSet frame off its (mock) serial line";
 
+  // NOTE: this used to also assert EXPECT_NE(msg->data[0], OP_CONFIG_SET) as a
+  // proxy for "the payload is sealed ciphertext, not plaintext" — but the
+  // sealed byte is attacker/crypto-controlled and has a ~1/256 chance of
+  // coincidentally equaling OP_CONFIG_SET (0xC1), making that a flaky
+  // assertion. The real, non-flaky signal that this frame took the sealed
+  // targeted-downlink path (rather than the plaintext broadcast path) is its
+  // target MAC: only a genuine broadcast uses FF:FF:FF:FF:FF:FF, and a
+  // targeted downlink is always addressed to the real destination MAC. Assert
+  // that directly instead of inspecting ciphertext bytes.
+  static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   bool sawSealedConfigSetDownlink = false;
   for (const auto& pkt : pendingSends) {
     if (pkt.data.size() != sizeof(mesh_message))
       continue;
     const auto* msg = reinterpret_cast<const mesh_message*>(pkt.data.data());
     if (msg->message_type == MESH_TYPE_ADAPTER_DATA &&
-        msg->data_type == lattice::adapter::SERIAL_ADAPTER &&
-        memcmp(msg->target_mac_address, sensor->mac(), 6) == 0) {
+        msg->data_type == lattice::adapter::SERIAL_ADAPTER) {
       sawSealedConfigSetDownlink = true;
-      EXPECT_NE(msg->data[0], OP_CONFIG_SET)
-          << "targeted CONFIG_SET downlink payload must be sealed (ciphertext) on the "
-             "wire, not plaintext";
+      EXPECT_EQ(0, memcmp(msg->target_mac_address, sensor->mac(), 6))
+          << "targeted CONFIG_SET downlink must be addressed to the sensor's real MAC";
+      EXPECT_NE(0, memcmp(msg->target_mac_address, kBroadcastMac, 6))
+          << "targeted CONFIG_SET downlink must never use broadcast FF:FF:FF:FF:FF:FF as "
+             "its target — that would mean the payload left unsealed/unopened";
     }
   }
   EXPECT_TRUE(sawSealedConfigSetDownlink)

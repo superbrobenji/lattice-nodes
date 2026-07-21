@@ -862,6 +862,146 @@ TEST_F(JoinAckRelayTest, DownlinkLastRelayForwardsToTarget) {
   EXPECT_TRUE(wasSentTo(leaf)) << "last relay forwards to target_mac";
 }
 
+// ─── Config-opcode injection resistance (CRITICAL finding) ──────────────────
+// Phase 3 seals+source-routes TARGETED downlink CONFIG_SET/NODE_ID_SET, and a
+// node opens a self-addressed sealed ADAPTER_DATA with its k_down before
+// honoring it (see the node-side E2E open block in processAdapterData). But a
+// forged BROADCAST (target FF:FF:FF:FF:FF:FF) ADAPTER_DATA frame is never
+// addressedToSelf, so it is never opened — it stays plaintext. Since
+// origin_mac is attacker-controlled on the wire and the master's real MAC is
+// public (broadcast in every beacon), a forged broadcast frame with
+// origin_mac spoofed to the master passes the origin check too. Without a
+// guard, this reaches externalRecvCallback (-> Adapter::onMeshData ->
+// ESP.restart()) completely unauthenticated: one plaintext RF frame reboots
+// or reconfigures any node.
+
+class ConfigOpcodeInjectionTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    EEPROM.reset();
+    resetMillis();
+    resetEspNowMock();
+    lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
+    lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+  }
+
+  static constexpr uint8_t kMyMac[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  static constexpr uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+  uint8_t nodePriv[32], nodePub[32];
+  uint8_t masterPriv[32], masterPub[32];
+
+  // A non-master node enrolled under kMasterMac with real Curve25519 keys, so
+  // masterE2EKeys() can derive the same k_down the master would use to seal a
+  // legitimate targeted downlink.
+  Mesh makeEnrolledNode() {
+    Mesh mesh;
+    memcpy(mesh.deviceMacAddress, kMyMac, 6);
+    mesh.isMaster = false;
+    memcpy(mesh.enrollment.devicePrivateKey, nodePriv, 32);
+    memcpy(mesh.enrollment.devicePublicKey, nodePub, 32);
+    mesh.enrollment.hasMasterMac = true;
+    memcpy(mesh.enrollment.knownMasterMac, kMasterMac, 6);
+    memcpy(mesh.currentMaster.mac, kMasterMac, 6);
+    mesh.currentMaster.distance = 1;
+    PeerInfo master{};
+    memcpy(master.mac, kMasterMac, 6);
+    memcpy(master.publicKey, masterPub, 32);
+    master.lastSeenMillis = 0;
+    mesh.peers.append(master);
+    return mesh;
+  }
+
+  // Exactly the attack in the finding: BROADCAST target, SERIAL_ADAPTER
+  // data_type, data[0]=OP_CONFIG_SET, data[1..6]=victim's own MAC,
+  // origin_mac spoofed to the master's public MAC, NOT sealed.
+  mesh_message makeForgedBroadcastConfigSet() {
+    mesh_message m{};
+    m.proto_version = PROTO_VERSION;
+    m.message_type = MESH_TYPE_ADAPTER_DATA;
+    m.data_type = adapter_types::SERIAL_ADAPTER;
+    memcpy(m.origin_mac_address, kMasterMac, 6); // spoofed: master's public MAC
+    memcpy(m.target_mac_address, kBroadcastMac, 6); // forged: broadcast, never opened
+    memcpy(m.last_hop_mac_address, kMasterMac, 6);
+    m.epoch_num = 1;
+    m.seq_num = 1;
+    m.data[0] = OP_CONFIG_SET;
+    memcpy(&m.data[1], kMyMac, 6); // victim's own MAC as the opcode's target field
+    m.data[7] = 0x02;              // attacker-chosen adapter type
+    // NOT sealed — plaintext, exactly as an RF attacker would send it.
+    return m;
+  }
+};
+
+constexpr uint8_t ConfigOpcodeInjectionTest::kMyMac[];
+constexpr uint8_t ConfigOpcodeInjectionTest::kMasterMac[];
+constexpr uint8_t ConfigOpcodeInjectionTest::kBroadcastMac[];
+
+TEST_F(ConfigOpcodeInjectionTest, ForgedBroadcastConfigSet_NotDeliveredToExternalCallback) {
+  Mesh mesh = makeEnrolledNode();
+  bool sawConfigSet = false;
+  mesh.linkDataRecvCallback([&](const mesh_message& m) {
+    if (m.data_type == adapter_types::SERIAL_ADAPTER && m.data[0] == OP_CONFIG_SET)
+      sawConfigSet = true;
+  });
+
+  mesh.processAdapterData(makeForgedBroadcastConfigSet());
+
+  EXPECT_FALSE(sawConfigSet)
+      << "a forged plaintext BROADCAST CONFIG_SET must never reach externalRecvCallback — "
+         "it was never addressedToSelf, so it was never opened/authenticated with k_down";
+}
+
+TEST_F(ConfigOpcodeInjectionTest, ForgedBroadcastNodeIdSet_NotDeliveredToExternalCallback) {
+  Mesh mesh = makeEnrolledNode();
+  int deliveredCount = 0;
+  mesh.linkDataRecvCallback([&](const mesh_message&) { ++deliveredCount; });
+
+  mesh_message forged = makeForgedBroadcastConfigSet();
+  forged.data[0] = OP_NODE_ID_SET;
+  forged.data[7] = 0x42; // attacker-chosen node ID
+
+  mesh.processAdapterData(forged);
+
+  EXPECT_EQ(deliveredCount, 0)
+      << "a forged plaintext BROADCAST NODE_ID_SET must never reach externalRecvCallback";
+}
+
+// Legitimate counterpart: a genuinely targeted, sealed CONFIG_SET
+// (addressedToSelf, opened with k_down) must still be delivered — the guard
+// above must not overreach and break the real downlink path.
+TEST_F(ConfigOpcodeInjectionTest, TargetedSealedConfigSet_StillDelivered) {
+  Mesh mesh = makeEnrolledNode();
+  const uint8_t *kUp, *kDown;
+  ASSERT_TRUE(mesh.masterE2EKeys(&kUp, &kDown));
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ADAPTER_DATA;
+  msg.data_type = adapter_types::SERIAL_ADAPTER;
+  memcpy(msg.origin_mac_address, kMasterMac, 6);
+  memcpy(msg.target_mac_address, kMyMac, 6); // targeted, not broadcast
+  memcpy(msg.last_hop_mac_address, kMasterMac, 6);
+  msg.epoch_num = 1;
+  msg.seq_num = 1;
+  msg.data[0] = OP_CONFIG_SET;
+  memcpy(&msg.data[1], kMyMac, 6);
+  msg.data[7] = 0x02;
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kDown, msg));
+
+  bool sawConfigSet = false;
+  mesh.linkDataRecvCallback([&](const mesh_message& m) {
+    if (m.data_type == adapter_types::SERIAL_ADAPTER && m.data[0] == OP_CONFIG_SET)
+      sawConfigSet = true;
+  });
+
+  mesh.processAdapterData(msg);
+
+  EXPECT_TRUE(sawConfigSet) << "a genuinely targeted, sealed CONFIG_SET (addressedToSelf, "
+                               "opened with k_down) must still be delivered";
+}
+
 // ─── JOIN_ACK forgery resistance ─────────────────────────────────────────────
 // JOIN_ACKs travel over the unencrypted broadcast peer, and everything a forger
 // needs is observable over the air: the victim's pubkey prefix (broadcast in its
