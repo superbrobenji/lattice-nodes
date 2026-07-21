@@ -2,7 +2,9 @@
 
 # Design Gap: Multi-Hop Data Uplink
 
-**Status:** Open — needs its own design/brainstorming session.
+**Status:** CLOSED (Phase 2, 2026-07-20) — multi-hop data uplink works via the
+NeighborTable (spec §3). The dual-master data-failover sibling (#8) remains open,
+tracked below and in the Phase 4 plan.
 **Update 2026-07-19:** Phase 1 (protocol v3 + E2E payload AEAD, spec
 `docs/superpowers/specs/2026-07-16-multihop-routing-e2e-crypto-design.md`) landed —
 keying groundwork done; the routing gap itself closes in Phase 2.
