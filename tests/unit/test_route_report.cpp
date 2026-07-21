@@ -249,6 +249,55 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
   EXPECT_EQ(received.data[0], OP_ROUTE_REPORT);
 }
 
+// Task 4 (spec §4): the master must learn the origin's relay path from the
+// route report so it can later source-route a downlink back to that node.
+// The path is recorded from the RAW msg's plaintext route_path/route_len
+// header fields (accumulated hop-by-hop by relays), NOT from the sealed
+// payload — mirrors ProcessRouteReport_MasterDeliversToCallback above for
+// the E2E open/keying setup.
+TEST_F(RouteReportTest, ProcessRouteReport_MasterRecordsRouteFromReport) {
+  const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  const uint8_t r1[6]        = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0x01};
+  const uint8_t r2[6]        = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0x02};
+  Mesh mesh;
+  mesh.isMaster = true;
+
+  // Task 6 (E2E AEAD): master opens the sealed payload before delivering to
+  // the callback — register the origin as a keyed peer and seal accordingly.
+  uint8_t originPriv[32], originPub[32];
+  lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+  lattice::mesh::crypto::generateKeypair(originPriv, originPub);
+  memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+  memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+  PeerInfo origin{};
+  memcpy(origin.mac, originMac, 6);
+  memcpy(origin.publicKey, originPub, 32);
+  origin.lastSeenMillis = 0;
+  mesh.peers.append(origin);
+  uint8_t kUp[32], kDown[32];
+  lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ROUTE_REPORT;
+  memcpy(msg.origin_mac_address, originMac, 6);
+  msg.route_len = 2;
+  memcpy(&msg.route_path[0], r1, 6);
+  memcpy(&msg.route_path[6], r2, 6);
+  msg.data[0] = OP_ROUTE_REPORT;
+  msg.data[1] = 2;
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
+
+  mesh.processRouteReport(msg);
+
+  uint8_t out[60];
+  uint8_t len = 0;
+  ASSERT_TRUE(mesh.testRoutes().lookup(originMac, out, &len));
+  EXPECT_EQ(len, 2);
+  EXPECT_EQ(memcmp(&out[0], r1, 6), 0);
+  EXPECT_EQ(memcmp(&out[6], r2, 6), 0);
+}
+
 // Replaces the old ProcessRouteReport_PathFullDropsMessage: the path-length
 // guard was part of the relay-side path-accumulation feature this task
 // removes (spec §4 — a relay can no longer read msg.data at all). The

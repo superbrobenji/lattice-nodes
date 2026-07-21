@@ -934,6 +934,10 @@ void Mesh::processRouteReport(const mesh_message& msg) {
       Logger::logln("MESH", "processRouteReport: bad opcode, dropping", LogLevel::LOG_WARN);
       return;
     }
+    // Learn the origin's relay path for downlink source routing (spec §4).
+    // route_path/route_len are plaintext header fields (accumulated by relays);
+    // bounds-checked by RouteTable::record.
+    routes.record(msg.origin_mac_address, msg.route_path, msg.route_len, millis());
     // Terminal endpoint — deliver to server via external callback
     if (externalRecvCallback)
       externalRecvCallback(opened);

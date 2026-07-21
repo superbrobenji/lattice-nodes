@@ -15,6 +15,12 @@ public:
   RouteTable() = default;
   RouteTable(const RouteTable&) = delete;
   RouteTable& operator=(const RouteTable&) = delete;
+  // Move is fine (and needed so composing types — e.g. Mesh, which now holds
+  // one of these — stay returnable-by-value/relocatable, notably in test
+  // factory helpers). The table holds no pointers or owned resources, only
+  // fixed-size POD entries. Mirrors NeighborTable's rationale.
+  RouteTable(RouteTable&&) = default;
+  RouteTable& operator=(RouteTable&&) = default;
 
   void record(const uint8_t* nodeMac, const uint8_t* path, uint8_t pathLen, uint32_t nowMillis) {
     if (pathLen > config::MAX_HOPS)

@@ -18,6 +18,7 @@
 #include "Enrollment.h"
 #include "E2EKeyStore.h"
 #include "NeighborTable.h"
+#include "RouteTable.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -135,6 +136,7 @@ private:
 #ifdef UNIT_TEST
   ReplayCache& testReplay() { return replay; }
   NeighborTable& testNeighbors() { return neighbors; }
+  RouteTable& testRoutes() { return routes; }
   uint32_t testMillisNow() { return millis(); } // exposes the node's mocked clock to tests
 #endif
 
@@ -173,6 +175,9 @@ private:
   // Forwarding candidates toward the master, learned from overheard master
   // beacons (spec §3). Routing only — never consulted for E2E crypto.
   NeighborTable neighbors;
+  // Master-side node -> relay path store, populated from route reports
+  // (spec §4), consulted for downlink source routing.
+  RouteTable routes;
   // Holds a NeighborTable-resolved next hop (not an enrolled peer) so
   // findNextHopToMaster() can return a stable PeerInfo* for a pure relay,
   // which is never added to `peers` (enrollment-only rule).
