@@ -152,6 +152,62 @@ TEST_F(RouteReportTest, ProcessRouteReport_RelayForwardsSealedFrameUnmodified) {
   EXPECT_EQ(sent.hop_count, 2);
 }
 
+// Task 3 (Phase 3, spec §4): route_len/route_path are plaintext header fields
+// excluded from the AEAD AAD (E2ECrypto.h buildAad — 24 bytes: version, type,
+// data_type, origin, target, epoch, seq), so a relay can accumulate the
+// origin->master relay chain there without touching (or invalidating) the
+// E2E-sealed payload. This is the replacement for the msg.data-based path
+// accumulation that Task 6's AEAD work removed (see
+// ProcessRouteReport_RelayForwardsSealedFrameUnmodified above).
+TEST_F(RouteReportTest, RelayAppendsOwnMacToRoutePath) {
+  const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  const uint8_t myMac[6]     = {0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x01};
+  Mesh mesh;
+  setupRelayNode(mesh, masterMac);
+  memcpy(mesh.deviceMacAddress, myMac, 6); // set after setupRelayNode (which overwrites it)
+
+  // Seal a real E2E payload (origin -> master) so this test also proves the
+  // route_path/route_len write does not invalidate the AEAD tag: buildAad()
+  // (E2ECrypto.h) covers only proto_version/message_type/data_type/origin/
+  // target/epoch/seq — route_len and route_path are outside the AAD.
+  uint8_t originPriv[32], originPub[32];
+  lattice::mesh::crypto::generateKeypair(originPriv, originPub);
+  uint8_t kUp[32], kDown[32];
+  lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ROUTE_REPORT;
+  msg.data_type = 0;
+  msg.hop_count = 0;
+  msg.route_len = 0; // origin sent an empty path
+  msg.epoch_num = 5;
+  msg.seq_num = 1;
+  memcpy(msg.origin_mac_address, originMac, 6);
+  memcpy(msg.target_mac_address, masterMac, 6);
+  msg.data[0] = OP_ROUTE_REPORT;
+  msg.data[1] = 0;
+  uint8_t plaintext[64];
+  memcpy(plaintext, msg.data, sizeof(plaintext));
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
+
+  size_t before = espNowSentPackets.size();
+  mesh.processRouteReport(msg);
+
+  ASSERT_EQ(espNowSentPackets.size(), before + 1);
+  mesh_message sent = lastSentMsg();
+  ASSERT_EQ(sent.route_len, 1) << "relay appended its own MAC";
+  EXPECT_EQ(memcmp(&sent.route_path[0], myMac, 6), 0);
+
+  // Self-review (spec §4 AAD claim): the forwarded frame's sealed payload must
+  // still open with the same k_up and recover the original plaintext, proving
+  // the route_path/route_len write did not break the AEAD tag.
+  ASSERT_TRUE(lattice::mesh::crypto::openPayload(kUp, sent))
+      << "sealed payload must still open after relay writes route_path/route_len";
+  EXPECT_EQ(memcmp(sent.data, plaintext, sizeof(plaintext)), 0);
+}
+
 TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
   const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   Mesh mesh;

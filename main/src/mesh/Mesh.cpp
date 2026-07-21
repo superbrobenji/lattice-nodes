@@ -940,18 +940,24 @@ void Mesh::processRouteReport(const mesh_message& msg) {
     return;
   }
 
-  // Relay node (spec §4): the payload is E2E-sealed end-to-end (origin -> master)
-  // so a relay cannot read or mutate msg.data — path accumulation via data[] is
-  // removed; it moves to the header route_path field in a future phase. Forward
-  // the frame unmodified except routing metadata (hop_count/last_hop).
+  // Relay node (spec §4): the payload is E2E-sealed origin->master and opaque to
+  // us. Accumulate the relay path in the plaintext route_path header (excluded
+  // from AAD, so this does not break the tag) so the master learns the full
+  // origin->master relay chain for downlink source routing.
   if (msg.hop_count >= lattice::config::MAX_HOPS) {
     Logger::logln("MESH", "processRouteReport: hop limit reached, dropping", LogLevel::LOG_WARN);
+    return;
+  }
+  if (msg.route_len >= lattice::config::MAX_HOPS) {
+    Logger::logln("MESH", "route report path full — dropping", LogLevel::LOG_WARN);
     return;
   }
 
   mesh_message relay = msg;
   relay.hop_count++;
   memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+  memcpy(&relay.route_path[static_cast<size_t>(relay.route_len) * 6], deviceMacAddress, 6);
+  relay.route_len++;
 
   transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ROUTE_REPORT,
                &relay);
