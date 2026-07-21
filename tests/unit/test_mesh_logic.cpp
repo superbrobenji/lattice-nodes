@@ -336,7 +336,6 @@ protected:
     mesh.isMaster = false;
     // Set master route: next hop IS the master (1 hop away)
     memcpy(mesh.currentMaster.mac, kMasterMac, 6);
-    memcpy(mesh.currentMaster.nextHop, kMasterMac, 6);
     mesh.currentMaster.distance = 1;
     mesh.enrollment.hasMasterMac = true;
     memcpy(mesh.enrollment.knownMasterMac, kMasterMac, 6);
@@ -671,7 +670,6 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
   // And the route must actually resolve once a beacon establishes the topology
   // (nextHop = master, one hop) — the end goal of registering the master.
   memcpy(mesh.currentMaster.mac, kMasterMac, 6);
-  memcpy(mesh.currentMaster.nextHop, kMasterMac, 6);
   mesh.currentMaster.distance = 1;
   EXPECT_NE(mesh.findNextHopToMaster(), nullptr)
       << "uplink route must resolve through the newly registered master peer";

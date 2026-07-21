@@ -35,7 +35,6 @@ protected:
     memcpy(mesh.enrollment.knownMasterMac, masterMac, 6);
     memcpy(mesh.currentMaster.mac, masterMac, 6);
     mesh.currentMaster.distance = 1;
-    memcpy(mesh.currentMaster.nextHop, masterMac, 6);
     memcpy(mesh.enrollment.devicePrivateKey, myPriv, 32);
     memcpy(mesh.enrollment.devicePublicKey, myPub, 32);
 

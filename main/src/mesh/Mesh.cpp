@@ -28,7 +28,6 @@ Mesh::Mesh()
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
-  memset(currentMaster.nextHop, 0, 6);
   memset(lastSeenMasterMac, 0, 6);
   memset(deviceMacAddress, 0, 6);
   memset(recvQueue, 0, sizeof(recvQueue));
@@ -564,7 +563,6 @@ void Mesh::checkMasterTimeout() {
                   LogLevel::LOG_WARN);
     memset(currentMaster.mac, 0, 6);
     currentMaster.distance = 0xFF;
-    memset(currentMaster.nextHop, 0, 6);
     memset(lastSeenMasterMac, 0, 6);
     lastMasterBeaconReceivedMs = 0;
   }
@@ -642,7 +640,6 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       newDistance < currentMaster.distance) {
     memcpy(currentMaster.mac, msg.origin_mac_address, 6);
     currentMaster.distance = newDistance;
-    memcpy(currentMaster.nextHop, msg.last_hop_mac_address, 6);
     Logger::logln("MESH", "Updated route to master. Distance: " + String(newDistance),
                   LogLevel::LOG_INFO);
   }
