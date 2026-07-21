@@ -435,15 +435,18 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
     msg = buildMessage(type, data, msgType);
   }
 
-  // Only for adapter data, set target as master
-  if (msgType == MESH_TYPE_ADAPTER_DATA) {
-    memcpy(msg.target_mac_address, currentMaster.mac,
-           6); // authoritative: overrides relay's original target
+  bool selfOriginated = (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0);
+
+  // Only a self-originated uplink sets its own target to the master. A relayed
+  // frame (msgOverride, foreign origin) is already sealed against the origin's
+  // target — rewriting it would corrupt the AEAD AAD the destination master
+  // verifies. Leave relayed frames' target untouched.
+  if (msgType == MESH_TYPE_ADAPTER_DATA && selfOriginated) {
+    memcpy(msg.target_mac_address, currentMaster.mac, 6);
   }
 
   // E2E seal (spec §1/§2): self-originated uplink payloads only. Relayed frames
   // (msgOverride with foreign origin) are already sealed — forward untouched.
-  bool selfOriginated = (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0);
   if (!isMaster && selfOriginated && isSealedType(msg.message_type)) {
     const uint8_t *kUp, *kDown;
     if (!masterE2EKeys(&kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kUp, msg)) {

@@ -866,6 +866,46 @@ TEST_F(JoinAckRelayTest, DownlinkSourceRoutesViaFirstHop) {
   EXPECT_TRUE(esp_now_is_peer_exist(R2));
 }
 
+// Task 4 (Phase 5 follow-ups): a relayed ADAPTER_DATA frame is already sealed
+// against the ORIGIN's target (AAD-bound — see E2ECrypto buildAad). A relay
+// mid-forward must not overwrite target_mac_address with its OWN currentMaster
+// — in a multi-master mesh where the relay and the frame's origin have
+// adopted different masters (e.g. mid-failover), that rewrite corrupts the
+// AAD the origin master needs to openPayload.
+TEST_F(JoinAckRelayTest, RelayedAdapterDataKeepsOriginTarget) {
+  Mesh relay = makeIntermediateNode(); // non-master, kPeerMac enrolled (unused here)
+  const uint8_t originMaster[6] = {0x02, 0, 0, 0, 0, 0x01}; // the origin's master (frame target)
+  // Force the relay's own currentMaster to a DIFFERENT mac (simulate multi-master/mid-failover):
+  const uint8_t relaysMaster[6] = {0x02, 0, 0, 0, 0, 0x02};
+  // Seed a peer entry for the relay's own master so findNextHopToMaster()
+  // resolves via the direct-peer branch (distance 1, in range) and the frame
+  // is actually sent.
+  PeerInfo relayMasterPeer{};
+  memcpy(relayMasterPeer.mac, relaysMaster, 6);
+  relayMasterPeer.lastSeenMillis = 0;
+  relay.peers.append(relayMasterPeer);
+  memcpy(relay.currentMaster.mac, relaysMaster, 6);
+  relay.currentMaster.distance = 1;
+
+  mesh_message fwd = {};
+  fwd.proto_version = PROTO_VERSION;
+  fwd.message_type = MESH_TYPE_ADAPTER_DATA;
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  memcpy(fwd.origin_mac_address, leaf, 6);         // foreign origin (a leaf)
+  memcpy(fwd.target_mac_address, originMaster, 6); // sealed against originMaster's AAD
+  fwd.epoch_num = 3;
+  fwd.seq_num = 5;
+
+  resetEspNowMock();
+  relay.transmitCore(static_cast<adapter_types>(fwd.data_type), fwd.data, MESH_TYPE_ADAPTER_DATA,
+                     &fwd);
+
+  ASSERT_TRUE(wasSentTo(relaysMaster)) << "relay must forward toward its own next hop";
+  mesh_message sent = lastEspNowSentTo(relaysMaster);
+  EXPECT_EQ(0, memcmp(sent.target_mac_address, originMaster, 6))
+      << "relayed frame must keep the origin's target (AAD-bound), not the relay's currentMaster";
+}
+
 // (b) A relay in the path forwards to the next index, unchanged frame.
 TEST_F(JoinAckRelayTest, DownlinkRelayForwardsToNextIndex) {
   static constexpr uint8_t kR2[6] = {0x02, 0, 0, 0, 0, 0x22};
