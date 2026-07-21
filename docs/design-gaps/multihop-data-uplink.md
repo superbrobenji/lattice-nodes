@@ -2,9 +2,19 @@
 
 # Design Gap: Multi-Hop Data Uplink
 
-**Status:** CLOSED (Phase 2, 2026-07-20) — multi-hop data uplink works via the
-NeighborTable (spec §3). The dual-master data-failover sibling (#8) remains open,
-tracked below and in the Phase 4 plan.
+**Status:** CLOSED. Multi-hop data uplink (#7) closed in Phase 2 via the
+NeighborTable (spec §3); the dual-master data-failover sibling (#8) closed in
+Phase 4 (see the "Related gap" section below). Downlink source routing +
+`k_down` sealing landed in Phase 3.
+
+**Accepted / not fixed (Phase 5 decision):** `currentMaster.distance` is
+sticky-low — for the same master it only ever decreases, so if the shortest
+relay path dies while a longer one survives, uplink drops until the full
+`STALE_MASTER_THRESHOLD_MS` (~9s) reset re-learns the route. Left as-is: the
+sticky-min correctly picks the shortest path in the common multi-path case, it
+self-recovers within ~9s, and a naive "latest-beacon-wins" fix risks route
+oscillation across relay paths of differing length. Revisit only if faster
+longer-path repair becomes a requirement.
 **Update 2026-07-19:** Phase 1 (protocol v3 + E2E payload AEAD, spec
 `docs/superpowers/specs/2026-07-16-multihop-routing-e2e-crypto-design.md`) landed —
 keying groundwork done; the routing gap itself closes in Phase 2.

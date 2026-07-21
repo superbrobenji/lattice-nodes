@@ -794,6 +794,10 @@ TEST_F(JoinAckRelayTest, DirectMasterStaleFallsBackToNeighborTable) {
   PeerInfo* hop = node.findNextHopToMaster();
   ASSERT_NE(hop, nullptr) << "stale direct peer must fall back to the fresh NeighborTable entry";
   EXPECT_EQ(0, memcmp(hop->mac, masterMac, 6));
+  // Branch-identity proof: only the NeighborTable fallback branch auto-registers
+  // the next hop as an ESP-NOW peer; the direct-peer branch does not. So a
+  // registered peer here proves the fallback fired, not the (stale) direct branch.
+  EXPECT_TRUE(esp_now_is_peer_exist(masterMac));
 }
 
 // Final-review fix: findNextHopToMaster() must bound auto-registered
