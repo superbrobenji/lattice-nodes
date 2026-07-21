@@ -900,6 +900,70 @@ TEST_F(JoinAckRelayTest, DownlinkRelayForward_BoundsAutoRegisteredPeers_NeverEvi
       << "enrolled peer must never be evicted by downlink forwarding-peer churn";
 }
 
+// ─── enrollPeer: secondary-master identity stamped into JOIN_ACK ────────────
+// Helpers to inspect the broadcast JOIN_ACK by message_type — mirror
+// wasSentTo/lastEspNowSentTo above, but keyed on the broadcast dest (FF:FF:…)
+// + message_type rather than a unicast dest MAC.
+
+static bool sawBroadcastOfType(uint8_t type) {
+  static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  for (auto it = espNowSentPackets.rbegin(); it != espNowSentPackets.rend(); ++it) {
+    if (memcmp(it->addr, kBroadcast, 6) == 0 && it->data.size() >= sizeof(mesh_message)) {
+      mesh_message m{};
+      memcpy(&m, it->data.data(), sizeof(m));
+      if (m.message_type == type)
+        return true;
+    }
+  }
+  return false;
+}
+
+static mesh_message lastEspNowBroadcastOfType(uint8_t type) {
+  static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  for (auto it = espNowSentPackets.rbegin(); it != espNowSentPackets.rend(); ++it) {
+    if (memcmp(it->addr, kBroadcast, 6) == 0 && it->data.size() >= sizeof(mesh_message)) {
+      mesh_message m{};
+      memcpy(&m, it->data.data(), sizeof(m));
+      if (m.message_type == type)
+        return m;
+    }
+  }
+  ADD_FAILURE() << "no broadcast ESP-NOW packet of the requested message_type was sent";
+  return mesh_message{};
+}
+
+TEST_F(JoinAckRelayTest, EnrollPeerStampsSecondaryIdentityIntoJoinAck) {
+  Mesh master = makeMasterNode();
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  uint8_t leafPub[32];
+  for (int i = 0; i < 32; ++i) leafPub[i] = static_cast<uint8_t>(i + 1);
+  const uint8_t sec[6] = {0x02, 0, 0, 0, 0, 0x02};
+  uint8_t secPub[32];
+  for (int i = 0; i < 32; ++i) secPub[i] = static_cast<uint8_t>(0x40 + i);
+
+  resetEspNowMock();
+  master.enrollPeer(leaf, leafPub, sec, secPub);
+
+  // JOIN_ACK is broadcast; find it in the mock's sent frames.
+  ASSERT_TRUE(sawBroadcastOfType(MESH_TYPE_JOIN_ACK));
+  mesh_message ack = lastEspNowBroadcastOfType(MESH_TYPE_JOIN_ACK);
+  EXPECT_EQ(0, memcmp(ack.secondary_master_mac, sec, 6));
+  EXPECT_EQ(0, memcmp(ack.secondary_public_key, secPub, 32));
+}
+
+TEST_F(JoinAckRelayTest, EnrollPeerTwoArgLeavesSecondaryZero) {
+  Mesh master = makeMasterNode();
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  uint8_t leafPub[32] = {9};
+  resetEspNowMock();
+  master.enrollPeer(leaf, leafPub); // 2-arg: no secondary
+  ASSERT_TRUE(sawBroadcastOfType(MESH_TYPE_JOIN_ACK));
+  mesh_message ack = lastEspNowBroadcastOfType(MESH_TYPE_JOIN_ACK);
+  uint8_t zero6[6] = {}, zero32[32] = {};
+  EXPECT_EQ(0, memcmp(ack.secondary_master_mac, zero6, 6));
+  EXPECT_EQ(0, memcmp(ack.secondary_public_key, zero32, 32));
+}
+
 // ─── Config-opcode injection resistance (CRITICAL finding) ──────────────────
 // Phase 3 seals+source-routes TARGETED downlink CONFIG_SET/NODE_ID_SET, and a
 // node opens a self-addressed sealed ADAPTER_DATA with its k_down before

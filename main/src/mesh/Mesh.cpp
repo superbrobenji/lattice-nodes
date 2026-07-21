@@ -1013,6 +1013,11 @@ bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, b
 }
 
 void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
+  enrollPeer(mac, publicKey32, nullptr, nullptr);
+}
+
+void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint8_t* secondaryMac,
+                      const uint8_t* secondaryPubKey32) {
   if (!registerPeerWithKey(mac, publicKey32, /*allowRekey=*/true))
     return; // registry full — do not ACK an enrollment we could not record
 
@@ -1039,6 +1044,13 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
   // Include OUR public key so the enrolling node can register this master as
   // an encrypted, routable peer in its own registry (see Enrollment::processJoinAck).
   memcpy(ack.enrollment_public_key, enrollment.getPublicKey(), 32);
+  // Stamp the server-provided secondary-master identity, if any, so the
+  // enrolling node can TOFU-learn its failover master from this same ACK
+  // (Phase 4). Left zeroed (ack's default) when there is no secondary.
+  if (secondaryMac && secondaryPubKey32) {
+    memcpy(ack.secondary_master_mac, secondaryMac, 6);
+    memcpy(ack.secondary_public_key, secondaryPubKey32, 32);
+  }
   // Broadcast via the registered FF:FF:… peer so the new node receives the ACK
   // even before it is individually registered as a unicast peer.
   static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};

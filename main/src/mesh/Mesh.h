@@ -318,6 +318,13 @@ public:
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
   void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);
+  // 4-arg overload: also stamps the server-provided secondary-master identity
+  // (secondaryMac/secondaryPubKey32) into the JOIN_ACK broadcast to the newly
+  // enrolled node, so it can TOFU-learn its failover master up front (Phase 4).
+  // Pass nullptr, nullptr (as the 2-arg overload does) when there is no
+  // secondary — the ACK's secondary fields are then left zeroed.
+  void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint8_t* secondaryMac,
+                  const uint8_t* secondaryPubKey32);
 
   // Enrollment relay callback — set by Serial_Adapter owner (main.ino)
   void setEnrollmentRelayFn(EnrollmentRelayFn fn) { enrollment.setRelayFn(fn); }
