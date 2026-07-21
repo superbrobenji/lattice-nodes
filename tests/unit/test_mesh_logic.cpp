@@ -768,6 +768,38 @@ TEST_F(JoinAckRelayTest, NextHopThroughRelayIsRegisteredAsEspNowPeer) {
       << "relay must be auto-registered as an ESP-NOW peer";
 }
 
+// A distance-1 node whose enrolled master peer has gone stale (out of range)
+// must not blackhole its uplink — the NeighborTable fallback branch of
+// findNextHopToMaster() must still find a route if the master is also known
+// as a fresh distance-0 neighbor (e.g. its own beacon was still heard even
+// though the direct PeerRegistry entry's lastSeenMillis is stale).
+TEST_F(JoinAckRelayTest, DirectMasterStaleFallsBackToNeighborTable) {
+  Mesh node = makeIntermediateNode();
+  const uint8_t masterMac[6] = {0x02, 0, 0, 0, 0, 0x01};
+  node.currentMaster.distance = 1;
+  memcpy(node.currentMaster.mac, masterMac, 6);
+
+  // Master is an enrolled peer but STALE (out of range): register it, then
+  // advance the mocked clock past STALE_PEER_THRESHOLD_MS so
+  // PeerRegistry::isPeerInRange() returns false for it.
+  PeerInfo masterPeer{};
+  memcpy(masterPeer.mac, masterMac, 6);
+  masterPeer.lastSeenMillis = 0;
+  node.peers.append(masterPeer);
+  advanceMillis(lattice::config::STALE_PEER_THRESHOLD_MS);
+
+  // Master is also a fresh distance-0 neighbor:
+  node.testNeighbors().observe(masterMac, 0, node.testMillisNow());
+
+  PeerInfo* hop = node.findNextHopToMaster();
+  ASSERT_NE(hop, nullptr) << "stale direct peer must fall back to the fresh NeighborTable entry";
+  EXPECT_EQ(0, memcmp(hop->mac, masterMac, 6));
+  // Branch-identity proof: only the NeighborTable fallback branch auto-registers
+  // the next hop as an ESP-NOW peer; the direct-peer branch does not. So a
+  // registered peer here proves the fallback fired, not the (stale) direct branch.
+  EXPECT_TRUE(esp_now_is_peer_exist(masterMac));
+}
+
 // Final-review fix: findNextHopToMaster() must bound auto-registered
 // forwarding ESP-NOW peers to exactly one, evicting the stale relay when the
 // selected next hop changes — otherwise an RF attacker flooding distinct-MAC
@@ -864,6 +896,46 @@ TEST_F(JoinAckRelayTest, DownlinkSourceRoutesViaFirstHop) {
   // first hop auto-registered as ESP-NOW peer (VirtualBus doesn't enforce this,
   // so assert it explicitly — the Phase-2 lesson).
   EXPECT_TRUE(esp_now_is_peer_exist(R2));
+}
+
+// Task 4 (Phase 5 follow-ups): a relayed ADAPTER_DATA frame is already sealed
+// against the ORIGIN's target (AAD-bound — see E2ECrypto buildAad). A relay
+// mid-forward must not overwrite target_mac_address with its OWN currentMaster
+// — in a multi-master mesh where the relay and the frame's origin have
+// adopted different masters (e.g. mid-failover), that rewrite corrupts the
+// AAD the origin master needs to openPayload.
+TEST_F(JoinAckRelayTest, RelayedAdapterDataKeepsOriginTarget) {
+  Mesh relay = makeIntermediateNode(); // non-master, kPeerMac enrolled (unused here)
+  const uint8_t originMaster[6] = {0x02, 0, 0, 0, 0, 0x01}; // the origin's master (frame target)
+  // Force the relay's own currentMaster to a DIFFERENT mac (simulate multi-master/mid-failover):
+  const uint8_t relaysMaster[6] = {0x02, 0, 0, 0, 0, 0x02};
+  // Seed a peer entry for the relay's own master so findNextHopToMaster()
+  // resolves via the direct-peer branch (distance 1, in range) and the frame
+  // is actually sent.
+  PeerInfo relayMasterPeer{};
+  memcpy(relayMasterPeer.mac, relaysMaster, 6);
+  relayMasterPeer.lastSeenMillis = 0;
+  relay.peers.append(relayMasterPeer);
+  memcpy(relay.currentMaster.mac, relaysMaster, 6);
+  relay.currentMaster.distance = 1;
+
+  mesh_message fwd = {};
+  fwd.proto_version = PROTO_VERSION;
+  fwd.message_type = MESH_TYPE_ADAPTER_DATA;
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  memcpy(fwd.origin_mac_address, leaf, 6);         // foreign origin (a leaf)
+  memcpy(fwd.target_mac_address, originMaster, 6); // sealed against originMaster's AAD
+  fwd.epoch_num = 3;
+  fwd.seq_num = 5;
+
+  resetEspNowMock();
+  relay.transmitCore(static_cast<adapter_types>(fwd.data_type), fwd.data, MESH_TYPE_ADAPTER_DATA,
+                     &fwd);
+
+  ASSERT_TRUE(wasSentTo(relaysMaster)) << "relay must forward toward its own next hop";
+  mesh_message sent = lastEspNowSentTo(relaysMaster);
+  EXPECT_EQ(0, memcmp(sent.target_mac_address, originMaster, 6))
+      << "relayed frame must keep the origin's target (AAD-bound), not the relay's currentMaster";
 }
 
 // (b) A relay in the path forwards to the next index, unchanged frame.

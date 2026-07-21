@@ -14,6 +14,7 @@
 // loop() call (see PirAdapter.cpp), so a single world.step() after
 // simulatePirMotion() is enough to get the sealed frame into flight.
 #include "harness/MeshSimTest.h"
+#include <cstring>
 
 TEST_F(MeshSimTest, SealedUplinkDeliversPlaintextToHub) {
   addMaster();
@@ -27,11 +28,17 @@ TEST_F(MeshSimTest, SealedUplinkDeliversPlaintextToHub) {
   mesh_message* onWire = world.bus.lastPendingOfType(MESH_TYPE_ADAPTER_DATA);
   ASSERT_NE(onWire, nullptr) << "sensor must have a sealed ADAPTER_DATA uplink frame in flight";
   // PirAdapter's motion frame is data[64] = {1} (no named OP_PIR_* opcode
-  // constant exists in opcodes.h — PIR uses a bare literal). Once sealed,
-  // ChaCha20-Poly1305 ciphertext occupying data[0] must not coincide with
-  // that plaintext byte.
-  EXPECT_NE(onWire->data[0], 1)
-      << "the plaintext motion byte (data[0]==1) must not appear on the wire — "
+  // constant exists in opcodes.h — PIR uses a bare literal, and aggregate
+  // initialization zero-fills the rest of the buffer). Comparing only
+  // data[0] against the plaintext byte has a ~1/256 chance the sealed
+  // ciphertext byte happens to coincide with the plaintext value, flaking
+  // the test. Compare the FULL on-wire payload against the known plaintext
+  // buffer instead — a whole-buffer collision is cryptographically
+  // negligible, so this proves sealing without flaking while still failing
+  // if the payload were sent unsealed.
+  uint8_t plaintextMotionFrame[64] = {1};
+  EXPECT_NE(0, memcmp(onWire->data, plaintextMotionFrame, sizeof(plaintextMotionFrame)))
+      << "the plaintext motion payload must not appear verbatim on the wire — "
          "the payload must be sealed in transit";
 
   runPolled(2000);

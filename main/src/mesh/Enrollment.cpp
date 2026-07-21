@@ -143,9 +143,9 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
       break;
     }
   if (hasSecondary) {
-    if (registerFn)
-      registerFn(msg.secondary_master_mac, msg.secondary_public_key);
-    if (!hasMasterMacSecondary) {
+    bool secondaryRegistered =
+        registerFn && registerFn(msg.secondary_master_mac, msg.secondary_public_key);
+    if (secondaryRegistered && !hasMasterMacSecondary) {
       memcpy(knownMasterMacSecondary, msg.secondary_master_mac, 6);
       hasMasterMacSecondary = true;
       EepromManager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
