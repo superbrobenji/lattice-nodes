@@ -138,6 +138,7 @@ private:
   NeighborTable& testNeighbors() { return neighbors; }
   RouteTable& testRoutes() { return routes; }
   uint32_t testMillisNow() { return millis(); } // exposes the node's mocked clock to tests
+  const uint8_t* testDeviceMac() const { return deviceMacAddress; }
 #endif
 
   // Relay jitter: deferred relay pending fields (Task 3)
@@ -248,6 +249,13 @@ public:
   // this node's own serial adapter — broadcastToAllPeers() explicitly skips
   // self, so without this the master could never answer for itself.
   void broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally = false);
+
+  // Master-only: source-route a sealed downlink to a specific enrolled node
+  // (spec §4). Seals `data` with the destination's k_down, then unicasts via
+  // the reversed relay path recorded in RouteTable (from that node's most
+  // recent route report), or broadcast-floods if no route is known. No-op if
+  // this node is not master. See Mesh.cpp for the full rationale.
+  void sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const uint8_t* data);
 
   // Serial adapter helper (optional broadcast)
   static void broadcastAdapterDataStatic(adapter_types type, const uint8_t* data);

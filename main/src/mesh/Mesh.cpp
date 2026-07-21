@@ -534,6 +534,42 @@ void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data, bool de
   }
 }
 
+void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const uint8_t* data) {
+  if (!isMaster)
+    return;
+  mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
+  memcpy(msg.target_mac_address, destMac, 6); // AAD-bound destination — set before sealing
+
+  const uint8_t *kUp, *kDown;
+  if (!peerE2EKeys(destMac, &kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kDown, msg)) {
+    Logger::logln("MESH", "downlink seal unavailable — dropped", LogLevel::LOG_WARN);
+    return;
+  }
+
+  uint8_t path[lattice::config::MAX_HOPS * 6];
+  uint8_t pathLen = 0;
+  if (routes.lookup(destMac, path, &pathLen) && pathLen > 0) {
+    // RouteTable stores the path in origin->master order (as accumulated by
+    // relays on the uplink route report); reverse it into master->origin order
+    // for the downlink source route.
+    msg.route_len = pathLen;
+    for (uint8_t i = 0; i < pathLen; ++i)
+      memcpy(&msg.route_path[static_cast<size_t>(i) * 6],
+             &path[static_cast<size_t>(pathLen - 1 - i) * 6], 6);
+    // First hop = route_path[0]; auto-register it as an unencrypted ESP-NOW peer
+    // (idempotent) so esp_now_send can unicast to it — real ESP-NOW requires the
+    // peer to be registered first (VirtualBus doesn't enforce this, but the
+    // Phase-2 lesson was that skipping it here is a real-hardware bug).
+    lattice::mesh::crypto::registerPeerWithEspNow(msg.route_path);
+    sendMessage(msg.route_path, msg);
+    return;
+  }
+  // No known multi-hop route: fall back to broadcast flood (still sealed).
+  // Direct/adjacent nodes and unknown-route nodes are reached this way.
+  msg.route_len = 0;
+  broadcastToAllPeers(msg);
+}
+
 void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t* data) {
   if (instance)
     instance->broadcastAdapterData(type, data);
@@ -699,8 +735,26 @@ void Mesh::processAdapterData(const mesh_message& msg) {
                    &relay);
       return;
     }
-    // Downlink to another node: relay outward toward specific target
-    relayDownlink(msg);
+    // Downlink toward a specific node. If the frame carries a source route and
+    // we are on it, forward to the next hop (stateless — spec §4); otherwise
+    // fall back to the flood.
+    if (msg.route_len > 0 && msg.route_len <= lattice::config::MAX_HOPS) {
+      for (uint8_t i = 0; i < msg.route_len; ++i) {
+        if (memcmp(&msg.route_path[static_cast<size_t>(i) * 6], deviceMacAddress, 6) == 0) {
+          if (msg.hop_count >= lattice::config::MAX_HOPS)
+            return;
+          mesh_message fwd = msg;
+          fwd.hop_count++;
+          const uint8_t* next = (i + 1 < msg.route_len)
+                                    ? &msg.route_path[static_cast<size_t>(i + 1) * 6]
+                                    : msg.target_mac_address;
+          lattice::mesh::crypto::registerPeerWithEspNow(next); // idempotent; needed to unicast
+          sendMessage(next, fwd);
+          return;
+        }
+      }
+    }
+    relayDownlink(msg); // not on the route / no route -> existing flood fallback
     return;
   }
 

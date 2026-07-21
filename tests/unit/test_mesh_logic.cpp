@@ -7,6 +7,7 @@
 #include "esp_now_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
+#include "lib/lattice-protocol/c/opcodes.h"
 
 using namespace lattice::mesh;
 
@@ -570,6 +571,36 @@ protected:
     return mesh;
   }
 
+  // A master with one enrolled leaf (real Curve25519 keys, so peerE2EKeys can
+  // actually derive k_down for sendDownlinkToNode's sealing step).
+  Mesh makeMasterNode() {
+    Mesh mesh;
+    static constexpr uint8_t kThisMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+    static constexpr uint8_t kLeafMac[6] = {0x02, 0, 0, 0, 0, 0x0B};
+    memcpy(mesh.deviceMacAddress, kThisMasterMac, 6);
+    mesh.isMaster = true;
+    uint8_t masterPriv[32], masterPub[32], leafPriv[32], leafPub[32];
+    lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+    lattice::mesh::crypto::generateKeypair(leafPriv, leafPub);
+    memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+    memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+    PeerInfo leaf{};
+    memcpy(leaf.mac, kLeafMac, 6);
+    memcpy(leaf.publicKey, leafPub, 32);
+    leaf.lastSeenMillis = 0;
+    mesh.peers.append(leaf);
+    return mesh;
+  }
+
+  // A bare relay node identified only by its MAC — used to exercise the
+  // stateless downlink forwarding branch of processAdapterData in isolation.
+  Mesh makeIntermediateNodeWithMac(const uint8_t mac[6]) {
+    Mesh mesh;
+    memcpy(mesh.deviceMacAddress, mac, 6);
+    mesh.isMaster = false;
+    return mesh;
+  }
+
   mesh_message makeJoinAck(const uint8_t target[6], uint8_t hopCount = 1) {
     mesh_message m{};
     m.proto_version = 1;
@@ -734,6 +765,101 @@ TEST_F(JoinAckRelayTest, MultiHopForwardingPeer_BoundToOne_EvictsStaleRelayOnSwi
   // Bound: enrolled peer (kPeerMac) + at most one auto-registered forwarding peer.
   EXPECT_EQ(espNowRegisteredPeers.size(), 2u)
       << "auto-registered forwarding peers must stay bounded to one";
+}
+
+// ─── sendDownlinkToNode / source-routed downlink relay ──────────────────────
+// Helpers to inspect captured ESP-NOW sends by destination MAC — esp_now_send
+// serializes to raw bytes, so deserialize back into a mesh_message to inspect.
+
+static bool wasSentTo(const uint8_t* mac) {
+  for (const auto& pkt : espNowSentPackets) {
+    if (!pkt.isBroadcast && memcmp(pkt.addr, mac, 6) == 0)
+      return true;
+  }
+  return false;
+}
+
+static mesh_message lastEspNowSentTo(const uint8_t* mac) {
+  for (auto it = espNowSentPackets.rbegin(); it != espNowSentPackets.rend(); ++it) {
+    if (!it->isBroadcast && memcmp(it->addr, mac, 6) == 0) {
+      mesh_message m{};
+      memcpy(&m, it->data.data(), sizeof(m));
+      return m;
+    }
+  }
+  ADD_FAILURE() << "no ESP-NOW packet was sent to the requested MAC";
+  return mesh_message{};
+}
+
+// (a) Master with a known route source-routes to the first hop, target=dest, sealed.
+TEST_F(JoinAckRelayTest, DownlinkSourceRoutesViaFirstHop) {
+  Mesh master = makeMasterNode(); // fixture master with an enrolled leaf + keys
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  const uint8_t R1[6] = {0x02, 0, 0, 0, 0, 0x11};
+  const uint8_t R2[6] = {0x02, 0, 0, 0, 0, 0x22};
+  uint8_t path[12];
+  memcpy(path, R1, 6);
+  memcpy(path + 6, R2, 6); // origin->R1->R2->master
+  master.testRoutes().record(leaf, path, 2, 1000);
+
+  resetEspNowMock();
+  uint8_t cmd[64] = {};
+  cmd[0] = OP_CONFIG_SET;
+  master.sendDownlinkToNode(leaf, adapter_types::SERIAL_ADAPTER, cmd);
+
+  // Reversed path [R2,R1]; first hop = R2.
+  ASSERT_TRUE(wasSentTo(R2));
+  mesh_message sent = lastEspNowSentTo(R2);
+  EXPECT_EQ(sent.route_len, 2);
+  EXPECT_EQ(0, memcmp(&sent.route_path[0], R2, 6));
+  EXPECT_EQ(0, memcmp(&sent.route_path[6], R1, 6));
+  EXPECT_EQ(0, memcmp(sent.target_mac_address, leaf, 6));
+  // payload sealed: data[0] != plaintext opcode
+  EXPECT_NE(sent.data[0], OP_CONFIG_SET);
+  // first hop auto-registered as ESP-NOW peer (VirtualBus doesn't enforce this,
+  // so assert it explicitly — the Phase-2 lesson).
+  EXPECT_TRUE(esp_now_is_peer_exist(R2));
+}
+
+// (b) A relay in the path forwards to the next index, unchanged frame.
+TEST_F(JoinAckRelayTest, DownlinkRelayForwardsToNextIndex) {
+  static constexpr uint8_t kR2[6] = {0x02, 0, 0, 0, 0, 0x22};
+  Mesh r2 = makeIntermediateNodeWithMac(kR2);
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  const uint8_t R1[6] = {0x02, 0, 0, 0, 0, 0x11};
+  mesh_message dl = {};
+  dl.proto_version = PROTO_VERSION;
+  dl.message_type = MESH_TYPE_ADAPTER_DATA;
+  memcpy(dl.target_mac_address, leaf, 6);
+  dl.route_len = 2;
+  memcpy(&dl.route_path[0], r2.testDeviceMac(), 6); // R2
+  memcpy(&dl.route_path[6], R1, 6);
+  dl.epoch_num = 7;
+  dl.seq_num = 3;
+
+  resetEspNowMock();
+  r2.processAdapterData(dl); // reachable directly — public under UNIT_TEST
+  EXPECT_TRUE(wasSentTo(R1)) << "R2 forwards to route_path[1]=R1";
+}
+
+// (c) Last relay forwards to target_mac.
+TEST_F(JoinAckRelayTest, DownlinkLastRelayForwardsToTarget) {
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  static constexpr uint8_t kR1[6] = {0x02, 0, 0, 0, 0, 0x11};
+  Mesh r1 = makeIntermediateNodeWithMac(kR1); // R1
+  mesh_message dl = {};
+  dl.proto_version = PROTO_VERSION;
+  dl.message_type = MESH_TYPE_ADAPTER_DATA;
+  memcpy(dl.target_mac_address, leaf, 6);
+  dl.route_len = 2;
+  const uint8_t R2mac[6] = {0x02, 0, 0, 0, 0, 0x22};
+  memcpy(&dl.route_path[0], R2mac, 6);
+  memcpy(&dl.route_path[6], r1.testDeviceMac(), 6); // R1 at index 1 (last)
+  dl.epoch_num = 7;
+  dl.seq_num = 4;
+  resetEspNowMock();
+  r1.processAdapterData(dl);
+  EXPECT_TRUE(wasSentTo(leaf)) << "last relay forwards to target_mac";
 }
 
 // ─── JOIN_ACK forgery resistance ─────────────────────────────────────────────
