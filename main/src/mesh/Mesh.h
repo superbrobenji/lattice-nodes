@@ -192,6 +192,35 @@ private:
   // Enrolled peers (master + sensors, held in `peers`) are NEVER tracked or
   // evicted here.
   uint8_t forwardingPeer[6]{};
+
+  // Bounded LRU of auto-registered DOWNLINK forwarding-peer MACs (spec §2:
+  // "20-peer cap, LRU-evicted"). Unlike the single uplink forwardingPeer
+  // above, a node/master may legitimately need to have MULTIPLE distinct
+  // downlink forwarding peers registered concurrently (e.g. relaying several
+  // in-flight source-routed frames toward different next hops), so this is a
+  // small fixed-capacity LRU rather than a single slot. Capacity is
+  // LATTICE_DOWNLINK_PEER_MAX (project_config.h) — kept small so enrolled
+  // peers + the uplink forwardingPeer + this stay well under the ~20 ESP-NOW
+  // cap. Entries are ordered most-recently-used first (index 0). Enrolled
+  // peers (`peers`) and the current master are NEVER tracked or evicted here
+  // — see registerDownlinkPeer().
+  uint8_t downlinkPeerLru[lattice::config::LATTICE_DOWNLINK_PEER_MAX][6]{};
+  size_t downlinkPeerLruCount{0};
+
+  // Auto-register `mac` as an unencrypted ESP-NOW peer for downlink
+  // forwarding, bounding the set of non-enrolled, non-master peers this adds
+  // via the downlinkPeerLru above (spec §2). If `mac` is an enrolled peer or
+  // the current master, this is a plain idempotent registration — those
+  // peers are managed elsewhere (PeerRegistry / enrollment) and must never be
+  // evicted by downlink forwarding churn. Otherwise `mac` is tracked in the
+  // LRU: already-tracked -> move to front (touch); not tracked and the LRU is
+  // full -> evict the oldest entry from ESP-NOW first. Replaces the plaintext
+  // `registerPeerWithEspNow` calls previously used directly by
+  // sendDownlinkToNode()/processAdapterData()'s relay-forward branch, which
+  // had no bound and let an RF attacker crafting frames with fresh distinct
+  // next-hop MACs exhaust the ESP-NOW peer table one entry per frame.
+  void registerDownlinkPeer(const uint8_t* mac);
+
   // Returns k_up/k_down for the current master (leaf side); false if not enrolled
   // or master pubkey unknown.
   bool masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown);

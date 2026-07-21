@@ -121,6 +121,49 @@ PeerInfo* Mesh::findNextHopToMaster() {
   return &nextHopScratch;
 }
 
+void Mesh::registerDownlinkPeer(const uint8_t* mac) {
+  // Enrolled peers and the current master are managed exclusively by their
+  // own paths (PeerRegistry / enrollment) — just register (idempotent) and
+  // never track or evict them via this LRU.
+  bool isCurrentMaster =
+      currentMaster.distance != 0xFF &&
+      lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(currentMaster.mac);
+  if (peers.find(mac) || isCurrentMaster) {
+    lattice::mesh::crypto::registerPeerWithEspNow(mac);
+    return;
+  }
+
+  // Already tracked: touch (move to front) and ensure still registered.
+  for (size_t i = 0; i < downlinkPeerLruCount; ++i) {
+    if (lattice::utils::MacAddress(downlinkPeerLru[i]) == lattice::utils::MacAddress(mac)) {
+      uint8_t touched[6];
+      memcpy(touched, downlinkPeerLru[i], 6);
+      for (size_t j = i; j > 0; --j)
+        memcpy(downlinkPeerLru[j], downlinkPeerLru[j - 1], 6);
+      memcpy(downlinkPeerLru[0], touched, 6);
+      lattice::mesh::crypto::registerPeerWithEspNow(mac);
+      return;
+    }
+  }
+
+  // Not tracked. Evict the oldest (LRU) entry from ESP-NOW first if at
+  // capacity (spec §2: "20-peer cap, LRU-evicted") — otherwise an RF attacker
+  // crafting downlink frames with fresh distinct next-hop MACs on every frame
+  // would grow this set unbounded and eventually exhaust the ESP-NOW peer
+  // table (no self-heal, no reboot).
+  if (downlinkPeerLruCount >= lattice::config::LATTICE_DOWNLINK_PEER_MAX) {
+    uint8_t* oldest = downlinkPeerLru[downlinkPeerLruCount - 1];
+    if (esp_now_is_peer_exist(oldest))
+      esp_now_del_peer(oldest);
+  } else {
+    ++downlinkPeerLruCount;
+  }
+  for (size_t j = downlinkPeerLruCount - 1; j > 0; --j)
+    memcpy(downlinkPeerLru[j], downlinkPeerLru[j - 1], 6);
+  memcpy(downlinkPeerLru[0], mac, 6);
+  lattice::mesh::crypto::registerPeerWithEspNow(mac);
+}
+
 uint16_t Mesh::nextSeqGuarded() {
   uint16_t seq = replay.nextSeq();
   if (seq == 0) {
@@ -557,10 +600,11 @@ void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const 
       memcpy(&msg.route_path[static_cast<size_t>(i) * 6],
              &path[static_cast<size_t>(pathLen - 1 - i) * 6], 6);
     // First hop = route_path[0]; auto-register it as an unencrypted ESP-NOW peer
-    // (idempotent) so esp_now_send can unicast to it — real ESP-NOW requires the
-    // peer to be registered first (VirtualBus doesn't enforce this, but the
-    // Phase-2 lesson was that skipping it here is a real-hardware bug).
-    lattice::mesh::crypto::registerPeerWithEspNow(msg.route_path);
+    // so esp_now_send can unicast to it — real ESP-NOW requires the peer to be
+    // registered first (VirtualBus doesn't enforce this, but the Phase-2 lesson
+    // was that skipping it here is a real-hardware bug). Bounded via the
+    // downlink forwarding-peer LRU (spec §2) — see registerDownlinkPeer().
+    registerDownlinkPeer(msg.route_path);
     sendMessage(msg.route_path, msg);
     return;
   }
@@ -754,7 +798,11 @@ void Mesh::processAdapterData(const mesh_message& msg) {
           const uint8_t* next = (i + 1 < msg.route_len)
                                     ? &msg.route_path[static_cast<size_t>(i + 1) * 6]
                                     : msg.target_mac_address;
-          lattice::mesh::crypto::registerPeerWithEspNow(next); // idempotent; needed to unicast
+          // Bounded via the downlink forwarding-peer LRU (spec §2) — `next` is
+          // attacker-controlled plaintext (this relay never opens the sealed
+          // frame), so an unbounded registerPeerWithEspNow here would let an RF
+          // attacker exhaust the ESP-NOW peer table one entry per crafted frame.
+          registerDownlinkPeer(next);
           sendMessage(next, fwd);
           return;
         }

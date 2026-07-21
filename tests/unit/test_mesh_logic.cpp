@@ -862,6 +862,44 @@ TEST_F(JoinAckRelayTest, DownlinkLastRelayForwardsToTarget) {
   EXPECT_TRUE(wasSentTo(leaf)) << "last relay forwards to target_mac";
 }
 
+// Whole-branch-review finding: the downlink relay-forward branch never opens
+// the sealed frame, so route_path[i+1] is attacker-controlled plaintext. An RF
+// attacker can craft ADAPTER_DATA with this relay at route_path[i] and a fresh
+// distinct MAC at route_path[i+1] on every frame (dodging replay dedup via
+// fresh epoch/seq at the network entry point) to permanently grow the ESP-NOW
+// peer table one entry per frame — spec §2's "20-peer cap, LRU-evicted" must
+// bound this the same way Phase 2 bounded the uplink forwardingPeer.
+TEST_F(JoinAckRelayTest, DownlinkRelayForward_BoundsAutoRegisteredPeers_NeverEvictsEnrolled) {
+  Mesh mesh = makeIntermediateNode(); // kPeerMac is an ENROLLED peer — must never be evicted
+  // Mirror what setupEspNow()/addPeer() do for a real enrolled peer at boot
+  // (the fixture's peers.append() above only populates the PeerRegistry).
+  lattice::mesh::crypto::registerPeerWithEspNow(kPeerMac);
+
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  const int kFloodCount = static_cast<int>(lattice::config::LATTICE_DOWNLINK_PEER_MAX) + 6;
+  for (int i = 0; i < kFloodCount; ++i) {
+    mesh_message dl{};
+    dl.proto_version = PROTO_VERSION;
+    dl.message_type = MESH_TYPE_ADAPTER_DATA;
+    memcpy(dl.target_mac_address, leaf, 6);
+    dl.route_len = 2;
+    memcpy(&dl.route_path[0], kMyMac, 6); // this node is at route_path[0]
+    // Fresh, distinct MAC at route_path[1] on every iteration — the attack.
+    uint8_t nextMac[6] = {0x03, 0, 0, 0, static_cast<uint8_t>((i >> 8) & 0xFF),
+                          static_cast<uint8_t>(i & 0xFF)};
+    memcpy(&dl.route_path[6], nextMac, 6);
+    dl.epoch_num = 1;
+    dl.seq_num = static_cast<uint16_t>(i + 1);
+
+    mesh.processAdapterData(dl);
+  }
+
+  EXPECT_LE(espNowRegisteredPeers.size(), 1 + lattice::config::LATTICE_DOWNLINK_PEER_MAX)
+      << "auto-registered downlink forwarding peers must stay bounded by the LRU cap";
+  EXPECT_TRUE(esp_now_is_peer_exist(kPeerMac))
+      << "enrolled peer must never be evicted by downlink forwarding-peer churn";
+}
+
 // ─── Config-opcode injection resistance (CRITICAL finding) ──────────────────
 // Phase 3 seals+source-routes TARGETED downlink CONFIG_SET/NODE_ID_SET, and a
 // node opens a self-addressed sealed ADAPTER_DATA with its k_down before
