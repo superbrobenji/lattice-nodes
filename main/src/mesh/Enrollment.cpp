@@ -131,6 +131,26 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
     EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
     Logger::logln("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
   }
+
+  // Dual-master (spec §5): if the server included a secondary master, register it
+  // as a peer (persists mac+pubkey, so masterE2EKeys can derive against it after
+  // failover) and record it as the secondary for beacon adoption. Guarded on a
+  // non-zero secondary MAC.
+  bool hasSecondary = false;
+  for (int i = 0; i < 6; ++i)
+    if (msg.secondary_master_mac[i]) {
+      hasSecondary = true;
+      break;
+    }
+  if (hasSecondary) {
+    if (registerFn)
+      registerFn(msg.secondary_master_mac, msg.secondary_public_key);
+    if (!hasMasterMacSecondary) {
+      memcpy(knownMasterMacSecondary, msg.secondary_master_mac, 6);
+      hasMasterMacSecondary = true;
+      EepromManager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
+    }
+  }
 }
 
 void Enrollment::enrollPeer(const uint8_t* mac, const uint8_t* pubKey32, RegisterPeerFn registerFn,

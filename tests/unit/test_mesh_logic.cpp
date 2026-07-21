@@ -706,6 +706,51 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
       << "uplink route must resolve through the newly registered master peer";
 }
 
+TEST_F(JoinAckRelayTest, ProcessJoinAckRegistersSecondaryMasterAndKeys) {
+  // A JOIN_ACK carrying a non-zero secondary master identity (spec §5 dual
+  // master) must register the secondary as a routable/keyable PeerRegistry
+  // peer (mac+pubkey, persisted) AND record it as the TOFU secondary — this
+  // is what lets masterE2EKeys() derive keys against the secondary once
+  // currentMaster.mac flips to it after failover.
+  Mesh leaf = makeIntermediateNode(); // non-master, not yet enrolled with anyone
+
+  uint8_t leafPriv[32], leafPub[32], primPriv[32], primPub[32], secPriv[32], secPub[32];
+  lattice::mesh::crypto::generateKeypair(leafPriv, leafPub);
+  lattice::mesh::crypto::generateKeypair(primPriv, primPub);
+  lattice::mesh::crypto::generateKeypair(secPriv, secPub);
+  memcpy(leaf.enrollment.devicePrivateKey, leafPriv, 32);
+  memcpy(leaf.enrollment.devicePublicKey, leafPub, 32);
+
+  const uint8_t primMac[6] = {0x02, 0, 0, 0, 0, 0x01};
+  const uint8_t secMac[6] = {0x02, 0, 0, 0, 0, 0x02};
+  mesh_message ack = {};
+  ack.proto_version = PROTO_VERSION;
+  ack.message_type = MESH_TYPE_JOIN_ACK;
+  memcpy(ack.origin_mac_address, primMac, 6); // primary sent it
+  memcpy(ack.target_mac_address, leaf.testDeviceMac(), 6);
+  memcpy(ack.data, leafPub, 4); // fingerprint of the leaf's pubkey
+  memcpy(ack.enrollment_public_key, primPub, 32); // primary pubkey
+  memcpy(ack.secondary_master_mac, secMac, 6);
+  memcpy(ack.secondary_public_key, secPub, 32);
+
+  leaf.processJoinAck(ack);
+
+  // Secondary registered as a routable/keyable peer with its pubkey:
+  PeerInfo* sec = leaf.peers.find(secMac);
+  ASSERT_NE(sec, nullptr) << "secondary master must be registered in the PeerRegistry";
+  EXPECT_EQ(0, memcmp(sec->publicKey, secPub, 32));
+  // Secondary TOFU state set:
+  EXPECT_TRUE(leaf.enrollment.hasMasterMacSecondary);
+  EXPECT_EQ(0, memcmp(leaf.enrollment.knownMasterMacSecondary, secMac, 6));
+  // And post-failover masterE2EKeys resolves against the secondary:
+  leaf.enrollment.hasMasterMac = true; // enrolled with primary
+  memcpy(leaf.currentMaster.mac, secMac, 6); // simulate adoption after failover
+  leaf.currentMaster.distance = 1;
+  const uint8_t *kUp, *kDown;
+  EXPECT_TRUE(leaf.masterE2EKeys(&kUp, &kDown))
+      << "keys derivable against the secondary post-failover";
+}
+
 TEST_F(JoinAckRelayTest, NextHopThroughRelayIsRegisteredAsEspNowPeer) {
   Mesh mesh = makeIntermediateNode(); // distance/enrollment set up by fixture
   // Node is distance 2; a relay at distance 1 is known ONLY via the NeighborTable
