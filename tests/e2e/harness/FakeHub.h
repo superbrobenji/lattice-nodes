@@ -42,6 +42,18 @@ public:
   // node's own device public key.
   void approveEnrollment(const uint8_t* nodeMac, const uint8_t* nodePubKey32);
 
+  // Same as above, but also tells the node about a server-designated secondary
+  // master (Phase 4 dual-master failover): sets ack.secondary_master_mac/
+  // secondary_public_key before injecting the JOIN_ACK. SerialAdapter::
+  // handleCompleteFrame forwards these into the 4-arg Mesh::enrollPeer overload,
+  // which relays them on to the enrolling node's own JOIN_ACK, where
+  // Enrollment::processJoinAck registers the secondary as a peer (so
+  // masterE2EKeys can derive a key against it after failover) and records it
+  // for beacon adoption. The 2-arg overload above delegates here with an
+  // all-zero secondary, which SerialAdapter treats as "no secondary present".
+  void approveEnrollment(const uint8_t* nodeMac, const uint8_t* nodePubKey32,
+                         const uint8_t* secondaryMac, const uint8_t* secondaryPubKey32);
+
   // Script a server-issued adapter reconfiguration for targetMac.
   void sendConfigSet(const uint8_t* targetMac, lattice::adapter::adapter_types newType);
 

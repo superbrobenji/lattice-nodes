@@ -85,3 +85,67 @@ TEST_F(DualMasterTest, LearnsSecondaryMasterInDualMode) {
   });
   EXPECT_TRUE(knowsSecondary) << "sensor must TOFU-learn the secondary master in dual-master mode";
 }
+
+// Full DATA failover (closes gap #8): the server designates a secondary master
+// at enrollment time (JOIN_ACK's secondary_master_mac/secondary_public_key,
+// Phase 4 tasks 1-2), so the sensor is ECDH-keyed to BOTH masters from the
+// start. When the primary goes silent and the sensor adopts the secondary as
+// currentMaster, its post-failover uplink must actually DECRYPT there — not
+// just arrive. FakeHub only surfaces what the master's serial bridge decoded
+// AFTER Mesh opened the sealed payload with peerE2EKeys(origin) (see
+// Mesh.cpp's "needsOpen" uplink-open path); if the master couldn't open the
+// frame, it is dropped and never reaches serial/FakeHub at all. So arrival at
+// hub2 is itself proof of decryption at master2, not just of routing.
+TEST_F(DualMasterTest, UplinkReachesSecondaryMasterAfterFailover) {
+  addMaster();
+  auto* sensor = addSensor(MAC_NODE_A);
+  world.bus.link(master, sensor);
+  auto* master2 = bringUpSecondary(sensor); // dual mode on; master2 linked to sensor + primary
+
+  // Read master2's pubkey (server knows both masters' identities).
+  uint8_t m2Pub[32];
+  master2->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    memcpy(m2Pub, m.enrollment.getPublicKey(), 32);
+    return 0;
+  });
+
+  // Enroll the sensor with the PRIMARY, server designating master2 as the secondary.
+  runPolled(11000);
+  const mesh_message* req = hub->enrollmentFrom(sensor->mac());
+  ASSERT_NE(req, nullptr) << "enrollment request never reached hub";
+  hub->approveEnrollment(sensor->mac(), req->enrollment_public_key, master2->mac(), m2Pub);
+  runPolled(5000);
+  ASSERT_TRUE(sensor->with(
+      [&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.isEnrolled(); }));
+
+  // Server sync: teach master2 the sensor's pubkey (so master2 can open its uplink).
+  uint8_t sensorPub[32];
+  sensor->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    memcpy(sensorPub, m.enrollment.getPublicKey(), 32);
+    return 0;
+  });
+  master2->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    m.enrollPeer(sensor->mac(), sensorPub);
+    return 0;
+  });
+
+  // Attach a hub to master2 so we can observe what reaches it.
+  sim::FakeHub hub2(master2);
+
+  // Primary goes silent → sensor fails over to master2.
+  world.bus.unlink(master, sensor);
+  runPolled(lattice::config::STALE_MASTER_THRESHOLD_MS + 4000);
+  ASSERT_TRUE(sensor->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    return memcmp(m.currentMaster.mac, master2->mac(), 6) == 0;
+  })) << "sensor must adopt the secondary as currentMaster once the primary goes stale";
+
+  // Sensor sends PIR data; it must arrive DECRYPTED at master2's hub.
+  size_t before = hub2.adapterDataFromOrigin(sensor->mac()).size();
+  sensor->simulatePirMotion();
+  runPolled(4000);
+  hub2.poll();
+  auto frames = hub2.adapterDataFromOrigin(sensor->mac());
+  ASSERT_GT(frames.size(), before) << "post-failover uplink reached the secondary";
+  // FakeHub delivers what the master OPENED — so arrival proves master2 decrypted it
+  // with the sensor's k_up derived against the (sensor, master2) ECDH pair.
+}

@@ -91,6 +91,13 @@ void FakeHub::sendFrame(const mesh_message& msg) {
 }
 
 void FakeHub::approveEnrollment(const uint8_t* nodeMac, const uint8_t* nodePubKey32) {
+  static const uint8_t zeroMac[6] = {0, 0, 0, 0, 0, 0};
+  static const uint8_t zeroPub[32] = {0};
+  approveEnrollment(nodeMac, nodePubKey32, zeroMac, zeroPub);
+}
+
+void FakeHub::approveEnrollment(const uint8_t* nodeMac, const uint8_t* nodePubKey32,
+                                const uint8_t* secondaryMac, const uint8_t* secondaryPubKey32) {
   mesh_message ack{};
   ack.proto_version = 2;
   ack.message_type = MESH_TYPE_JOIN_ACK;
@@ -104,6 +111,12 @@ void FakeHub::approveEnrollment(const uint8_t* nodeMac, const uint8_t* nodePubKe
   // later frame's data[0..3] that Enrollment::processJoinAck checks, on the
   // enrolling node, against its own device public key.
   memcpy(ack.data, nodePubKey32, 4);
+  // Server-designated secondary master (Phase 4 dual-master failover). Left
+  // zeroed by the 2-arg overload above, which SerialAdapter::handleCompleteFrame
+  // treats as "no secondary present" (see its all-zero secondary_master_mac
+  // check) and so falls back to the plain 2-arg Mesh::enrollPeer.
+  memcpy(ack.secondary_master_mac, secondaryMac, 6);
+  memcpy(ack.secondary_public_key, secondaryPubKey32, 32);
   sendFrame(ack);
 }
 
