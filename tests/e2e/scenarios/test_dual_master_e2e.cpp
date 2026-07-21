@@ -11,6 +11,8 @@
 #include "harness/MeshSimTest.h"
 #include "src/mesh/Mesh.h"
 #include "src/adapter/Adapter.h"
+#include "src/adapter/AdapterFactory.h"
+#include "lib/lattice-protocol/c/opcodes.h"
 #include "project_config.h"
 
 class DualMasterTest : public MeshSimTest {
@@ -148,4 +150,86 @@ TEST_F(DualMasterTest, UplinkReachesSecondaryMasterAfterFailover) {
   ASSERT_GT(frames.size(), before) << "post-failover uplink reached the secondary";
   // FakeHub delivers what the master OPENED — so arrival proves master2 decrypted it
   // with the sensor's k_up derived against the (sensor, master2) ECDH pair.
+}
+
+// Task 3 (Phase 5 follow-ups): a CONFIG_SET/NODE_ID_SET sealed and sent by the
+// SECONDARY master after failover must be honored — not rejected by an origin
+// check that only recognized the primary's MAC. Reuses the setup from
+// UplinkReachesSecondaryMasterAfterFailover above (enroll with the primary,
+// server designates master2 as secondary, sync the sensor's pubkey to
+// master2, primary goes stale so the sensor adopts master2 as currentMaster).
+// Then master2 sends a sealed CONFIG_SET downlink directly (mirroring
+// FakeHub::sendConfigSet's wire format: [OP_CONFIG_SET][6B targetMac][1B
+// adapterType]) and we assert the sensor actually reconfigures its adapter —
+// the same signal ServerBroadcastTest.ConfigSetReachesNodeAdapterAndPersists
+// (test_harness_smoke.cpp) uses to prove config application end-to-end.
+//
+// This exercises ONLY the origin-allowlist widening (defense-in-depth): the
+// E2E-open gate (isConfigOpcode && !needsOpen && !nodeOpened) above it in
+// Mesh::processAdapterData is untouched and still requires the frame to have
+// been opened with the sensor's own k_down — a forged CONFIG_SET still can't
+// get in without it.
+TEST_F(DualMasterTest, ConfigSetFromSecondaryMasterIsHonoredAfterFailover) {
+  addMaster();
+  auto* sensor = addSensor(MAC_NODE_A);
+  world.bus.link(master, sensor);
+  auto* master2 = bringUpSecondary(sensor); // dual mode on; master2 linked to sensor + primary
+
+  // Read master2's pubkey (server knows both masters' identities).
+  uint8_t m2Pub[32];
+  master2->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    memcpy(m2Pub, m.enrollment.getPublicKey(), 32);
+    return 0;
+  });
+
+  // Enroll the sensor with the PRIMARY, server designating master2 as the secondary.
+  runPolled(11000);
+  const mesh_message* req = hub->enrollmentFrom(sensor->mac());
+  ASSERT_NE(req, nullptr) << "enrollment request never reached hub";
+  hub->approveEnrollment(sensor->mac(), req->enrollment_public_key, master2->mac(), m2Pub);
+  runPolled(5000);
+  ASSERT_TRUE(sensor->with(
+      [&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.isEnrolled(); }));
+
+  // Server sync: teach master2 the sensor's pubkey (so master2 can seal its downlink).
+  uint8_t sensorPub[32];
+  sensor->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    memcpy(sensorPub, m.enrollment.getPublicKey(), 32);
+    return 0;
+  });
+  master2->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    m.enrollPeer(sensor->mac(), sensorPub);
+    return 0;
+  });
+
+  // Primary goes silent → sensor fails over to master2.
+  world.bus.unlink(master, sensor);
+  runPolled(lattice::config::STALE_MASTER_THRESHOLD_MS + 4000);
+  ASSERT_TRUE(sensor->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    return memcmp(m.currentMaster.mac, master2->mac(), 6) == 0;
+  })) << "sensor must adopt the secondary as currentMaster once the primary goes stale";
+
+  auto preType = sensor->with(
+      [](lattice::mesh::Mesh&, lattice::adapter::Adapter* a) { return a->getAdapterType(); });
+  EXPECT_EQ(preType, lattice::adapter::PIR_ADAPTER) << "precondition: sensor starts as PIR";
+
+  // master2 sends a sealed CONFIG_SET to the sensor (sealed with the sensor's k_down).
+  master2->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    uint8_t cmd[64] = {};
+    cmd[0] = OP_CONFIG_SET;
+    memcpy(&cmd[1], sensor->mac(), 6);
+    cmd[7] =
+        lattice::adapter::AdapterFactory::adapterTypeToEEPROM(lattice::adapter::SERIAL_ADAPTER);
+    m.sendDownlinkToNode(sensor->mac(), lattice::adapter::SERIAL_ADAPTER, cmd);
+    return 0;
+  });
+  runPolled(4000);
+
+  // Assert the sensor honored it (applied the config) — NOT rejected as "non-master MAC".
+  auto type = sensor->with(
+      [](lattice::mesh::Mesh&, lattice::adapter::Adapter* a) { return a->getAdapterType(); });
+  EXPECT_EQ(type, lattice::adapter::SERIAL_ADAPTER)
+      << "CONFIG_SET sealed and sent by the secondary master post-failover must be honored — "
+         "the origin gate must accept enrollment.knownMasterMacSecondary, not just the primary's "
+         "MAC";
 }

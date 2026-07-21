@@ -874,11 +874,15 @@ void Mesh::processAdapterData(const mesh_message& msg) {
                   LogLevel::LOG_WARN);
     return;
   }
-  // TODO(dual-master): also allow secondary master MAC for CONFIG_SET
-  if (isConfigOpcode && enrollment.hasMasterMac &&
-      memcmp(opened.origin_mac_address, enrollment.knownMasterMac, 6) != 0) {
-    Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
-    return;
+  if (isConfigOpcode && enrollment.hasMasterMac) {
+    bool fromPrimary = memcmp(opened.origin_mac_address, enrollment.knownMasterMac, 6) == 0;
+    bool fromSecondary =
+        enrollment.hasMasterMacSecondary &&
+        memcmp(opened.origin_mac_address, enrollment.knownMasterMacSecondary, 6) == 0;
+    if (!fromPrimary && !fromSecondary) {
+      Logger::logln("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
+      return;
+    }
   }
   // Note: the "master received ADAPTER_DATA not addressed to self" case is now
   // handled (and rejected) by the security gate above — ADAPTER_DATA is always a
