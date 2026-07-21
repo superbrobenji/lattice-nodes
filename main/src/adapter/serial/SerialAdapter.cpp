@@ -251,7 +251,22 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
                     LogLevel::LOG_INFO);
       lattice::mesh::Mesh* meshInstance = lattice::mesh::Mesh::getInstance();
       if (meshInstance) {
-        meshInstance->enrollPeer(msg.target_mac_address, msg.enrollment_public_key);
+        // Server may relay a secondary-master identity alongside the
+        // enrollment approval (Phase 4 dual-master failover) — pass it
+        // through to the JOIN_ACK only if it's actually present (non-zero).
+        bool hasSecondary = false;
+        for (int i = 0; i < 6; ++i) {
+          if (msg.secondary_master_mac[i]) {
+            hasSecondary = true;
+            break;
+          }
+        }
+        if (hasSecondary) {
+          meshInstance->enrollPeer(msg.target_mac_address, msg.enrollment_public_key,
+                                   msg.secondary_master_mac, msg.secondary_public_key);
+        } else {
+          meshInstance->enrollPeer(msg.target_mac_address, msg.enrollment_public_key);
+        }
       }
     } else {
       Logger::logln("Serial_Adapter", "Server rejected enrollment request", LogLevel::LOG_WARN);

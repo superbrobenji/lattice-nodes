@@ -12,6 +12,8 @@
 /* Struct definitions */
 typedef PB_BYTES_ARRAY_T(64) mesh_MeshMessage_data_t;
 typedef PB_BYTES_ARRAY_T(32) mesh_MeshMessage_public_key_t;
+typedef PB_BYTES_ARRAY_T(6) mesh_MeshMessage_secondaryMasterMac_t;
+typedef PB_BYTES_ARRAY_T(32) mesh_MeshMessage_secondaryPublicKey_t;
 typedef struct _mesh_MeshMessage {
     uint32_t messageType;
     int32_t dataType;
@@ -26,6 +28,10 @@ typedef struct _mesh_MeshMessage {
     uint32_t protoVersion;
     bool has_public_key;
     mesh_MeshMessage_public_key_t public_key;
+    bool has_secondaryMasterMac;
+    mesh_MeshMessage_secondaryMasterMac_t secondaryMasterMac;
+    bool has_secondaryPublicKey;
+    mesh_MeshMessage_secondaryPublicKey_t secondaryPublicKey;
 } mesh_MeshMessage;
 
 
@@ -34,8 +40,8 @@ extern "C" {
 #endif
 
 /* Initializer values for message structs */
-#define mesh_MeshMessage_init_default            {0, 0, {0}, {0}, {0}, false, {0, {0}}, 0, 0, 0, 0, false, {0, {0}}}
-#define mesh_MeshMessage_init_zero               {0, 0, {0}, {0}, {0}, false, {0, {0}}, 0, 0, 0, 0, false, {0, {0}}}
+#define mesh_MeshMessage_init_default            {0, 0, {0}, {0}, {0}, false, {0, {0}}, 0, 0, 0, 0, false, {0, {0}}, false, {0, {0}}, false, {0, {0}}}
+#define mesh_MeshMessage_init_zero               {0, 0, {0}, {0}, {0}, false, {0, {0}}, 0, 0, 0, 0, false, {0, {0}}, false, {0, {0}}, false, {0, {0}}}
 
 /* Field tags (for use in manual encoding/decoding) */
 #define mesh_MeshMessage_messageType_tag         1
@@ -49,6 +55,8 @@ extern "C" {
 #define mesh_MeshMessage_seqNum_tag              9
 #define mesh_MeshMessage_protoVersion_tag        10
 #define mesh_MeshMessage_public_key_tag          11
+#define mesh_MeshMessage_secondaryMasterMac_tag  15
+#define mesh_MeshMessage_secondaryPublicKey_tag  16
 
 /* Struct field encoding specification for nanopb */
 #define mesh_MeshMessage_FIELDLIST(X, a) \
@@ -62,7 +70,9 @@ X(a, STATIC,   SINGULAR, UINT32,   hopCount,          7) \
 X(a, STATIC,   SINGULAR, UINT32,   epochNum,          8) \
 X(a, STATIC,   SINGULAR, UINT32,   seqNum,            9) \
 X(a, STATIC,   SINGULAR, UINT32,   protoVersion,     10) \
-X(a, STATIC,   OPTIONAL, BYTES,    public_key,       11)
+X(a, STATIC,   OPTIONAL, BYTES,    public_key,       11) \
+X(a, STATIC,   OPTIONAL, BYTES,    secondaryMasterMac,  15) \
+X(a, STATIC,   OPTIONAL, BYTES,    secondaryPublicKey,  16)
 #define mesh_MeshMessage_CALLBACK NULL
 #define mesh_MeshMessage_DEFAULT NULL
 
@@ -73,7 +83,7 @@ extern const pb_msgdesc_t mesh_MeshMessage_msg;
 
 /* Maximum encoded size of messages (where known) */
 #define MESH_MESH_PB_H_MAX_SIZE                  mesh_MeshMessage_size
-#define mesh_MeshMessage_size                    160
+#define mesh_MeshMessage_size                    202
 
 #ifdef __cplusplus
 } /* extern "C" */

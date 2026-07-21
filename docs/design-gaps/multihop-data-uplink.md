@@ -116,7 +116,24 @@ than an obviously-unenrolled one.
 
 ## Related gap: dual-master data failover
 
-The same "a node is only keyed to the master it enrolled with" constraint blocks
+**Status:** CLOSED (Phase 4, 2026-07-21). At enrollment the server designates a
+secondary master and supplies its MAC + public key in the JOIN_ACK (relayed
+through the primary); the leaf registers the secondary as a persisted
+`PeerRegistry` peer, so after it adopts the secondary on failover
+`masterE2EKeys()` derives a distinct `k_up`/`k_down` pair against the secondary
+and its uplink seals with keys the secondary can open (the server syncs each
+leaf's public key to the secondary). No wire-format or EEPROM-layout change was
+needed — the `secondary_master_mac`/`secondary_public_key` fields already existed
+in proto v3, and the secondary's key persists in the existing peer list.
+Executable spec: `tests/e2e/scenarios/test_dual_master_e2e.cpp` →
+`UplinkReachesSecondaryMasterAfterFailover`. Follow-up (functional, not
+blocking): downlink *commands* (`CONFIG_SET`) from the secondary are not yet
+honored post-failover — the origin gate is still primary-MAC-only
+(`Mesh.cpp` `TODO(dual-master)`).
+
+The original description of the gap follows.
+
+The same "a node is only keyed to the master it enrolled with" constraint blocked
 dual-master **data** failover (Task 12). In dual-master mode a node correctly
 TOFU-learns a secondary master's beacon and *adopts* it as `currentMaster` when
 the primary goes silent (route-adoption failover works and is tested — see
