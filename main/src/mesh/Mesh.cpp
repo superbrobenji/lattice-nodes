@@ -575,6 +575,12 @@ void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t* data) {
     instance->broadcastAdapterData(type, data);
 }
 
+void Mesh::sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
+                                    const uint8_t* data) {
+  if (instance)
+    instance->sendDownlinkToNode(destMac, type, data);
+}
+
 void Mesh::debugDumpRadio() {
   if (!EepromManager::getInstance().getDevMode())
     return;
@@ -782,6 +788,19 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     if (!peerE2EKeys(msg.origin_mac_address, &kUp, &kDown) ||
         !lattice::mesh::crypto::openPayload(kUp, opened)) {
       Logger::logln("MESH", "E2E open failed — frame dropped", LogLevel::LOG_WARN);
+      return;
+    }
+  }
+
+  // Node-side E2E open (spec §2): a self-addressed sealed ADAPTER_DATA from the
+  // master is opened with our k_down before local delivery. Mirrors the master's
+  // uplink open above. Failure → drop (finding-#9 pattern). Broadcast (FF:FF)
+  // frames are NOT opened — addressedToSelf is false for those, so this never
+  // fires for them (they stay plaintext, handled below).
+  if (!isMaster && addressedToSelf && msg.message_type == MESH_TYPE_ADAPTER_DATA) {
+    const uint8_t *kUp, *kDown;
+    if (!masterE2EKeys(&kUp, &kDown) || !lattice::mesh::crypto::openPayload(kDown, opened)) {
+      Logger::logln("MESH", "downlink open failed — dropped", LogLevel::LOG_WARN);
       return;
     }
   }

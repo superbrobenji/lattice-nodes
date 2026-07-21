@@ -274,11 +274,28 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
                          6, "Serial_Adapter: transmit function not set");
     }
   } else if (msg.message_type == MESH_TYPE_SERIAL_CMD_BROADCAST) {
-    Logger::logln("Serial_Adapter", "Broadcasting adapter data to all peers", LogLevel::LOG_DEBUG);
-    // Broadcast adapter data to all peers
-    lattice::mesh::Mesh::broadcastAdapterDataStatic(static_cast<adapter_types>(msg.data_type),
-                                                    msg.data);
-    Logger::logln("Serial_Adapter", "Broadcast sent successfully", LogLevel::LOG_DEBUG);
+    static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    bool isGenuineBroadcast = (memcmp(msg.target_mac_address, kBroadcastMac, 6) == 0);
+    if (isGenuineBroadcast) {
+      Logger::logln("Serial_Adapter", "Broadcasting adapter data to all peers",
+                    LogLevel::LOG_DEBUG);
+      // Broadcast adapter data to all peers (plaintext — no single destination to seal for)
+      lattice::mesh::Mesh::broadcastAdapterDataStatic(static_cast<adapter_types>(msg.data_type),
+                                                      msg.data);
+      Logger::logln("Serial_Adapter", "Broadcast sent successfully", LogLevel::LOG_DEBUG);
+    } else {
+      // Master -> node command: source-route + seal to the specific destination
+      // (spec §4), instead of flooding it in plaintext to every peer. The
+      // opcode's target field (data[1..6], e.g. CONFIG_SET/NODE_ID_SET) carries
+      // the destination MAC.
+      const uint8_t* fwdData = msg.data;
+      uint8_t destMac[6];
+      memcpy(destMac, &fwdData[1], 6); // CONFIG_SET target field
+      Logger::logln("Serial_Adapter", "Sending sealed, source-routed downlink to node",
+                    LogLevel::LOG_DEBUG);
+      lattice::mesh::Mesh::sendDownlinkToNodeStatic(
+          destMac, static_cast<adapter_types>(msg.data_type), fwdData);
+    }
   } else {
     Logger::logln("Serial_Adapter", "Unknown message type: " + String(msg.message_type),
                   LogLevel::LOG_WARN);

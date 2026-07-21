@@ -260,6 +260,12 @@ public:
   // Serial adapter helper (optional broadcast)
   static void broadcastAdapterDataStatic(adapter_types type, const uint8_t* data);
 
+  // Serial adapter helper: static shim to sendDownlinkToNode (mirrors
+  // broadcastAdapterDataStatic above) so SerialAdapter can source-route+seal a
+  // targeted server command without holding a Mesh instance itself.
+  static void sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
+                                       const uint8_t* data);
+
   // Debug helper
   void debugDumpRadio();
 

@@ -137,3 +137,46 @@ TEST_F(MeshSimTest, RelayLearnsNeighborFromMasterBeacon) {
   });
   EXPECT_TRUE(eligible) << "relay should have learned the master as a neighbor from its beacon";
 }
+
+// Phase 3 (downlink source routing, spec §4): the downlink counterpart of
+// SensorOutOfMasterRangeRelaysThroughMiddleNode above. A leaf out of direct RF
+// range of the master (chain: master -> relay -> leaf, leaf NOT linked to
+// master) receives and applies a server-issued CONFIG_SET that the master had
+// to seal with the leaf's k_down and source-route through the relay
+// (Mesh::sendDownlinkToNode) — the relay cannot read the sealed payload, only
+// forward it one hop further per the route_path header. The master only knows
+// that route once the leaf's periodic route report (ROUTE_REPORT_INTERVAL_MS)
+// has reached it (RouteTable, Task 5), so wait that out first; before then the
+// only path is the sealed flood-fallback, which this test intentionally
+// avoids exercising.
+TEST_F(MeshSimTest, MasterSendsSealedConfigSetThroughRelayToLeaf) {
+  addMaster();
+  auto* relay = addSensor(MAC_NODE_A);
+  auto* leaf = addSensor(MAC_NODE_B);
+  world.bus.link(master, relay);
+  world.bus.link(relay, leaf);
+  enroll(relay);
+  enroll(leaf);
+
+  // Let the leaf's periodic route report reach the master so it learns the
+  // relay path (RouteTable) before the downlink is issued.
+  runPolled(lattice::config::ROUTE_REPORT_INTERVAL_MS + 5000);
+
+  auto typeOf = [](sim::SimNode* n) {
+    return n->with(
+        [](lattice::mesh::Mesh&, lattice::adapter::Adapter* a) { return a->getAdapterType(); });
+  };
+  ASSERT_EQ(typeOf(leaf), lattice::adapter::PIR_ADAPTER) << "precondition: leaf starts as PIR";
+  ASSERT_EQ(typeOf(relay), lattice::adapter::PIR_ADAPTER) << "precondition: relay starts as PIR";
+
+  hub->sendConfigSet(leaf->mac(), lattice::adapter::SERIAL_ADAPTER);
+  runPolled(5000); // master seals+source-routes -> relay forwards -> leaf opens+applies+reboots
+
+  EXPECT_EQ(typeOf(leaf), lattice::adapter::SERIAL_ADAPTER)
+      << "leaf must open the sealed downlink with its k_down and apply the CONFIG_SET despite "
+         "being 2 hops from the master";
+  EXPECT_EQ(typeOf(relay), lattice::adapter::PIR_ADAPTER)
+      << "a relay forwarding a downlink addressed to another node must not apply it itself";
+  EXPECT_FALSE(relay->restartRequested())
+      << "the relay must never locally deliver a downlink addressed to the leaf";
+}

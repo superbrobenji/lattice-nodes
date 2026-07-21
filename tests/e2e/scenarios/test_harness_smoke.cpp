@@ -265,21 +265,18 @@ TEST(FakeHubTest, OriginMacsPreservedAndFiltersWork) {
   // this comment previously claimed full master->mesh->sensor propagation was
   // broken because Mesh::buildMessage() stamps outgoing ADAPTER_DATA frames'
   // target_mac_address from the sender's own (unset, all-zero) currentMaster.mac.
-  // That claim does not hold for this call path: SerialAdapter::handleCompleteFrame
-  // reaches the mesh via Mesh::broadcastAdapterDataStatic() -> broadcastAdapterData(),
-  // which overwrites target_mac_address to the broadcast address FF:FF:FF:FF:FF:FF
-  // right after buildMessage() runs (Mesh.cpp) -- buildMessage()'s currentMaster.mac
-  // stamp is immediately discarded, never sent. Mesh::processAdapterData() on the
-  // receiving node already special-cases that broadcast target: it delivers locally
-  // (invoking externalRecvCallback / Adapter::onMeshData) AND relays outward for
-  // multi-hop, exactly as this opcode needs. This is exercised directly by
-  // test_mesh_logic.cpp's AdapterDataRelayTest.IntermediateNode_BroadcastTarget_
-  // DeliveredAndRelayed and .BroadcastAdapterData_UsesBroadcastTargetMAC, and
-  // end-to-end (enrollment -> sendConfigSet -> sensor reboots with the new adapter
-  // type) by ServerBroadcastTest.ConfigSetReachesNodeAdapterAndPersists below.
-  // No main/src change was needed for Task 6a; this test's own assertions below
-  // were already correct (they only ever inspected the payload data[], never
-  // target_mac_address) and are left as-is.
+  // That claim does not hold for this call path.
+  //
+  // UPDATE (Task 6, spec §4): a targeted CONFIG_SET (target != FF:FF) no longer
+  // goes out via Mesh::broadcastAdapterDataStatic() at all. SerialAdapter::
+  // handleCompleteFrame now routes it through Mesh::sendDownlinkToNodeStatic(),
+  // which seals the payload with the destination's k_down before it ever hits
+  // ESP-NOW (source-routed if the master already knows a path, flood-fallback
+  // otherwise — still sealed either way) and keeps target_mac_address as the
+  // real destination MAC rather than FF:FF:FF:FF:FF:FF. The opcode is therefore
+  // NOT readable on the wire below; only the destination node's k_down-opened
+  // copy exposes data[0]==OP_CONFIG_SET, proved end-to-end by
+  // ServerBroadcastTest.ConfigSetReachesNodeAdapterAndPersists below.
   //
   // VirtualBus::deliver() collects AND clears each node's ctx().espNowSent within
   // the very same step() call that produced it, so inspecting
@@ -292,20 +289,23 @@ TEST(FakeHubTest, OriginMacsPreservedAndFiltersWork) {
   EXPECT_TRUE(master->ctx().serialRx.empty())
       << "master must have consumed the sendConfigSet frame off its (mock) serial line";
 
-  bool sawConfigSetBroadcast = false;
+  bool sawSealedConfigSetDownlink = false;
   for (const auto& pkt : pendingSends) {
     if (pkt.data.size() != sizeof(mesh_message))
       continue;
     const auto* msg = reinterpret_cast<const mesh_message*>(pkt.data.data());
-    if (msg->data_type == lattice::adapter::SERIAL_ADAPTER && msg->data[0] == OP_CONFIG_SET &&
-        memcmp(&msg->data[1], sensor->mac(), 6) == 0) {
-      sawConfigSetBroadcast = true;
+    if (msg->message_type == MESH_TYPE_ADAPTER_DATA &&
+        msg->data_type == lattice::adapter::SERIAL_ADAPTER &&
+        memcmp(msg->target_mac_address, sensor->mac(), 6) == 0) {
+      sawSealedConfigSetDownlink = true;
+      EXPECT_NE(msg->data[0], OP_CONFIG_SET)
+          << "targeted CONFIG_SET downlink payload must be sealed (ciphertext) on the "
+             "wire, not plaintext";
     }
   }
-  EXPECT_TRUE(sawConfigSetBroadcast)
-      << "master must rebroadcast the CONFIG_SET opcode (data[0]==0xC1) with the "
-         "sensor's mac embedded in the payload, even though full end-to-end "
-         "delivery into the sensor's adapter is a separate, unfixed gap";
+  EXPECT_TRUE(sawSealedConfigSetDownlink)
+      << "master must send a sealed ADAPTER_DATA frame addressed to the sensor's own "
+         "MAC (not broadcast FF:FF), even though decoding it requires the sensor's k_down";
 
   world.run(50); // let VirtualBus deliver/clear the snapshotted frame normally
 
