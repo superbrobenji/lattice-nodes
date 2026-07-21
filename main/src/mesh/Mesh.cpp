@@ -77,18 +77,49 @@ void Mesh::printMeshMessage(const mesh_message& msg) {
 }
 
 PeerInfo* Mesh::findNextHopToMaster() {
-  // For this mesh: nextHop == currentMaster.nextHop
   if (currentMaster.distance == 0xFF)
     return nullptr;
-  for (size_t i = 0; i < peers.peerCount; ++i) {
-    if (lattice::utils::MacAddress(peers.peerMacs[i].mac) ==
-            lattice::utils::MacAddress(currentMaster.nextHop) &&
-        peers.isPeerInRange(peers.peerMacs[i].mac) &&
-        lattice::utils::MacAddress(peers.peerMacs[i].mac) !=
-            lattice::utils::MacAddress(deviceMacAddress))
-      return &peers.peerMacs[i];
+
+  // Prefer an enrolled peer that is the direct master and in range (distance 1,
+  // the common single-hop case) — keeps the existing behavior and E2E peering.
+  PeerInfo* direct = peers.find(currentMaster.mac);
+  if (direct && currentMaster.distance == 1 && peers.isPeerInRange(direct->mac) &&
+      lattice::utils::MacAddress(direct->mac) != lattice::utils::MacAddress(deviceMacAddress))
+    return direct;
+
+  // Multi-hop (spec §3): pick the freshest neighbor strictly closer to the
+  // master from the NeighborTable. The relay need not be an enrolled peer.
+  uint8_t hopMac[6];
+  if (!neighbors.selectNextHop(currentMaster.distance, millis(), hopMac))
+    return nullptr;
+  if (lattice::utils::MacAddress(hopMac) == lattice::utils::MacAddress(deviceMacAddress))
+    return nullptr;
+
+  // Bound the auto-registered forwarding peer to exactly one (spec §2:
+  // "20-peer cap, LRU-evicted"). A node forwards uplink to only one next hop
+  // at a time, so if we previously auto-registered a DIFFERENT relay, evict
+  // it before registering the new one — otherwise a beacon-flooding attacker
+  // spoofing distinct relay MACs could exhaust the ~20-slot ESP-NOW peer
+  // table (no self-heal, no reboot) and blackhole the real uplink. Never
+  // evict an enrolled peer (master or sensor) — those live in `peers` and
+  // are managed exclusively by the enrollment path.
+  static const uint8_t kZeroMac[6] = {0, 0, 0, 0, 0, 0};
+  bool isNewRelay =
+      lattice::utils::MacAddress(forwardingPeer) != lattice::utils::MacAddress(hopMac);
+  bool forwardingPeerSet = memcmp(forwardingPeer, kZeroMac, 6) != 0;
+  if (forwardingPeerSet && isNewRelay && !peers.find(forwardingPeer) &&
+      lattice::utils::MacAddress(forwardingPeer) != lattice::utils::MacAddress(currentMaster.mac)) {
+    if (esp_now_is_peer_exist(forwardingPeer))
+      esp_now_del_peer(forwardingPeer);
   }
-  return nullptr;
+
+  // Auto-register the chosen next hop as an unencrypted ESP-NOW peer (spec §3).
+  // Idempotent — registerPeerWithEspNow no-ops if the peer already exists.
+  lattice::mesh::crypto::registerPeerWithEspNow(hopMac);
+  memcpy(forwardingPeer, hopMac, 6);
+
+  memcpy(nextHopScratch.mac, hopMac, 6);
+  return &nextHopScratch;
 }
 
 uint16_t Mesh::nextSeqGuarded() {
@@ -615,6 +646,15 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     Logger::logln("MESH", "Updated route to master. Distance: " + String(newDistance),
                   LogLevel::LOG_INFO);
   }
+
+  // Multi-hop routing (spec §3): the node we heard this beacon THROUGH
+  // (last_hop) is a forwarding candidate. msg.hop_count is last_hop's OWN
+  // distance to the master (this receiving node's distance is one more, per
+  // `newDistance` above — last_hop is one hop closer), so last_hop's distance
+  // is msg.hop_count, not +1: a direct beacon straight from the master
+  // (hop_count == 0, last_hop == master) must record the master itself as a
+  // distance-0 neighbor. Learned here, not from enrollment — routing only.
+  neighbors.observe(msg.last_hop_mac_address, msg.hop_count, millis());
 
   if (!isMaster) {
     // C10 fix: only relay if this beacon is newer than the last one we relayed

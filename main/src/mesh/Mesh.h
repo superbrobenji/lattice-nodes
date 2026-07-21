@@ -17,6 +17,7 @@
 #include "PeerRegistry.h"
 #include "Enrollment.h"
 #include "E2EKeyStore.h"
+#include "NeighborTable.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -133,6 +134,8 @@ private:
 
 #ifdef UNIT_TEST
   ReplayCache& testReplay() { return replay; }
+  NeighborTable& testNeighbors() { return neighbors; }
+  uint32_t testMillisNow() { return millis(); } // exposes the node's mocked clock to tests
 #endif
 
   // Relay jitter: deferred relay pending fields (Task 3)
@@ -167,6 +170,22 @@ private:
 
   // E2E AEAD (spec §1/§2): per-peer derived key cache + lookup helpers.
   E2EKeyStore e2eKeys;
+  // Forwarding candidates toward the master, learned from overheard master
+  // beacons (spec §3). Routing only — never consulted for E2E crypto.
+  NeighborTable neighbors;
+  // Holds a NeighborTable-resolved next hop (not an enrolled peer) so
+  // findNextHopToMaster() can return a stable PeerInfo* for a pure relay,
+  // which is never added to `peers` (enrollment-only rule).
+  PeerInfo nextHopScratch{};
+  // MAC of the single auto-registered (unencrypted) ESP-NOW peer currently
+  // standing in for a multi-hop forwarding relay, or all-zero if none. A node
+  // only ever forwards uplink to ONE next hop at a time, so at most one such
+  // peer is ever needed — bounding it here closes the ESP-NOW peer table
+  // exhaustion vector (spec §2: "20-peer cap, LRU-evicted") that an RF
+  // attacker flooding distinct-MAC spoofed beacons would otherwise trigger.
+  // Enrolled peers (master + sensors, held in `peers`) are NEVER tracked or
+  // evicted here.
+  uint8_t forwardingPeer[6]{};
   // Returns k_up/k_down for the current master (leaf side); false if not enrolled
   // or master pubkey unknown.
   bool masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown);

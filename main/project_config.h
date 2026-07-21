@@ -24,16 +24,18 @@ constexpr bool DEFAULT_DEV_MASTER = true;
 // =====================
 // Adapter instantiated on first boot or in DEV_MODE
 // IMPORTANT: For server communication via USB, MUST be SERIAL_ADAPTER
-constexpr lattice::adapter::adapter_types DEFAULT_ADAPTER = lattice::adapter::adapter_types::SERIAL_ADAPTER;
+constexpr lattice::adapter::adapter_types DEFAULT_ADAPTER =
+    lattice::adapter::adapter_types::SERIAL_ADAPTER;
 // Primary mesh-beacon interval (milliseconds)
 constexpr unsigned long MASTER_BEACON_INTERVAL_MS = 3000;
-// Stale-master threshold: node clears master route after this many ms without a beacon (3× interval)
+// Stale-master threshold: node clears master route after this many ms without a beacon (3×
+// interval)
 constexpr uint32_t STALE_MASTER_THRESHOLD_MS = 9000;
 // Enable for deployments with two physically separate master nodes.
 // When false (production default), standard single-master TOFU enforcement applies.
 constexpr bool DUAL_MASTER_MODE = false;
-// Per-node relay jitter window (ms) — non-master nodes delay relay by [10, 10+RELAY_JITTER_MAX_MS) ms
-// to stagger transmissions and prevent collision bursts when all nodes relay simultaneously
+// Per-node relay jitter window (ms) — non-master nodes delay relay by [10, 10+RELAY_JITTER_MAX_MS)
+// ms to stagger transmissions and prevent collision bursts when all nodes relay simultaneously
 constexpr uint8_t RELAY_JITTER_MAX_MS = 64;
 
 // =====================
@@ -44,23 +46,22 @@ constexpr uint8_t WIFI_CHANNEL = 1;
 // Global 16-byte AES key – ALWAYS used for ESP-NOW encryption.
 // WARNING: Change this before deployment. Every node in a mesh must share the same key.
 // Generate a random key: python3 -c "import os; print([hex(b) for b in os.urandom(16)])"
-inline constexpr uint8_t DEFAULT_MESH_KEY[16] = {
-  0x12,0x34,0x56,0x78, 0x9A,0xBC,0xDE,0xF0,
-  0x11,0x22,0x33,0x44, 0x55,0x66,0x77,0x88};
+inline constexpr uint8_t DEFAULT_MESH_KEY[16] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+                                                 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
 
 // =====================
 // 4. Hardware Pins
 // =====================
 // Status LEDs
-constexpr int RED_LED_PIN   = 33;
+constexpr int RED_LED_PIN = 33;
 constexpr int GREEN_LED_PIN = 26;
 // Buttons
 constexpr int CONFIG_BUTTON_PIN = 32;
 // GPIO 35 is input-only (no internal pull resistors) — use GPIO 25 or similar
-constexpr int RESET_BUTTON_PIN  = 25;
+constexpr int RESET_BUTTON_PIN = 25;
 // Seven-segment (TM1637) display – optional
 constexpr int SEVSEG_DATA_PIN = 23; // DIO
-constexpr int SEVSEG_CLK_PIN  = 22; // CLK
+constexpr int SEVSEG_CLK_PIN = 22;  // CLK
 // Compile without display driver by toggling this flag
 constexpr bool ENABLE_SEVSEG_DISPLAY = true;
 
@@ -71,8 +72,8 @@ constexpr bool ENABLE_SEVSEG_DISPLAY = true;
 // Run `esptool.py chip_id` or read from the serial output on first boot.
 // All nodes in a mesh must share identical WIFI_CHANNEL and DEFAULT_MESH_KEY.
 inline constexpr uint8_t DEFAULT_PEERS[][6] = {
-  {0xAA,0xBB,0xCC,0xDD,0xEE,0x01}, // master — replace with real MAC
-  {0xAA,0xBB,0xCC,0xDD,0xEE,0x02}  // node   — replace with real MAC
+    {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01}, // master — replace with real MAC
+    {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x02}  // node   — replace with real MAC
 };
 constexpr int NUM_DEFAULT_PEERS = sizeof(DEFAULT_PEERS) / sizeof(DEFAULT_PEERS[0]);
 
@@ -89,13 +90,13 @@ constexpr lattice::utils::LogLevel DEFAULT_LOG_LEVEL = lattice::utils::LogLevel:
 // Named presets — admin-friendly, no RF knowledge needed.
 // Stored in EEPROM and applied on boot.
 enum class TxPowerPreset : uint8_t {
-  SHORT_RANGE = 0,  // 2dBm  — same room
-  INDOOR      = 1,  // 14dBm — through walls, building-wide
-  OUTDOOR     = 2,  // 20dBm — outdoor, maximum range (default)
+  SHORT_RANGE = 0, // 2dBm  — same room
+  INDOOR = 1,      // 14dBm — through walls, building-wide
+  OUTDOOR = 2,     // 20dBm — outdoor, maximum range (default)
 };
 
 // Maps preset → esp_wifi_set_max_tx_power() value (units of 0.25dBm)
-static constexpr uint8_t TX_POWER_VALUES[] = { 8, 56, 80 };
+static constexpr uint8_t TX_POWER_VALUES[] = {8, 56, 80};
 
 constexpr TxPowerPreset DEFAULT_TX_POWER_PRESET = TxPowerPreset::OUTDOOR;
 
@@ -105,7 +106,7 @@ constexpr TxPowerPreset DEFAULT_TX_POWER_PRESET = TxPowerPreset::OUTDOOR;
 // Set to 1 (or define via -DSIMULATE_MODE=1 build flag) to enable simulation mode
 // (serial-injected fake events for single-device dev/test). Never enabled in production.
 #ifndef SIMULATE_MODE
-  #define SIMULATE_MODE 0
+#define SIMULATE_MODE 0
 #endif
 
 // =====================
@@ -114,6 +115,9 @@ constexpr TxPowerPreset DEFAULT_TX_POWER_PRESET = TxPowerPreset::OUTDOOR;
 // E2E AEAD derived-key cache entries (spec §2). One entry per (peer, master) pair;
 // masters need one per enrolled node, leaves need one per master. Default: MAX_PEERS.
 inline constexpr size_t LATTICE_E2E_KEYCACHE_MAX = 10; // = MAX_PEERS
+// Multi-hop uplink routing (spec §3): max beacon-learned forwarding neighbors
+// tracked per node. One entry per distinct upstream relay a node can hear.
+inline constexpr size_t LATTICE_NEIGHBOR_MAX = 8;
 // Maximum allowed routing hops in the mesh network
 constexpr uint8_t MAX_HOPS = 10;
 // Maximum relay hops in a route report path; bounded by data[2..61] = 60 bytes / 6 bytes per MAC
