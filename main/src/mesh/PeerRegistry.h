@@ -20,8 +20,7 @@ struct PeerInfo {
 // Master routing info
 struct MasterInfo {
   uint8_t mac[6];
-  uint8_t distance;   // Hops to master
-  uint8_t nextHop[6]; // Next hop MAC
+  uint8_t distance; // Hops to master
 };
 
 class PeerRegistry {

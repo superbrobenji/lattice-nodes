@@ -18,6 +18,7 @@
 #include "Enrollment.h"
 #include "E2EKeyStore.h"
 #include "NeighborTable.h"
+#include "RouteTable.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -135,7 +136,9 @@ private:
 #ifdef UNIT_TEST
   ReplayCache& testReplay() { return replay; }
   NeighborTable& testNeighbors() { return neighbors; }
+  RouteTable& testRoutes() { return routes; }
   uint32_t testMillisNow() { return millis(); } // exposes the node's mocked clock to tests
+  const uint8_t* testDeviceMac() const { return deviceMacAddress; }
 #endif
 
   // Relay jitter: deferred relay pending fields (Task 3)
@@ -173,6 +176,9 @@ private:
   // Forwarding candidates toward the master, learned from overheard master
   // beacons (spec §3). Routing only — never consulted for E2E crypto.
   NeighborTable neighbors;
+  // Master-side node -> relay path store, populated from route reports
+  // (spec §4), consulted for downlink source routing.
+  RouteTable routes;
   // Holds a NeighborTable-resolved next hop (not an enrolled peer) so
   // findNextHopToMaster() can return a stable PeerInfo* for a pure relay,
   // which is never added to `peers` (enrollment-only rule).
@@ -186,6 +192,35 @@ private:
   // Enrolled peers (master + sensors, held in `peers`) are NEVER tracked or
   // evicted here.
   uint8_t forwardingPeer[6]{};
+
+  // Bounded LRU of auto-registered DOWNLINK forwarding-peer MACs (spec §2:
+  // "20-peer cap, LRU-evicted"). Unlike the single uplink forwardingPeer
+  // above, a node/master may legitimately need to have MULTIPLE distinct
+  // downlink forwarding peers registered concurrently (e.g. relaying several
+  // in-flight source-routed frames toward different next hops), so this is a
+  // small fixed-capacity LRU rather than a single slot. Capacity is
+  // LATTICE_DOWNLINK_PEER_MAX (project_config.h) — kept small so enrolled
+  // peers + the uplink forwardingPeer + this stay well under the ~20 ESP-NOW
+  // cap. Entries are ordered most-recently-used first (index 0). Enrolled
+  // peers (`peers`) and the current master are NEVER tracked or evicted here
+  // — see registerDownlinkPeer().
+  uint8_t downlinkPeerLru[lattice::config::LATTICE_DOWNLINK_PEER_MAX][6]{};
+  size_t downlinkPeerLruCount{0};
+
+  // Auto-register `mac` as an unencrypted ESP-NOW peer for downlink
+  // forwarding, bounding the set of non-enrolled, non-master peers this adds
+  // via the downlinkPeerLru above (spec §2). If `mac` is an enrolled peer or
+  // the current master, this is a plain idempotent registration — those
+  // peers are managed elsewhere (PeerRegistry / enrollment) and must never be
+  // evicted by downlink forwarding churn. Otherwise `mac` is tracked in the
+  // LRU: already-tracked -> move to front (touch); not tracked and the LRU is
+  // full -> evict the oldest entry from ESP-NOW first. Replaces the plaintext
+  // `registerPeerWithEspNow` calls previously used directly by
+  // sendDownlinkToNode()/processAdapterData()'s relay-forward branch, which
+  // had no bound and let an RF attacker crafting frames with fresh distinct
+  // next-hop MACs exhaust the ESP-NOW peer table one entry per frame.
+  void registerDownlinkPeer(const uint8_t* mac);
+
   // Returns k_up/k_down for the current master (leaf side); false if not enrolled
   // or master pubkey unknown.
   bool masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown);
@@ -244,8 +279,21 @@ public:
   // self, so without this the master could never answer for itself.
   void broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally = false);
 
+  // Master-only: source-route a sealed downlink to a specific enrolled node
+  // (spec §4). Seals `data` with the destination's k_down, then unicasts via
+  // the reversed relay path recorded in RouteTable (from that node's most
+  // recent route report), or broadcast-floods if no route is known. No-op if
+  // this node is not master. See Mesh.cpp for the full rationale.
+  void sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const uint8_t* data);
+
   // Serial adapter helper (optional broadcast)
   static void broadcastAdapterDataStatic(adapter_types type, const uint8_t* data);
+
+  // Serial adapter helper: static shim to sendDownlinkToNode (mirrors
+  // broadcastAdapterDataStatic above) so SerialAdapter can source-route+seal a
+  // targeted server command without holding a Mesh instance itself.
+  static void sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
+                                       const uint8_t* data);
 
   // Debug helper
   void debugDumpRadio();

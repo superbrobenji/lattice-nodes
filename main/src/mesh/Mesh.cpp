@@ -28,7 +28,6 @@ Mesh::Mesh()
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
-  memset(currentMaster.nextHop, 0, 6);
   memset(lastSeenMasterMac, 0, 6);
   memset(deviceMacAddress, 0, 6);
   memset(recvQueue, 0, sizeof(recvQueue));
@@ -120,6 +119,49 @@ PeerInfo* Mesh::findNextHopToMaster() {
 
   memcpy(nextHopScratch.mac, hopMac, 6);
   return &nextHopScratch;
+}
+
+void Mesh::registerDownlinkPeer(const uint8_t* mac) {
+  // Enrolled peers and the current master are managed exclusively by their
+  // own paths (PeerRegistry / enrollment) — just register (idempotent) and
+  // never track or evict them via this LRU.
+  bool isCurrentMaster =
+      currentMaster.distance != 0xFF &&
+      lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(currentMaster.mac);
+  if (peers.find(mac) || isCurrentMaster) {
+    lattice::mesh::crypto::registerPeerWithEspNow(mac);
+    return;
+  }
+
+  // Already tracked: touch (move to front) and ensure still registered.
+  for (size_t i = 0; i < downlinkPeerLruCount; ++i) {
+    if (lattice::utils::MacAddress(downlinkPeerLru[i]) == lattice::utils::MacAddress(mac)) {
+      uint8_t touched[6];
+      memcpy(touched, downlinkPeerLru[i], 6);
+      for (size_t j = i; j > 0; --j)
+        memcpy(downlinkPeerLru[j], downlinkPeerLru[j - 1], 6);
+      memcpy(downlinkPeerLru[0], touched, 6);
+      lattice::mesh::crypto::registerPeerWithEspNow(mac);
+      return;
+    }
+  }
+
+  // Not tracked. Evict the oldest (LRU) entry from ESP-NOW first if at
+  // capacity (spec §2: "20-peer cap, LRU-evicted") — otherwise an RF attacker
+  // crafting downlink frames with fresh distinct next-hop MACs on every frame
+  // would grow this set unbounded and eventually exhaust the ESP-NOW peer
+  // table (no self-heal, no reboot).
+  if (downlinkPeerLruCount >= lattice::config::LATTICE_DOWNLINK_PEER_MAX) {
+    uint8_t* oldest = downlinkPeerLru[downlinkPeerLruCount - 1];
+    if (esp_now_is_peer_exist(oldest))
+      esp_now_del_peer(oldest);
+  } else {
+    ++downlinkPeerLruCount;
+  }
+  for (size_t j = downlinkPeerLruCount - 1; j > 0; --j)
+    memcpy(downlinkPeerLru[j], downlinkPeerLru[j - 1], 6);
+  memcpy(downlinkPeerLru[0], mac, 6);
+  lattice::mesh::crypto::registerPeerWithEspNow(mac);
 }
 
 uint16_t Mesh::nextSeqGuarded() {
@@ -535,9 +577,52 @@ void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data, bool de
   }
 }
 
+void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const uint8_t* data) {
+  if (!isMaster)
+    return;
+  mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
+  memcpy(msg.target_mac_address, destMac, 6); // AAD-bound destination — set before sealing
+
+  const uint8_t *kUp, *kDown;
+  if (!peerE2EKeys(destMac, &kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kDown, msg)) {
+    Logger::logln("MESH", "downlink seal unavailable — dropped", LogLevel::LOG_WARN);
+    return;
+  }
+
+  uint8_t path[lattice::config::MAX_HOPS * 6];
+  uint8_t pathLen = 0;
+  if (routes.lookup(destMac, path, &pathLen) && pathLen > 0) {
+    // RouteTable stores the path in origin->master order (as accumulated by
+    // relays on the uplink route report); reverse it into master->origin order
+    // for the downlink source route.
+    msg.route_len = pathLen;
+    for (uint8_t i = 0; i < pathLen; ++i)
+      memcpy(&msg.route_path[static_cast<size_t>(i) * 6],
+             &path[static_cast<size_t>(pathLen - 1 - i) * 6], 6);
+    // First hop = route_path[0]; auto-register it as an unencrypted ESP-NOW peer
+    // so esp_now_send can unicast to it — real ESP-NOW requires the peer to be
+    // registered first (VirtualBus doesn't enforce this, but the Phase-2 lesson
+    // was that skipping it here is a real-hardware bug). Bounded via the
+    // downlink forwarding-peer LRU (spec §2) — see registerDownlinkPeer().
+    registerDownlinkPeer(msg.route_path);
+    sendMessage(msg.route_path, msg);
+    return;
+  }
+  // No known multi-hop route: fall back to broadcast flood (still sealed).
+  // Direct/adjacent nodes and unknown-route nodes are reached this way.
+  msg.route_len = 0;
+  broadcastToAllPeers(msg);
+}
+
 void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t* data) {
   if (instance)
     instance->broadcastAdapterData(type, data);
+}
+
+void Mesh::sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
+                                    const uint8_t* data) {
+  if (instance)
+    instance->sendDownlinkToNode(destMac, type, data);
 }
 
 void Mesh::debugDumpRadio() {
@@ -564,7 +649,6 @@ void Mesh::checkMasterTimeout() {
                   LogLevel::LOG_WARN);
     memset(currentMaster.mac, 0, 6);
     currentMaster.distance = 0xFF;
-    memset(currentMaster.nextHop, 0, 6);
     memset(lastSeenMasterMac, 0, 6);
     lastMasterBeaconReceivedMs = 0;
   }
@@ -642,7 +726,6 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       newDistance < currentMaster.distance) {
     memcpy(currentMaster.mac, msg.origin_mac_address, 6);
     currentMaster.distance = newDistance;
-    memcpy(currentMaster.nextHop, msg.last_hop_mac_address, 6);
     Logger::logln("MESH", "Updated route to master. Distance: " + String(newDistance),
                   LogLevel::LOG_INFO);
   }
@@ -702,8 +785,30 @@ void Mesh::processAdapterData(const mesh_message& msg) {
                    &relay);
       return;
     }
-    // Downlink to another node: relay outward toward specific target
-    relayDownlink(msg);
+    // Downlink toward a specific node. If the frame carries a source route and
+    // we are on it, forward to the next hop (stateless — spec §4); otherwise
+    // fall back to the flood.
+    if (msg.route_len > 0 && msg.route_len <= lattice::config::MAX_HOPS) {
+      for (uint8_t i = 0; i < msg.route_len; ++i) {
+        if (memcmp(&msg.route_path[static_cast<size_t>(i) * 6], deviceMacAddress, 6) == 0) {
+          if (msg.hop_count >= lattice::config::MAX_HOPS)
+            return;
+          mesh_message fwd = msg;
+          fwd.hop_count++;
+          const uint8_t* next = (i + 1 < msg.route_len)
+                                    ? &msg.route_path[static_cast<size_t>(i + 1) * 6]
+                                    : msg.target_mac_address;
+          // Bounded via the downlink forwarding-peer LRU (spec §2) — `next` is
+          // attacker-controlled plaintext (this relay never opens the sealed
+          // frame), so an unbounded registerPeerWithEspNow here would let an RF
+          // attacker exhaust the ESP-NOW peer table one entry per crafted frame.
+          registerDownlinkPeer(next);
+          sendMessage(next, fwd);
+          return;
+        }
+      }
+    }
+    relayDownlink(msg); // not on the route / no route -> existing flood fallback
     return;
   }
 
@@ -735,8 +840,40 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     }
   }
 
-  bool isConfigOpcode =
-      (opened.data_type == adapter_types::SERIAL_ADAPTER && opened.data[0] == OP_CONFIG_SET);
+  // Node-side E2E open (spec §2): a self-addressed sealed ADAPTER_DATA from the
+  // master is opened with our k_down before local delivery. Mirrors the master's
+  // uplink open above. Failure → drop (finding-#9 pattern). Broadcast (FF:FF)
+  // frames are NOT opened — addressedToSelf is false for those, so this never
+  // fires for them (they stay plaintext, handled below).
+  bool nodeOpened = false;
+  if (!isMaster && addressedToSelf && msg.message_type == MESH_TYPE_ADAPTER_DATA) {
+    const uint8_t *kUp, *kDown;
+    if (!masterE2EKeys(&kUp, &kDown) || !lattice::mesh::crypto::openPayload(kDown, opened)) {
+      Logger::logln("MESH", "downlink open failed — dropped", LogLevel::LOG_WARN);
+      return;
+    }
+    nodeOpened = true;
+  }
+
+  bool isConfigOpcode = (opened.data_type == adapter_types::SERIAL_ADAPTER &&
+                         (opened.data[0] == OP_CONFIG_SET || opened.data[0] == OP_NODE_ID_SET));
+  // Critical fix: config opcodes (CONFIG_SET / NODE_ID_SET) are state-changing
+  // (adapter-type reconfig + restart, node-identity assignment) and must be
+  // honored ONLY via the sealed, opened path above (needsOpen on the master,
+  // nodeOpened on a node) — never via a broadcast-target or otherwise-unopened
+  // frame. Without this, a forged plaintext BROADCAST (target FF:FF)
+  // ADAPTER_DATA frame is never addressedToSelf, so it is never opened; since
+  // origin_mac is attacker-controlled and the master's real MAC is public in
+  // beacons, such a frame sailed past the origin check below too and reached
+  // externalRecvCallback fully unauthenticated (one plaintext RF frame could
+  // reboot/reconfigure any node). Legitimate non-config broadcast adapter data
+  // (e.g. OP_HEALTH_REQ, OP_TX_POWER_SET) is unaffected — this guard only
+  // fires for CONFIG_SET/NODE_ID_SET.
+  if (isConfigOpcode && !needsOpen && !nodeOpened) {
+    Logger::logln("MESH", "Config opcode via unopened/broadcast path rejected (unauthenticated)",
+                  LogLevel::LOG_WARN);
+    return;
+  }
   // TODO(dual-master): also allow secondary master MAC for CONFIG_SET
   if (isConfigOpcode && enrollment.hasMasterMac &&
       memcmp(opened.origin_mac_address, enrollment.knownMasterMac, 6) != 0) {
@@ -937,24 +1074,34 @@ void Mesh::processRouteReport(const mesh_message& msg) {
       Logger::logln("MESH", "processRouteReport: bad opcode, dropping", LogLevel::LOG_WARN);
       return;
     }
+    // Learn the origin's relay path for downlink source routing (spec §4).
+    // route_path/route_len are plaintext header fields (accumulated by relays);
+    // bounds-checked by RouteTable::record.
+    routes.record(msg.origin_mac_address, msg.route_path, msg.route_len, millis());
     // Terminal endpoint — deliver to server via external callback
     if (externalRecvCallback)
       externalRecvCallback(opened);
     return;
   }
 
-  // Relay node (spec §4): the payload is E2E-sealed end-to-end (origin -> master)
-  // so a relay cannot read or mutate msg.data — path accumulation via data[] is
-  // removed; it moves to the header route_path field in a future phase. Forward
-  // the frame unmodified except routing metadata (hop_count/last_hop).
+  // Relay node (spec §4): the payload is E2E-sealed origin->master and opaque to
+  // us. Accumulate the relay path in the plaintext route_path header (excluded
+  // from AAD, so this does not break the tag) so the master learns the full
+  // origin->master relay chain for downlink source routing.
   if (msg.hop_count >= lattice::config::MAX_HOPS) {
     Logger::logln("MESH", "processRouteReport: hop limit reached, dropping", LogLevel::LOG_WARN);
+    return;
+  }
+  if (msg.route_len >= lattice::config::MAX_HOPS) {
+    Logger::logln("MESH", "route report path full — dropping", LogLevel::LOG_WARN);
     return;
   }
 
   mesh_message relay = msg;
   relay.hop_count++;
   memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+  memcpy(&relay.route_path[static_cast<size_t>(relay.route_len) * 6], deviceMacAddress, 6);
+  relay.route_len++;
 
   transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ROUTE_REPORT,
                &relay);

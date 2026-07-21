@@ -15,6 +15,8 @@
 #include "harness/MeshSimTest.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "project_config.h"
+#include "src/adapter/Adapter.h"
+#include "mesh/Mesh.h"
 
 // A directly-linked (distance-1) enrolled node's route report reaches the hub
 // with the right opcode and origin, and an empty hop chain (no relays between
@@ -39,25 +41,25 @@ TEST_F(MeshSimTest, DirectNodeRouteReportReachesHub) {
 }
 
 // Multi-hop hop-chain: leaf (distance 2) emits a route report that the relay
-// appends its MAC to before forwarding to the master, so the hub sees
-// path_len >= 1 with the relay's MAC first.
+// appends its MAC to (in the plaintext route_path header, spec §4) before
+// forwarding to the master, so the master learns a path with the relay's MAC
+// first.
 //
-// DISABLED: this requires multi-hop DATA uplink (leaf -> relay -> master for a
-// node-originated frame). The current firmware cannot route data at hop
-// distance >= 2 — sendRouteReport() returns false because findNextHopToMaster()
-// is null when the next hop (the relay) is not a registered, in-range peer.
-// Same root cause as the multi-hop data-uplink gap documented in
-// docs/design-gaps/multihop-data-uplink.md.
+// Header-field design (spec §4): the route report's opcode payload
+// (data[0]/data[1]) is E2E-sealed origin->master, so a relay can no longer
+// read/append to it (Mesh::processRouteReport's relay branch just forwards the
+// sealed frame unmodified) — that's why data[1] is a reserved constant 0 (see
+// DirectNodeRouteReportReachesHub above) regardless of hop count. Path
+// accumulation instead happens in the plaintext mesh_message header fields
+// route_len/route_path, which each relay appends to before re-transmitting.
 //
-// Task 6 (E2E AEAD) note: even once multi-hop uplink lands, the path-chain
-// assertions below are now STALE — the payload is E2E-sealed origin->master,
-// so a relay can no longer read/append to msg.data (Mesh::processRouteReport's
-// relay branch just forwards the sealed frame unmodified). Path accumulation
-// moves to the header route_path field in a future phase (spec §4); until
-// then the hub-side expectation is path_len == 0 (empty path) regardless of
-// hop count. Assertions below are stale pre-AEAD intent, kept for history —
-// rewrite them (pathLen == 0, no relay-MAC check) before dropping DISABLED_.
-TEST_F(MeshSimTest, DISABLED_RouteReportCarriesHopChain) {
+// Those header fields are mesh-internal (ESP-NOW) only, not part of the
+// serial wire protocol to the hub (SerialFraming/mesh.pb.h carry no
+// route_len/route_path field), so hub->ofType() frames can't be used to
+// inspect them — read the path the master actually recorded instead
+// (Mesh::processRouteReport -> RouteTable, Task 5's "master records node
+// routes from route reports").
+TEST_F(MeshSimTest, RouteReportCarriesHopChain) {
   addMaster();
   auto* relay = addSensor(MAC_NODE_A);
   auto* leaf = addSensor(MAC_NODE_B);
@@ -68,16 +70,23 @@ TEST_F(MeshSimTest, DISABLED_RouteReportCarriesHopChain) {
 
   runPolled(lattice::config::ROUTE_REPORT_INTERVAL_MS + 5000);
 
+  bool found = false;
+  uint8_t path[lattice::config::MAX_HOPS * 6] = {};
+  uint8_t pathLen = 0;
+  master->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
+    found = m.testRoutes().lookup(leaf->mac(), path, &pathLen);
+    return 0;
+  });
+  ASSERT_TRUE(found) << "master must record a route to the leaf from its route reports";
+  ASSERT_GE(pathLen, 1);
+  EXPECT_EQ(memcmp(&path[0], relay->mac(), 6), 0)
+      << "first relay in the leaf's path is the middle node";
+
   bool sawLeafRoute = false;
   for (const auto& m : hub->ofType(MESH_TYPE_ROUTE_REPORT)) {
     if (memcmp(m.origin_mac_address, leaf->mac(), 6) != 0)
       continue;
-    ASSERT_EQ(m.data[0], OP_ROUTE_REPORT);
-    uint8_t pathLen = m.data[1];
-    ASSERT_GE(pathLen, 1);
-    // First hop MAC in the chain must be the relay node.
-    EXPECT_EQ(memcmp(&m.data[2], relay->mac(), 6), 0);
     sawLeafRoute = true;
   }
-  EXPECT_TRUE(sawLeafRoute) << "leaf's route report must reach the hub via the relay";
+  EXPECT_TRUE(sawLeafRoute) << "leaf's route report reaches the hub carrying its relay path";
 }

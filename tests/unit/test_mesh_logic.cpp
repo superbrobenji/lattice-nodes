@@ -7,6 +7,7 @@
 #include "esp_now_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
+#include "lib/lattice-protocol/c/opcodes.h"
 
 using namespace lattice::mesh;
 
@@ -336,7 +337,6 @@ protected:
     mesh.isMaster = false;
     // Set master route: next hop IS the master (1 hop away)
     memcpy(mesh.currentMaster.mac, kMasterMac, 6);
-    memcpy(mesh.currentMaster.nextHop, kMasterMac, 6);
     mesh.currentMaster.distance = 1;
     mesh.enrollment.hasMasterMac = true;
     memcpy(mesh.enrollment.knownMasterMac, kMasterMac, 6);
@@ -571,6 +571,36 @@ protected:
     return mesh;
   }
 
+  // A master with one enrolled leaf (real Curve25519 keys, so peerE2EKeys can
+  // actually derive k_down for sendDownlinkToNode's sealing step).
+  Mesh makeMasterNode() {
+    Mesh mesh;
+    static constexpr uint8_t kThisMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+    static constexpr uint8_t kLeafMac[6] = {0x02, 0, 0, 0, 0, 0x0B};
+    memcpy(mesh.deviceMacAddress, kThisMasterMac, 6);
+    mesh.isMaster = true;
+    uint8_t masterPriv[32], masterPub[32], leafPriv[32], leafPub[32];
+    lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+    lattice::mesh::crypto::generateKeypair(leafPriv, leafPub);
+    memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+    memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+    PeerInfo leaf{};
+    memcpy(leaf.mac, kLeafMac, 6);
+    memcpy(leaf.publicKey, leafPub, 32);
+    leaf.lastSeenMillis = 0;
+    mesh.peers.append(leaf);
+    return mesh;
+  }
+
+  // A bare relay node identified only by its MAC — used to exercise the
+  // stateless downlink forwarding branch of processAdapterData in isolation.
+  Mesh makeIntermediateNodeWithMac(const uint8_t mac[6]) {
+    Mesh mesh;
+    memcpy(mesh.deviceMacAddress, mac, 6);
+    mesh.isMaster = false;
+    return mesh;
+  }
+
   mesh_message makeJoinAck(const uint8_t target[6], uint8_t hopCount = 1) {
     mesh_message m{};
     m.proto_version = 1;
@@ -671,7 +701,6 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
   // And the route must actually resolve once a beacon establishes the topology
   // (nextHop = master, one hop) — the end goal of registering the master.
   memcpy(mesh.currentMaster.mac, kMasterMac, 6);
-  memcpy(mesh.currentMaster.nextHop, kMasterMac, 6);
   mesh.currentMaster.distance = 1;
   EXPECT_NE(mesh.findNextHopToMaster(), nullptr)
       << "uplink route must resolve through the newly registered master peer";
@@ -736,6 +765,279 @@ TEST_F(JoinAckRelayTest, MultiHopForwardingPeer_BoundToOne_EvictsStaleRelayOnSwi
   // Bound: enrolled peer (kPeerMac) + at most one auto-registered forwarding peer.
   EXPECT_EQ(espNowRegisteredPeers.size(), 2u)
       << "auto-registered forwarding peers must stay bounded to one";
+}
+
+// ─── sendDownlinkToNode / source-routed downlink relay ──────────────────────
+// Helpers to inspect captured ESP-NOW sends by destination MAC — esp_now_send
+// serializes to raw bytes, so deserialize back into a mesh_message to inspect.
+
+static bool wasSentTo(const uint8_t* mac) {
+  for (const auto& pkt : espNowSentPackets) {
+    if (!pkt.isBroadcast && memcmp(pkt.addr, mac, 6) == 0)
+      return true;
+  }
+  return false;
+}
+
+static mesh_message lastEspNowSentTo(const uint8_t* mac) {
+  for (auto it = espNowSentPackets.rbegin(); it != espNowSentPackets.rend(); ++it) {
+    if (!it->isBroadcast && memcmp(it->addr, mac, 6) == 0) {
+      mesh_message m{};
+      memcpy(&m, it->data.data(), sizeof(m));
+      return m;
+    }
+  }
+  ADD_FAILURE() << "no ESP-NOW packet was sent to the requested MAC";
+  return mesh_message{};
+}
+
+// (a) Master with a known route source-routes to the first hop, target=dest, sealed.
+TEST_F(JoinAckRelayTest, DownlinkSourceRoutesViaFirstHop) {
+  Mesh master = makeMasterNode(); // fixture master with an enrolled leaf + keys
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  const uint8_t R1[6] = {0x02, 0, 0, 0, 0, 0x11};
+  const uint8_t R2[6] = {0x02, 0, 0, 0, 0, 0x22};
+  uint8_t path[12];
+  memcpy(path, R1, 6);
+  memcpy(path + 6, R2, 6); // origin->R1->R2->master
+  master.testRoutes().record(leaf, path, 2, 1000);
+
+  resetEspNowMock();
+  uint8_t cmd[64] = {};
+  cmd[0] = OP_CONFIG_SET;
+  master.sendDownlinkToNode(leaf, adapter_types::SERIAL_ADAPTER, cmd);
+
+  // Reversed path [R2,R1]; first hop = R2.
+  ASSERT_TRUE(wasSentTo(R2));
+  mesh_message sent = lastEspNowSentTo(R2);
+  EXPECT_EQ(sent.route_len, 2);
+  EXPECT_EQ(0, memcmp(&sent.route_path[0], R2, 6));
+  EXPECT_EQ(0, memcmp(&sent.route_path[6], R1, 6));
+  EXPECT_EQ(0, memcmp(sent.target_mac_address, leaf, 6));
+  // payload sealed: data[0] != plaintext opcode
+  EXPECT_NE(sent.data[0], OP_CONFIG_SET);
+  // first hop auto-registered as ESP-NOW peer (VirtualBus doesn't enforce this,
+  // so assert it explicitly — the Phase-2 lesson).
+  EXPECT_TRUE(esp_now_is_peer_exist(R2));
+}
+
+// (b) A relay in the path forwards to the next index, unchanged frame.
+TEST_F(JoinAckRelayTest, DownlinkRelayForwardsToNextIndex) {
+  static constexpr uint8_t kR2[6] = {0x02, 0, 0, 0, 0, 0x22};
+  Mesh r2 = makeIntermediateNodeWithMac(kR2);
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  const uint8_t R1[6] = {0x02, 0, 0, 0, 0, 0x11};
+  mesh_message dl = {};
+  dl.proto_version = PROTO_VERSION;
+  dl.message_type = MESH_TYPE_ADAPTER_DATA;
+  memcpy(dl.target_mac_address, leaf, 6);
+  dl.route_len = 2;
+  memcpy(&dl.route_path[0], r2.testDeviceMac(), 6); // R2
+  memcpy(&dl.route_path[6], R1, 6);
+  dl.epoch_num = 7;
+  dl.seq_num = 3;
+
+  resetEspNowMock();
+  r2.processAdapterData(dl); // reachable directly — public under UNIT_TEST
+  EXPECT_TRUE(wasSentTo(R1)) << "R2 forwards to route_path[1]=R1";
+}
+
+// (c) Last relay forwards to target_mac.
+TEST_F(JoinAckRelayTest, DownlinkLastRelayForwardsToTarget) {
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  static constexpr uint8_t kR1[6] = {0x02, 0, 0, 0, 0, 0x11};
+  Mesh r1 = makeIntermediateNodeWithMac(kR1); // R1
+  mesh_message dl = {};
+  dl.proto_version = PROTO_VERSION;
+  dl.message_type = MESH_TYPE_ADAPTER_DATA;
+  memcpy(dl.target_mac_address, leaf, 6);
+  dl.route_len = 2;
+  const uint8_t R2mac[6] = {0x02, 0, 0, 0, 0, 0x22};
+  memcpy(&dl.route_path[0], R2mac, 6);
+  memcpy(&dl.route_path[6], r1.testDeviceMac(), 6); // R1 at index 1 (last)
+  dl.epoch_num = 7;
+  dl.seq_num = 4;
+  resetEspNowMock();
+  r1.processAdapterData(dl);
+  EXPECT_TRUE(wasSentTo(leaf)) << "last relay forwards to target_mac";
+}
+
+// Whole-branch-review finding: the downlink relay-forward branch never opens
+// the sealed frame, so route_path[i+1] is attacker-controlled plaintext. An RF
+// attacker can craft ADAPTER_DATA with this relay at route_path[i] and a fresh
+// distinct MAC at route_path[i+1] on every frame (dodging replay dedup via
+// fresh epoch/seq at the network entry point) to permanently grow the ESP-NOW
+// peer table one entry per frame — spec §2's "20-peer cap, LRU-evicted" must
+// bound this the same way Phase 2 bounded the uplink forwardingPeer.
+TEST_F(JoinAckRelayTest, DownlinkRelayForward_BoundsAutoRegisteredPeers_NeverEvictsEnrolled) {
+  Mesh mesh = makeIntermediateNode(); // kPeerMac is an ENROLLED peer — must never be evicted
+  // Mirror what setupEspNow()/addPeer() do for a real enrolled peer at boot
+  // (the fixture's peers.append() above only populates the PeerRegistry).
+  lattice::mesh::crypto::registerPeerWithEspNow(kPeerMac);
+
+  const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  const int kFloodCount = static_cast<int>(lattice::config::LATTICE_DOWNLINK_PEER_MAX) + 6;
+  for (int i = 0; i < kFloodCount; ++i) {
+    mesh_message dl{};
+    dl.proto_version = PROTO_VERSION;
+    dl.message_type = MESH_TYPE_ADAPTER_DATA;
+    memcpy(dl.target_mac_address, leaf, 6);
+    dl.route_len = 2;
+    memcpy(&dl.route_path[0], kMyMac, 6); // this node is at route_path[0]
+    // Fresh, distinct MAC at route_path[1] on every iteration — the attack.
+    uint8_t nextMac[6] = {0x03, 0, 0, 0, static_cast<uint8_t>((i >> 8) & 0xFF),
+                          static_cast<uint8_t>(i & 0xFF)};
+    memcpy(&dl.route_path[6], nextMac, 6);
+    dl.epoch_num = 1;
+    dl.seq_num = static_cast<uint16_t>(i + 1);
+
+    mesh.processAdapterData(dl);
+  }
+
+  EXPECT_LE(espNowRegisteredPeers.size(), 1 + lattice::config::LATTICE_DOWNLINK_PEER_MAX)
+      << "auto-registered downlink forwarding peers must stay bounded by the LRU cap";
+  EXPECT_TRUE(esp_now_is_peer_exist(kPeerMac))
+      << "enrolled peer must never be evicted by downlink forwarding-peer churn";
+}
+
+// ─── Config-opcode injection resistance (CRITICAL finding) ──────────────────
+// Phase 3 seals+source-routes TARGETED downlink CONFIG_SET/NODE_ID_SET, and a
+// node opens a self-addressed sealed ADAPTER_DATA with its k_down before
+// honoring it (see the node-side E2E open block in processAdapterData). But a
+// forged BROADCAST (target FF:FF:FF:FF:FF:FF) ADAPTER_DATA frame is never
+// addressedToSelf, so it is never opened — it stays plaintext. Since
+// origin_mac is attacker-controlled on the wire and the master's real MAC is
+// public (broadcast in every beacon), a forged broadcast frame with
+// origin_mac spoofed to the master passes the origin check too. Without a
+// guard, this reaches externalRecvCallback (-> Adapter::onMeshData ->
+// ESP.restart()) completely unauthenticated: one plaintext RF frame reboots
+// or reconfigures any node.
+
+class ConfigOpcodeInjectionTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    EEPROM.reset();
+    resetMillis();
+    resetEspNowMock();
+    lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
+    lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+  }
+
+  static constexpr uint8_t kMyMac[6] = {0x02, 0, 0, 0, 0, 0x0B};
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  static constexpr uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+  uint8_t nodePriv[32], nodePub[32];
+  uint8_t masterPriv[32], masterPub[32];
+
+  // A non-master node enrolled under kMasterMac with real Curve25519 keys, so
+  // masterE2EKeys() can derive the same k_down the master would use to seal a
+  // legitimate targeted downlink.
+  Mesh makeEnrolledNode() {
+    Mesh mesh;
+    memcpy(mesh.deviceMacAddress, kMyMac, 6);
+    mesh.isMaster = false;
+    memcpy(mesh.enrollment.devicePrivateKey, nodePriv, 32);
+    memcpy(mesh.enrollment.devicePublicKey, nodePub, 32);
+    mesh.enrollment.hasMasterMac = true;
+    memcpy(mesh.enrollment.knownMasterMac, kMasterMac, 6);
+    memcpy(mesh.currentMaster.mac, kMasterMac, 6);
+    mesh.currentMaster.distance = 1;
+    PeerInfo master{};
+    memcpy(master.mac, kMasterMac, 6);
+    memcpy(master.publicKey, masterPub, 32);
+    master.lastSeenMillis = 0;
+    mesh.peers.append(master);
+    return mesh;
+  }
+
+  // Exactly the attack in the finding: BROADCAST target, SERIAL_ADAPTER
+  // data_type, data[0]=OP_CONFIG_SET, data[1..6]=victim's own MAC,
+  // origin_mac spoofed to the master's public MAC, NOT sealed.
+  mesh_message makeForgedBroadcastConfigSet() {
+    mesh_message m{};
+    m.proto_version = PROTO_VERSION;
+    m.message_type = MESH_TYPE_ADAPTER_DATA;
+    m.data_type = adapter_types::SERIAL_ADAPTER;
+    memcpy(m.origin_mac_address, kMasterMac, 6); // spoofed: master's public MAC
+    memcpy(m.target_mac_address, kBroadcastMac, 6); // forged: broadcast, never opened
+    memcpy(m.last_hop_mac_address, kMasterMac, 6);
+    m.epoch_num = 1;
+    m.seq_num = 1;
+    m.data[0] = OP_CONFIG_SET;
+    memcpy(&m.data[1], kMyMac, 6); // victim's own MAC as the opcode's target field
+    m.data[7] = 0x02;              // attacker-chosen adapter type
+    // NOT sealed — plaintext, exactly as an RF attacker would send it.
+    return m;
+  }
+};
+
+constexpr uint8_t ConfigOpcodeInjectionTest::kMyMac[];
+constexpr uint8_t ConfigOpcodeInjectionTest::kMasterMac[];
+constexpr uint8_t ConfigOpcodeInjectionTest::kBroadcastMac[];
+
+TEST_F(ConfigOpcodeInjectionTest, ForgedBroadcastConfigSet_NotDeliveredToExternalCallback) {
+  Mesh mesh = makeEnrolledNode();
+  bool sawConfigSet = false;
+  mesh.linkDataRecvCallback([&](const mesh_message& m) {
+    if (m.data_type == adapter_types::SERIAL_ADAPTER && m.data[0] == OP_CONFIG_SET)
+      sawConfigSet = true;
+  });
+
+  mesh.processAdapterData(makeForgedBroadcastConfigSet());
+
+  EXPECT_FALSE(sawConfigSet)
+      << "a forged plaintext BROADCAST CONFIG_SET must never reach externalRecvCallback — "
+         "it was never addressedToSelf, so it was never opened/authenticated with k_down";
+}
+
+TEST_F(ConfigOpcodeInjectionTest, ForgedBroadcastNodeIdSet_NotDeliveredToExternalCallback) {
+  Mesh mesh = makeEnrolledNode();
+  int deliveredCount = 0;
+  mesh.linkDataRecvCallback([&](const mesh_message&) { ++deliveredCount; });
+
+  mesh_message forged = makeForgedBroadcastConfigSet();
+  forged.data[0] = OP_NODE_ID_SET;
+  forged.data[7] = 0x42; // attacker-chosen node ID
+
+  mesh.processAdapterData(forged);
+
+  EXPECT_EQ(deliveredCount, 0)
+      << "a forged plaintext BROADCAST NODE_ID_SET must never reach externalRecvCallback";
+}
+
+// Legitimate counterpart: a genuinely targeted, sealed CONFIG_SET
+// (addressedToSelf, opened with k_down) must still be delivered — the guard
+// above must not overreach and break the real downlink path.
+TEST_F(ConfigOpcodeInjectionTest, TargetedSealedConfigSet_StillDelivered) {
+  Mesh mesh = makeEnrolledNode();
+  const uint8_t *kUp, *kDown;
+  ASSERT_TRUE(mesh.masterE2EKeys(&kUp, &kDown));
+
+  mesh_message msg{};
+  msg.proto_version = PROTO_VERSION;
+  msg.message_type = MESH_TYPE_ADAPTER_DATA;
+  msg.data_type = adapter_types::SERIAL_ADAPTER;
+  memcpy(msg.origin_mac_address, kMasterMac, 6);
+  memcpy(msg.target_mac_address, kMyMac, 6); // targeted, not broadcast
+  memcpy(msg.last_hop_mac_address, kMasterMac, 6);
+  msg.epoch_num = 1;
+  msg.seq_num = 1;
+  msg.data[0] = OP_CONFIG_SET;
+  memcpy(&msg.data[1], kMyMac, 6);
+  msg.data[7] = 0x02;
+  ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kDown, msg));
+
+  bool sawConfigSet = false;
+  mesh.linkDataRecvCallback([&](const mesh_message& m) {
+    if (m.data_type == adapter_types::SERIAL_ADAPTER && m.data[0] == OP_CONFIG_SET)
+      sawConfigSet = true;
+  });
+
+  mesh.processAdapterData(msg);
+
+  EXPECT_TRUE(sawConfigSet) << "a genuinely targeted, sealed CONFIG_SET (addressedToSelf, "
+                               "opened with k_down) must still be delivered";
 }
 
 // ─── JOIN_ACK forgery resistance ─────────────────────────────────────────────
