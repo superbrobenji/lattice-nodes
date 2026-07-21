@@ -177,6 +177,15 @@ private:
   // findNextHopToMaster() can return a stable PeerInfo* for a pure relay,
   // which is never added to `peers` (enrollment-only rule).
   PeerInfo nextHopScratch{};
+  // MAC of the single auto-registered (unencrypted) ESP-NOW peer currently
+  // standing in for a multi-hop forwarding relay, or all-zero if none. A node
+  // only ever forwards uplink to ONE next hop at a time, so at most one such
+  // peer is ever needed — bounding it here closes the ESP-NOW peer table
+  // exhaustion vector (spec §2: "20-peer cap, LRU-evicted") that an RF
+  // attacker flooding distinct-MAC spoofed beacons would otherwise trigger.
+  // Enrolled peers (master + sensors, held in `peers`) are NEVER tracked or
+  // evicted here.
+  uint8_t forwardingPeer[6]{};
   // Returns k_up/k_down for the current master (leaf side); false if not enrolled
   // or master pubkey unknown.
   bool masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown);

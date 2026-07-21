@@ -694,6 +694,50 @@ TEST_F(JoinAckRelayTest, NextHopThroughRelayIsRegisteredAsEspNowPeer) {
       << "relay must be auto-registered as an ESP-NOW peer";
 }
 
+// Final-review fix: findNextHopToMaster() must bound auto-registered
+// forwarding ESP-NOW peers to exactly one, evicting the stale relay when the
+// selected next hop changes — otherwise an RF attacker flooding distinct-MAC
+// spoofed distance-1 beacons exhausts the ~20-slot ESP-NOW peer table
+// permanently (no self-heal, no reboot), blackholing the real uplink.
+TEST_F(JoinAckRelayTest, MultiHopForwardingPeer_BoundToOne_EvictsStaleRelayOnSwitch) {
+  Mesh mesh = makeIntermediateNode(); // kPeerMac is an ENROLLED peer — must never be evicted
+  memcpy(mesh.currentMaster.mac, kMasterMac, 6);
+  mesh.currentMaster.distance = 3; // multi-hop: NeighborTable path, not the direct-peer branch
+  // Mirror what setupEspNow()/addPeer() do for a real enrolled peer at boot:
+  // register it as an ESP-NOW peer. The fixture's plain peers.append() above
+  // only populates the PeerRegistry, not the ESP-NOW peer table.
+  lattice::mesh::crypto::registerPeerWithEspNow(kPeerMac);
+
+  const uint8_t r1Mac[6] = {0x01, 0, 0, 0, 0, 0x01};
+  const uint8_t r2Mac[6] = {0x02, 0, 0, 0, 0, 0x02};
+
+  // R1 observed first, distance 1 from master.
+  mesh.testNeighbors().observe(r1Mac, 1, mesh.testMillisNow());
+  PeerInfo* hop1 = mesh.findNextHopToMaster();
+  ASSERT_NE(hop1, nullptr);
+  EXPECT_EQ(memcmp(hop1->mac, r1Mac, 6), 0);
+  EXPECT_TRUE(esp_now_is_peer_exist(r1Mac)) << "R1 must be auto-registered on first forward";
+  EXPECT_TRUE(esp_now_is_peer_exist(kPeerMac)) << "enrolled peer must remain registered";
+
+  // R2 observed later (fresher), also distance 1 — freshest wins, selectNextHop
+  // now returns R2 instead of R1.
+  advanceMillis(1000);
+  mesh.testNeighbors().observe(r2Mac, 1, mesh.testMillisNow());
+
+  PeerInfo* hop2 = mesh.findNextHopToMaster();
+  ASSERT_NE(hop2, nullptr);
+  EXPECT_EQ(memcmp(hop2->mac, r2Mac, 6), 0) << "freshest relay (R2) must now be selected";
+  EXPECT_TRUE(esp_now_is_peer_exist(r2Mac)) << "R2 must be auto-registered as the new next hop";
+  EXPECT_FALSE(esp_now_is_peer_exist(r1Mac))
+      << "stale forwarding peer R1 must be de-registered on switch";
+  EXPECT_TRUE(esp_now_is_peer_exist(kPeerMac))
+      << "enrolled peer must never be evicted by forwarding-peer churn";
+
+  // Bound: enrolled peer (kPeerMac) + at most one auto-registered forwarding peer.
+  EXPECT_EQ(espNowRegisteredPeers.size(), 2u)
+      << "auto-registered forwarding peers must stay bounded to one";
+}
+
 // ─── JOIN_ACK forgery resistance ─────────────────────────────────────────────
 // JOIN_ACKs travel over the unencrypted broadcast peer, and everything a forger
 // needs is observable over the air: the victim's pubkey prefix (broadcast in its

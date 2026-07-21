@@ -95,9 +95,28 @@ PeerInfo* Mesh::findNextHopToMaster() {
   if (lattice::utils::MacAddress(hopMac) == lattice::utils::MacAddress(deviceMacAddress))
     return nullptr;
 
+  // Bound the auto-registered forwarding peer to exactly one (spec §2:
+  // "20-peer cap, LRU-evicted"). A node forwards uplink to only one next hop
+  // at a time, so if we previously auto-registered a DIFFERENT relay, evict
+  // it before registering the new one — otherwise a beacon-flooding attacker
+  // spoofing distinct relay MACs could exhaust the ~20-slot ESP-NOW peer
+  // table (no self-heal, no reboot) and blackhole the real uplink. Never
+  // evict an enrolled peer (master or sensor) — those live in `peers` and
+  // are managed exclusively by the enrollment path.
+  static const uint8_t kZeroMac[6] = {0, 0, 0, 0, 0, 0};
+  bool isNewRelay =
+      lattice::utils::MacAddress(forwardingPeer) != lattice::utils::MacAddress(hopMac);
+  bool forwardingPeerSet = memcmp(forwardingPeer, kZeroMac, 6) != 0;
+  if (forwardingPeerSet && isNewRelay && !peers.find(forwardingPeer) &&
+      lattice::utils::MacAddress(forwardingPeer) != lattice::utils::MacAddress(currentMaster.mac)) {
+    if (esp_now_is_peer_exist(forwardingPeer))
+      esp_now_del_peer(forwardingPeer);
+  }
+
   // Auto-register the chosen next hop as an unencrypted ESP-NOW peer (spec §3).
   // Idempotent — registerPeerWithEspNow no-ops if the peer already exists.
   lattice::mesh::crypto::registerPeerWithEspNow(hopMac);
+  memcpy(forwardingPeer, hopMac, 6);
 
   memcpy(nextHopScratch.mac, hopMac, 6);
   return &nextHopScratch;

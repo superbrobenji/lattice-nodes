@@ -81,8 +81,9 @@ proto_version=3 | message_type | origin_mac(6) | target_mac(6) | last_hop_mac(6)
 Replaces the single `currentMaster.nextHop` as route source.
 
 - Entry: `mac(6) | masterDistance(u8) | lastSeenMillis`. Populated from
-  overheard master beacons: relayed beacon's `hop_count + 1` = that
-  neighbor's distance to master.
+  overheard master beacons: relayed beacon's `hop_count` (the last_hop
+  sender's own distance to the master) = that neighbor's distance to
+  master.
 - Size: compile-time `LATTICE_NEIGHBOR_MAX` (default 8).
 - Next hop = freshest neighbor with **min distance strictly less than own
   distance** (strict inequality prevents two equal-distance siblings

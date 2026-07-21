@@ -422,8 +422,9 @@ In `main/src/mesh/Mesh.cpp` `processMasterBeacon` (~`Mesh.cpp:544-642`): after t
 ```cpp
 // Multi-hop routing (spec §3): the node we heard this beacon THROUGH
 // (last_hop) is a forwarding candidate; its distance to the master is this
-// beacon's hop_count + 1. Learned here, not from enrollment — routing only.
-neighbors.observe(msg.last_hop_mac_address, msg.hop_count + 1, millis());
+// beacon's hop_count (last_hop's own distance — the receiver's own distance
+// is one more, hop_count + 1). Learned here, not from enrollment — routing only.
+neighbors.observe(msg.last_hop_mac_address, msg.hop_count, millis());
 ```
 
 Place this so it runs for every accepted beacon (including relayed ones with `hop_count > 0`), not only when `currentMaster` changes — a node needs all its upstream options, not just the current best. If the `currentMaster` update is inside a conditional, put the `neighbors.observe(...)` call OUTSIDE that conditional but still after the dedup/validity gate.
