@@ -768,6 +768,34 @@ TEST_F(JoinAckRelayTest, NextHopThroughRelayIsRegisteredAsEspNowPeer) {
       << "relay must be auto-registered as an ESP-NOW peer";
 }
 
+// A distance-1 node whose enrolled master peer has gone stale (out of range)
+// must not blackhole its uplink — the NeighborTable fallback branch of
+// findNextHopToMaster() must still find a route if the master is also known
+// as a fresh distance-0 neighbor (e.g. its own beacon was still heard even
+// though the direct PeerRegistry entry's lastSeenMillis is stale).
+TEST_F(JoinAckRelayTest, DirectMasterStaleFallsBackToNeighborTable) {
+  Mesh node = makeIntermediateNode();
+  const uint8_t masterMac[6] = {0x02, 0, 0, 0, 0, 0x01};
+  node.currentMaster.distance = 1;
+  memcpy(node.currentMaster.mac, masterMac, 6);
+
+  // Master is an enrolled peer but STALE (out of range): register it, then
+  // advance the mocked clock past STALE_PEER_THRESHOLD_MS so
+  // PeerRegistry::isPeerInRange() returns false for it.
+  PeerInfo masterPeer{};
+  memcpy(masterPeer.mac, masterMac, 6);
+  masterPeer.lastSeenMillis = 0;
+  node.peers.append(masterPeer);
+  advanceMillis(lattice::config::STALE_PEER_THRESHOLD_MS);
+
+  // Master is also a fresh distance-0 neighbor:
+  node.testNeighbors().observe(masterMac, 0, node.testMillisNow());
+
+  PeerInfo* hop = node.findNextHopToMaster();
+  ASSERT_NE(hop, nullptr) << "stale direct peer must fall back to the fresh NeighborTable entry";
+  EXPECT_EQ(0, memcmp(hop->mac, masterMac, 6));
+}
+
 // Final-review fix: findNextHopToMaster() must bound auto-registered
 // forwarding ESP-NOW peers to exactly one, evicting the stale relay when the
 // selected next hop changes — otherwise an RF attacker flooding distinct-MAC

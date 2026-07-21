@@ -42,6 +42,17 @@ TEST(NeighborTable, StaleNeighborNotEligible) {
   EXPECT_FALSE(t.selectNextHop(2, now, out));
 }
 
+TEST(NeighborTable, ExactStaleThresholdIsStale) {
+  NeighborTable t;
+  t.observe(A, 1, 1000);
+  uint8_t out[6];
+  // age == STALE_PEER_THRESHOLD_MS exactly → the impl uses >=, so it must be INELIGIBLE.
+  uint32_t now = 1000 + lattice::config::STALE_PEER_THRESHOLD_MS;
+  EXPECT_FALSE(t.selectNextHop(2, now, out)) << "age exactly == threshold is stale (>=)";
+  // one ms before the threshold → still fresh.
+  EXPECT_TRUE(t.selectNextHop(2, now - 1, out));
+}
+
 TEST(NeighborTable, ObserveUpdatesExistingEntry) {
   NeighborTable t;
   t.observe(A, 3, 1000);
