@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-22
 **Status:** Approved (umbrella) — per-phase implementation plans generated on pickup
-**Scope:** 17 open issues across three repos, decomposed into 10 sequenced phases.
+**Scope:** 19 open issues across three repos, decomposed into 11 sequenced phases.
 
 ## Purpose
 
@@ -29,6 +29,7 @@ The system supports the **latest protocol only**. Devices are reflashed; there i
 | D — Enrollment harden | #42 | nodes | Pin master pubkey at flash; node verifies JOIN_ACK key against it |
 | E — Hygiene | #47 | nodes + protocol | 6 code-hygiene items + lattice-protocol `gofmt` |
 | F — Hub misc | #63, #64 | hub | Empty-name enrollment default; meshsim write-under-mutex deadlock |
+| G — Optimization | #52, #53 | nodes | Arduino-safe flash trim + RAM residency/bounds (memory_usage.md P1/P3) |
 | (S) — folded into H | new | hub | Set `ProtoVersion=3` on all outbound frames + CI `mesh.pb.go`↔proto sync check |
 
 ## Dependency graph & sequencing
@@ -46,6 +47,7 @@ Phase C (3 repos)──┤ (needs Phase 0 build + Phase H's proto-sync CI)
 Phase D (nodes) ───┘ (needs Phase 0 build + Phase H working enrollment)
 Phase E (nodes+proto)  rides Phase C's protocol release
 Phase F (hub)          fully independent — any time
+Phase G (nodes)        measurement-gated: needs Phase 0 (size job) + banks A (EEPROM) & B (RouteTable) first
 ```
 
 - **Phase 0 and Phase H are in different repos with no shared dependency** — plan/execute concurrently.
@@ -112,6 +114,17 @@ Six low-severity items, none affecting shipped correctness:
 ### Phase F — #63, #64 (hub misc, independent)
 - **#63:** dashboard approve posts an empty name → blank NodeCard. Add a name input to the dashboard approval flow (match artist-portal's pattern) **and** default `name` to the MAC string in `AssignNode` as a belt-and-suspenders orchestrator guard. Update `e2e/tests/dashboard/enrollments.spec.ts` (currently asserts `name === ''`).
 - **#64:** `meshsim` `writeLocked` does a blocking TCP write while holding the sim mutex → deadlock if the peer stops reading. Add `SetWriteDeadline` in the write path; on deadline error, log + disconnect. Test-infra only.
+
+### Phase G — #52, #53 (optimization, nodes, measurement-gated)
+Storage + memory optimization. Context: `docs/memory_usage.md` already holds a prioritized P0–P4 plan; P0/P2/P3-top are covered by Phases 0/A/B (#49/#50/#51). This phase implements the remaining **Arduino-safe** levers — the biggest flash wins (drop-BT, mbedTLS-suite-trim) need an ESP-IDF toolchain and are explicitly **out of scope** (deferred project below).
+- **#52 (flash, the real pressure point):** compile out logging `.rodata` (`#if`, not runtime `if`); confirm/enable `-Os` + LTO + `--gc-sections`; single AEAD (drop the unused cipher). Est. ~15–40 KB.
+- **#53 (RAM):** shrink `mesh_message` in-RAM residency (242 B × 8-deep ring + per-frame stack copies — coordinate with the wire `static_assert`); right-size `RECV_QUEUE_SIZE`/`CACHE_SIZE`/`LATTICE_ROUTE_TABLE_MAX` after measuring real occupancy. Est. ~1 KB + bounds.
+
+**Gating:** must land after Phase 0 (the size-report job makes every before/after delta real, not estimated) and after A/B (which already bank the EEPROM ceiling + RouteTable win). #53 coordinates with #46 (`CACHE_SIZE`) and #51 (`LATTICE_ROUTE_TABLE_MAX`).
+
+## Deferred project (post-effort): ESP-IDF toolchain migration
+
+The largest flash levers — dropping BT (~10 KB, `btStop()` only disables at runtime) and trimming mbedTLS suites (10–30 KB) — require migrating off the Arduino core to **ESP-IDF / PlatformIO**. That is a large architectural change, out of scope here. **Deliverable:** a separate context + implementation plan doc to be written *after* this effort completes, evaluating the migration (est. +20–40 KB flash) against its cost/risk. Not started until the 11 phases here are done.
 
 ## Deliverable structure
 
