@@ -26,7 +26,7 @@ The system supports the **latest protocol only**. Devices are reflashed; there i
 | A — Persistence | #50, #43 | nodes | Migrate EepromManager → NVS/Preferences (clean start); fix DEV_MODE epoch + commit checks |
 | B — Routing | #45, #46, #51 | nodes | Distance-freshness coupling; replay high-water; RouteTable role-gating |
 | C — Downlink auth | #44 | protocol → nodes + hub | Per-hop HMAC-authenticated route_path; flag-day v4 proto field |
-| D — Enrollment harden | #42 | nodes | Button-press pairing window (TOFU-in-window) |
+| D — Enrollment harden | #42 | nodes | Pin master pubkey at flash; node verifies JOIN_ACK key against it |
 | E — Hygiene | #47 | nodes + protocol | 6 code-hygiene items + lattice-protocol `gofmt` |
 | F — Hub misc | #63, #64 | hub | Empty-name enrollment default; meshsim write-under-mutex deadlock |
 | (S) — folded into H | new | hub | Set `ProtoVersion=3` on all outbound frames + CI `mesh.pb.go`↔proto sync check |
@@ -88,7 +88,17 @@ Downlink `route_path` is relay-asserted and unauthenticated (misroute/blackhole 
 - **hub:** bump `go.mod` protocol pin to v4 + regen `mesh.pb.go`. No verification server-side (the master owns path auth; the hub is a pure downlink broadcaster).
 
 ### Phase D — #42 (enrollment harden, nodes)
-Enrollment is trust-on-first-use; the master is not cryptographically authenticated. Note: once Phase H lands, the master's pubkey **is** conveyed in JOIN_ACK — but it is still unauthenticated (nothing signs that it is the real master's key). Mitigation: gate JOIN_ACK acceptance on a **physical button-held pairing window** (`ButtonHandler`); outside the window, drop TOFU master-learn. Document as the accepted "TOFU-in-window" trust model. ~0 server change. Depends on Phase H (a working enrollment to gate) and Phase 0's build.
+Enrollment is trust-on-first-use; the master is not cryptographically authenticated. Once Phase H lands, the master's pubkey **is** conveyed in JOIN_ACK (`enrollment_public_key`) — but under plain TOFU it is still unauthenticated (an RF attacker present at enrollment can present their own key as the master).
+
+**Fix: pin the master public key at flash time and verify against it** — true authentication, not window-narrowing. Phase H/#87 gives the hub a durable master keypair (`masterkey.json`), so there is now a stable identity to pin. Since the fleet is reflashed anyway (no-backcompat) and it is a single key shared by all nodes, provisioning is cheap: inject the master pubkey at build/flash time (compile-time constant, or written to NVS at flash — compile-time constant is simplest and needs no storage). In `Enrollment::processJoinAck`, reject any JOIN_ACK whose `enrollment_public_key` does not match the pinned master key.
+
+This was reconsidered from an earlier button-window pick: button-window only *shrinks* the MITM window to the button-press moment and leaves the master key TOFU'd, whereas pinning rejects any wrong key regardless of timing. A server-signed JOIN_ACK was rejected as redundant — the node would still need the master pubkey to verify a signature, so once the key is pinned a direct compare is strictly simpler and gives the same guarantee (there is no key rotation to justify signing).
+
+**Dual-master (#88) trust is transitive:** pin the *primary* master pubkey → the primary's JOIN_ACK is authenticated → the secondary pubkey (proto field 16) arrives *inside* that authenticated frame → it is trusted without a second pin.
+
+Optional: a button-held enrollment-enable gate may still be kept as an operator-convenience control over *when* a node accepts enrollment, but it is **not** the security boundary — pinning is. ~0 server change.
+
+**Depends on Phase H** — not just for a working enrollment, but as a provisioning prerequisite: the hub must have generated its master keypair (#87) before a deployment's nodes are flashed with that pubkey. Also depends on Phase 0's build.
 
 ### Phase E — #47 (hygiene, nodes + protocol)
 Six low-severity items, none affecting shipped correctness:
