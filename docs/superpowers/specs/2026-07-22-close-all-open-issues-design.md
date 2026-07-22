@@ -2,7 +2,9 @@
 
 **Date:** 2026-07-22
 **Status:** Approved (umbrella) — per-phase implementation plans generated on pickup
-**Scope:** 19 open issues across three repos, decomposed into 11 sequenced phases.
+**Scope:** 20 open issues across three repos, decomposed into 11 sequenced phases.
+
+> **Revision (2026-07-22, during Phase 0 planning):** Driving the real toolchain revealed that after #49's three compile blockers are fixed, the firmware **fails to link** — `MBEDTLS_CHACHAPOLY_C` is disabled in the ESP32 Arduino core, so the Phase 1 E2E AEAD (ChaCha20-Poly1305) has no implementation (filed as **#54**). The shipped E2E crypto has never linked on this toolchain. Fix: **migrate the build to ESP-IDF (arduino-as-component)** with a custom `mbedtls_config`. This promotes the formerly-deferred ESP-IDF migration into the **foundational Phase 0**, and folds the previously-deferred flash levers (drop-BT, mbedtls-trim) into scope.
 
 ## Purpose
 
@@ -20,7 +22,7 @@ The system supports the **latest protocol only**. Devices are reflashed; there i
 
 | Phase | Issues | Repo(s) | One-line |
 |---|---|---|---|
-| 0 — Build unblock | #49 | nodes | Fix arduino-cli compile (3 blockers) + add CI firmware-compile/size job |
+| 0 — ESP-IDF migration | #49, #54 | nodes | Migrate build to ESP-IDF (arduino-as-component) — links chachapoly, enables mbedtls/BT config, fixes the 4 build blockers + CI build/size job |
 | H — Hub enrollment | #87, #85, #86 | hub | Master keypair → correct JOIN_ACK → fix test. P0: enrollment is broken today |
 | H2 — Hub dual-master | #88 | hub | Populate secondary-master fields in JOIN_ACK (hub half of shipped firmware Phase 4/5) |
 | A — Persistence | #50, #43 | nodes | Migrate EepromManager → NVS/Preferences (clean start); fix DEV_MODE epoch + commit checks |
@@ -29,7 +31,7 @@ The system supports the **latest protocol only**. Devices are reflashed; there i
 | D — Enrollment harden | #42 | nodes | Pin master pubkey at flash; node verifies JOIN_ACK key against it |
 | E — Hygiene | #47 | nodes + protocol | 6 code-hygiene items + lattice-protocol `gofmt` |
 | F — Hub misc | #63, #64 | hub | Empty-name enrollment default; meshsim write-under-mutex deadlock |
-| G — Optimization | #52, #53 | nodes | Arduino-safe flash trim + RAM residency/bounds (memory_usage.md P1/P3) |
+| G — Optimization | #52, #53 | nodes | Flash trim (incl. drop-BT + mbedtls-trim, now unlocked by Phase 0's IDF build) + RAM residency/bounds (memory_usage.md P1/P3) |
 | (S) — folded into H | new | hub | Set `ProtoVersion=3` on all outbound frames + CI `mesh.pb.go`↔proto sync check |
 
 ## Dependency graph & sequencing
@@ -56,13 +58,18 @@ Phase G (nodes)        measurement-gated: needs Phase 0 (size job) + banks A (EE
 
 ## Per-issue approach (locked decisions)
 
-### Phase 0 — #49 (build unblock, nodes)
-Firmware does not compile under `arduino-cli` today; only the Arduino IDE's include resolution masks it. Three blockers:
-1. **nanopb include path** — add `main/src/mesh/serialization/nanopb` to the sketch include path (build property).
-2. **Non-self-contained headers** — `ButtonHandler.h` (and siblings) use unqualified `Logger`/`LogLevel` relying on `main.ino`'s `using namespace`. Each header `#include`s what it uses and fully-qualifies `lattice::utils::Logger` / `lattice::utils::LogLevel`. Sweep for the same pattern (overlaps #47).
-3. **Duplicate `mesh_message` typedef** — keep vendored `main/lib/lattice-protocol/c/` out of the Arduino `lib/` auto-scan (collides with `using ::mesh_message`).
+### Phase 0 — #49 + #54 (ESP-IDF migration, nodes)
+**Goal:** a firmware image that **compiles AND links** with a reproducible non-IDE toolchain and a CI size report. Driving the real toolchain (arduino-cli 1.5.1 + esp32@3.3.10) proved the current build is broken at two levels — three compile blockers, then a link failure the compile errors were masking.
 
-Then add a CI job: `arduino-cli compile --fqbn esp32:esp32:esp32 main` + `xtensa-esp32-elf-size` size report that regenerates `docs/memory_usage.md`. **Gate:** green firmware build required before any later firmware phase.
+**The four verified blockers:**
+1. **nanopb include path** — `mesh.pb.h:6` does `#include <pb.h>`; `main/src/mesh/serialization/nanopb` is not on the include path. *Verified fix:* add it as an include dir. (Under ESP-IDF: a CMake `target_include_directories`.)
+2. **Non-self-contained headers** — `ButtonHandler.h` uses unqualified `Logger`/`LogLevel` (9 sites; verified it is the *only* affected file). *Verified fix:* fully-qualify `lattice::utils::Logger`/`LogLevel`. Correctness fix regardless of toolchain; overlaps #47.
+3. **Duplicate `mesh_message` typedef** — **not** `lib/` auto-scan as originally filed (arduino-cli adds no such `-I`, verified via `compile_commands.json`). Real cause: `mesh_message.h`'s `#pragma once` fails to dedupe across two include-path spellings. *Verified fix:* a traditional `#ifndef` guard — emitted **upstream in `cmd/gen-headers`** (lattice-protocol) so it survives regeneration.
+4. **Link failure — `mbedtls_chachapoly_*` undefined (#54)** — `MBEDTLS_CHACHAPOLY_C` is disabled in the ESP32 Arduino core's mbedtls, so the Phase 1 E2E AEAD (ChaCha20-Poly1305) has no implementation. Verified: chachapoly symbols absent from the core's `libmbedcrypto.a`; gcm/sha256 present. **This is why the migration is pulled forward** — a custom `mbedtls_config` under ESP-IDF is the clean, cipher-and-wire-preserving fix.
+
+**Approach — ESP-IDF with arduino-as-component.** Migrate off bare Arduino/`arduino-cli` to an ESP-IDF (CMake) project that pulls in `arduino-esp32` as a component, so the existing Arduino API surface (`Arduino.h`, `EEPROM`, `esp_now`, `String`, etc.) keeps working with minimal source change, while gaining a custom `sdkconfig` + `mbedtls_config` we control. This: (a) enables `MBEDTLS_CHACHAPOLY_C` → resolves #54 with cipher + wire unchanged; (b) unlocks the deferred flash levers now folded into Phase G (`CONFIG_BT_ENABLED=n`, mbedtls suite trim); (c) gives a reproducible CI build + `xtensa-esp32-elf-size` size report that regenerates `docs/memory_usage.md`.
+
+**CI:** replace the (nonexistent) firmware build with an ESP-IDF build job + size-report artifact. **Gate:** a green build+link required before any later firmware phase (A/B/C/D/E/G). The exact migration steps — CMake project layout, `idf_component.yml`, `sdkconfig` defaults, source relocation — are detailed in the Phase 0 implementation plan.
 
 ### Phase H — #87 → #85 → #86 (hub enrollment, P0)
 Enrollment is broken on `main`: hub JOIN_ACK is malformed and every node rejects it (`Enrollment.cpp:95` fingerprint check fails). Ordered fix:
@@ -116,21 +123,17 @@ Six low-severity items, none affecting shipped correctness:
 - **#64:** `meshsim` `writeLocked` does a blocking TCP write while holding the sim mutex → deadlock if the peer stops reading. Add `SetWriteDeadline` in the write path; on deadline error, log + disconnect. Test-infra only.
 
 ### Phase G — #52, #53 (optimization, nodes, measurement-gated)
-Storage + memory optimization. Context: `docs/memory_usage.md` already holds a prioritized P0–P4 plan; P0/P2/P3-top are covered by Phases 0/A/B (#49/#50/#51). This phase implements the remaining **Arduino-safe** levers — the biggest flash wins (drop-BT, mbedTLS-suite-trim) need an ESP-IDF toolchain and are explicitly **out of scope** (deferred project below).
-- **#52 (flash, the real pressure point):** compile out logging `.rodata` (`#if`, not runtime `if`); confirm/enable `-Os` + LTO + `--gc-sections`; single AEAD (drop the unused cipher). Est. ~15–40 KB.
+Storage + memory optimization. Context: `docs/memory_usage.md` already holds a prioritized P0–P4 plan; P0/P2/P3-top are covered by Phases 0/A/B (#49/#50/#51). With ESP-IDF now the build (Phase 0), the biggest flash wins are **in scope** — no longer deferred.
+- **#52 (flash, the real pressure point):** `CONFIG_BT_ENABLED=n` in `sdkconfig` (~10 KB + heap — now possible under IDF); trim unused mbedtls suites via `mbedtls_config` (10–30 KB, keeping X25519 + the one AEAD); compile out logging `.rodata` (`#if`, not runtime `if`); confirm `-Os` + LTO + `--gc-sections`; single AEAD (drop the unused cipher). Est. ~35–80 KB.
 - **#53 (RAM):** shrink `mesh_message` in-RAM residency (242 B × 8-deep ring + per-frame stack copies — coordinate with the wire `static_assert`); right-size `RECV_QUEUE_SIZE`/`CACHE_SIZE`/`LATTICE_ROUTE_TABLE_MAX` after measuring real occupancy. Est. ~1 KB + bounds.
 
 **Gating:** must land after Phase 0 (the size-report job makes every before/after delta real, not estimated) and after A/B (which already bank the EEPROM ceiling + RouteTable win). #53 coordinates with #46 (`CACHE_SIZE`) and #51 (`LATTICE_ROUTE_TABLE_MAX`).
-
-## Deferred project (post-effort): ESP-IDF toolchain migration
-
-The largest flash levers — dropping BT (~10 KB, `btStop()` only disables at runtime) and trimming mbedTLS suites (10–30 KB) — require migrating off the Arduino core to **ESP-IDF / PlatformIO**. That is a large architectural change, out of scope here. **Deliverable:** a separate context + implementation plan doc to be written *after* this effort completes, evaluating the migration (est. +20–40 KB flash) against its cost/risk. Not started until the 11 phases here are done.
 
 ## Deliverable structure
 
 - **This umbrella spec** — committed now; the single cross-repo sequencing + decision record.
 - **Per-phase implementation plans** — generated via the writing-plans skill when each phase is picked up, so every phase stays PR-sized and independently executable.
-- **First plan:** Phase 0 (build unblock), since it gates all firmware verification and the memory re-measure.
+- **First plan:** Phase 0 (ESP-IDF migration), since it gates all firmware build/link, verification, and the memory re-measure.
 
 ## Open risks / notes
 
