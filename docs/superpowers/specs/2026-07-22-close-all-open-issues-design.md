@@ -141,3 +141,25 @@ Storage + memory optimization. Context: `docs/memory_usage.md` already holds a p
 - **Phase C proto release touches three repos** — follow the lattice-protocol release+tag flow; never re-point the nodes submodule at a floating branch SHA.
 - **`mesh.pb.*` is hand-edited on the nodes side** (no regen toolchain); add `max_size` options upstream before any regen, or the secondary-master serial codec reverts. The Phase H proto-sync CI check is hub-side (`mesh.pb.go`), separate from this nodes-side fragility.
 - **#45 fix must be reviewed for route oscillation** — the naive "latest beacon wins" is explicitly rejected; the freshness-coupled approach is the safe form.
+
+## Session status / resume (2026-07-22)
+
+Where this paused, so a fresh session can pick up without re-deriving.
+
+**Done:** umbrella spec approved; all decisions below locked; issues #52/#53/#54 filed; #49 corrected via comment. Branch `docs/close-all-issues-umbrella-spec` pushed to origin (spec + this doc + memory_usage.md + phase plans; `build/` gitignored).
+
+**Phase 0 research complete — recommendation to confirm:** build via **raw ESP-IDF with arduino-esp32 as a component** (not PlatformIO). Rationale: raw IDF guarantees mbedtls recompiles from source against our `sdkconfig`, so `CONFIG_MBEDTLS_CHACHAPOLY_C=y` deterministically links; the PlatformIO/pioarduino `custom_sdkconfig` path has an unverified gap on exactly that requirement. Version pins: **ESP-IDF v5.5.4**, **arduino-esp32 ^3.3.10** (via `idf_component.yml` / `idf.py add-dependency`), CI **`espressif/esp-idf-ci-action@v1`** running `idf.py build && idf.py size`.
+
+**Verified Phase-0 facts (drove the real toolchain arduino-cli 1.5.1 + esp32@3.3.10):**
+- chachapoly needs THREE Kconfig options: `CONFIG_MBEDTLS_CHACHA20_C=y`, `CONFIG_MBEDTLS_POLY1305_C=y`, `CONFIG_MBEDTLS_CHACHAPOLY_C=y` (CHACHAPOLY depends on the other two; all default `n`).
+- BT off = `CONFIG_BT_ENABLED=n`; arduino-esp32 does not require BT.
+- Node has **no TLS** (`grep` found no `WiFiClientSecure`/HTTPS/`esp_tls`) → mbedtls can trim hard (drop RSA/DHE/ECDSA/SECP256R1, keep X25519 + chachapoly + SHA-256). RSA has no standalone toggle — gated by key-exchange symbols.
+- Arduino API surface is all core-provided (String, EEPROM, `esp_now_`, Serial, digitalWrite, WiFi) → arduino-as-component keeps them; migration is mechanical (.ino→`main/main.cpp` + forward decls, `CONFIG_AUTOSTART_ARDUINO=y` or `initArduino()`, `CMakeLists.txt` with `SRC_DIRS "." "src"`, `partitions.csv`, `CONFIG_FREERTOS_HZ=1000`).
+- **EEPROM lib gotcha:** under ESP-IDF the Arduino `EEPROM` lib needs a custom partition (type `data`, subtype `0x99`, label `eeprom`) or `EEPROM.begin()` silently fails. **#50's NVS/Preferences migration removes this need** — EEPROM is confined to `EepromManager.{h,cpp}` + `Mesh.cpp`.
+- `idf.py` is NOT installed locally → Phase 0 build is only verifiable in CI or after a local IDF 5.5.4 install, not in the planning session.
+
+**Two decisions still open (needed before the Phase 0 implementation plan):**
+1. **Build tool** — confirm raw ESP-IDF (recommended) vs PlatformIO (pioarduino; would add a must-pass spike proving `custom_sdkconfig` rebuilds mbedtls).
+2. **EEPROM/#50 sequencing** — add a temporary `0x99` `eeprom` partition in Phase 0 (keep #50 in Phase A, phases stay independent) **vs** pull #50 (EEPROM→Preferences) into Phase 0 to avoid the partition workaround entirely.
+
+**Next action on resume:** answer the two decisions, then invoke `superpowers:writing-plans` for Phase 0 (ESP-IDF migration), saved to `docs/superpowers/plans/2026-07-22-phase0-esp-idf-migration.md`.
