@@ -4,12 +4,11 @@
 namespace lattice {
 namespace utils {
 
-EepromManager::EepromManager()
-    : isInitialized(false), isDevMode(false), _dirty(false), _lastFlushMs(0) {}
+EepromManager::EepromManager() : isInitialized(false), isDevMode(false) {}
 
 EepromManager::~EepromManager() {
   if (isInitialized) {
-    EEPROM.end();
+    _prefs.end();
   }
 }
 
@@ -18,121 +17,19 @@ EepromManager& EepromManager::getInstance() {
   return instance;
 }
 
-// Tiger Style helpers
-bool EepromManager::beginEEPROM() {
-  if (EEPROM.begin(EEPROM_SIZES::TOTAL_SIZE))
-    return true;
-  handleInitFailure();
-  return false;
-}
-
-void EepromManager::handleInitFailure() {
-  Logger::logln("EEPROM", "Failed to initialize EEPROM", LogLevel::LOG_ERROR);
-  lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 1,
-                     "EepromManager: EEPROM.begin failed");
-}
-
-// --- refactored init with formal schema versioning ---
 bool EepromManager::init() {
   if (isInitialized)
     return true;
-  if (!beginEEPROM())
+
+  if (!_prefs.begin("lattice", false)) {
+    Logger::logln("EEPROM", "Failed to initialize NVS", LogLevel::LOG_ERROR);
+    lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 1,
+                       "EepromManager: NVS begin failed");
     return false;
+  }
+
   isInitialized = true;
-
-  // Version check: read schema version byte and migrate if needed
-  uint8_t storedVersion = EEPROM.read(EEPROM_ADDRESSES::SCHEMA_VERSION);
-
-  if (storedVersion == 0xFF) {
-    // Blank EEPROM — write current version and proceed
-    Logger::logln("EEPROM", "Fresh EEPROM — version 3 written", LogLevel::LOG_INFO);
-    EEPROM.write(EEPROM_ADDRESSES::SCHEMA_VERSION, EEPROM_SIZES::CURRENT_SCHEMA_VERSION);
-    EEPROM.commit();
-  } else if (storedVersion < EEPROM_SIZES::CURRENT_SCHEMA_VERSION) {
-    // Version mismatch: run versioned migration handlers
-    Logger::logln("EEPROM",
-                  String("EEPROM version mismatch: stored=") + storedVersion +
-                      " expected=" + EEPROM_SIZES::CURRENT_SCHEMA_VERSION + " — running migration",
-                  LogLevel::LOG_WARN);
-
-    if (storedVersion == 0x00) {
-      // v1→v2 migration
-      // Detect if old addresses still hold valid data (v1 layout used TOTAL_SIZE=256).
-      // Migration strategy:
-      //   1. Copy reboot tracking bytes from old addresses (92, 93) to new (412, 413).
-      //   2. Copy keypair + CRC + enrolled flag from old addresses to new ones.
-      //   3. Wipe old addresses so they don't interfere.
-      //   4. Clear peer list (old records were 6-byte MAC only; new format is 38 bytes).
-      //      Peers will be re-added at runtime via discovery/re-enrollment.
-      Logger::logln("EEPROM", "v1→v2 layout migration running...", LogLevel::LOG_INFO);
-
-      // Migrate reboot tracking
-      uint8_t oldReason = EEPROM.read(EEPROM_ADDRESSES::V1_REBOOT_REASON);
-      uint8_t oldCount = EEPROM.read(EEPROM_ADDRESSES::V1_REBOOT_COUNT);
-      EEPROM.write(EEPROM_ADDRESSES::REBOOT_REASON, (oldReason == 0x00) ? 0xFF : oldReason);
-      EEPROM.write(EEPROM_ADDRESSES::REBOOT_COUNT, (oldCount > 10) ? 0 : oldCount);
-
-      // Migrate keypair (private key, public key, CRC, enrolled flag)
-      for (int i = 0; i < 32; ++i) {
-        EEPROM.write(EEPROM_ADDRESSES::PRIVATE_KEY + i,
-                     EEPROM.read(EEPROM_ADDRESSES::V1_PRIVATE_KEY + i));
-        EEPROM.write(EEPROM_ADDRESSES::PUBLIC_KEY + i,
-                     EEPROM.read(EEPROM_ADDRESSES::V1_PUBLIC_KEY + i));
-      }
-      EEPROM.write(EEPROM_ADDRESSES::KEYPAIR_CRC, EEPROM.read(EEPROM_ADDRESSES::V1_KEYPAIR_CRC));
-      EEPROM.write(EEPROM_ADDRESSES::KEYPAIR_CRC + 1,
-                   EEPROM.read(EEPROM_ADDRESSES::V1_KEYPAIR_CRC + 1));
-      EEPROM.write(EEPROM_ADDRESSES::ENROLLED_FLAG,
-                   EEPROM.read(EEPROM_ADDRESSES::V1_ENROLLED_FLAG));
-
-      // Wipe old addresses (now overlapped by new PEER_LIST range 32..411)
-      // Only wipe 92..163 to avoid touching MESH_KEY (16..31) and MASTER/DEV flags (0,1).
-      for (uint16_t addr = 92; addr <= 163; ++addr) {
-        EEPROM.write(addr, 0xFF);
-      }
-
-      // Wipe full peer list region so stale 6-byte MAC records don't pollute 38-byte reads
-      for (uint16_t i = 0; i < EEPROM_SIZES::PEER_LIST_SIZE; ++i) {
-        EEPROM.write(EEPROM_ADDRESSES::PEER_LIST + i, 0xFF);
-      }
-
-      Logger::logln("EEPROM", "v1→v2 migration complete", LogLevel::LOG_INFO);
-    }
-    if (storedVersion <= 2) {
-      // v2→v3 migration: initialise the new secondary master MAC slot to 0xFF (unset sentinel)
-      Logger::logln("EEPROM", "v2→v3 migration: initialising secondary master MAC slot",
-                    LogLevel::LOG_INFO);
-      for (uint16_t i = 0; i < 6; ++i) {
-        EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC_SECONDARY + i, 0xFF);
-      }
-    }
-
-    // Write updated version and commit
-    EEPROM.write(EEPROM_ADDRESSES::SCHEMA_VERSION, EEPROM_SIZES::CURRENT_SCHEMA_VERSION);
-    EEPROM.commit();
-  } else if (storedVersion > EEPROM_SIZES::CURRENT_SCHEMA_VERSION) {
-    // Firmware downgrade: EEPROM is from a newer firmware version
-    Logger::logln("EEPROM",
-                  String("EEPROM version mismatch: stored=") + storedVersion +
-                      " expected=" + EEPROM_SIZES::CURRENT_SCHEMA_VERSION +
-                      " — clearing EEPROM to recover from firmware downgrade",
-                  LogLevel::LOG_WARN);
-    clearAll();
-    EEPROM.write(EEPROM_ADDRESSES::SCHEMA_VERSION, EEPROM_SIZES::CURRENT_SCHEMA_VERSION);
-    EEPROM.commit();
-  }
-  // else: storedVersion == CURRENT_SCHEMA_VERSION, no migration needed
-
-  // Normal boot: validate WDT tracking bytes
-  if (EEPROM.read(EEPROM_ADDRESSES::REBOOT_REASON) == 0x00) {
-    EEPROM.write(EEPROM_ADDRESSES::REBOOT_REASON, 0xFF);
-  }
-  if (EEPROM.read(EEPROM_ADDRESSES::REBOOT_COUNT) > 10) {
-    EEPROM.write(EEPROM_ADDRESSES::REBOOT_COUNT, 0);
-  }
-  EEPROM.commit();
-
-  logOperation("Initialized", "EEPROM ready");
+  logOperation("Initialized", "NVS ready");
   return true;
 }
 
@@ -147,7 +44,7 @@ bool EepromManager::getDevMode() const {
 
 bool EepromManager::ensureInitialized() {
   if (!isInitialized) {
-    Logger::logln("EEPROM", "EEPROM not initialized", LogLevel::LOG_ERROR);
+    Logger::logln("EEPROM", "NVS not initialized", LogLevel::LOG_ERROR);
     return false;
   }
   return true;
@@ -161,28 +58,13 @@ void EepromManager::logOperation(const char* operation, const char* details) {
   }
 }
 
-// Deferred flush implementation
-void EepromManager::markDirty() {
-  _dirty = true;
-}
-
+// Deferred flush API — no-ops for NVS (commits are immediate)
 void EepromManager::flushIfDirty() {
-  if (!_dirty)
-    return;
-  if (millis() - _lastFlushMs < EEPROM_FLUSH_INTERVAL_MS)
-    return;
-  EEPROM.commit();
-  _dirty = false;
-  _lastFlushMs = millis();
-  logOperation("EEPROM flushed (deferred)");
+  // No-op
 }
 
 void EepromManager::forceFlush() {
-  if (!_dirty)
-    return;
-  EEPROM.commit();
-  _dirty = false;
-  _lastFlushMs = millis();
+  // No-op
 }
 
 // Master flag operations
@@ -190,8 +72,7 @@ bool EepromManager::loadMasterFlag() {
   if (!ensureInitialized())
     return false;
 
-  uint8_t flag = EEPROM.read(EEPROM_ADDRESSES::MASTER_FLAG);
-  bool isMaster = (flag == 1);
+  bool isMaster = _prefs.getBool(NVS_KEYS::MASTER_FLAG, false);
   logOperation("Master flag loaded", isMaster ? "Master" : "Node");
   return isMaster;
 }
@@ -200,12 +81,11 @@ void EepromManager::saveMasterFlag(bool isMaster) {
   if (!ensureInitialized())
     return;
   if (isDevMode) {
-    logOperation("Master flag save skipped", "Dev mode - no EEPROM storage");
+    logOperation("Master flag save skipped", "Dev mode - no NVS storage");
     return;
   }
 
-  EEPROM.write(EEPROM_ADDRESSES::MASTER_FLAG, isMaster ? 1 : 0);
-  markDirty();
+  _prefs.putBool(NVS_KEYS::MASTER_FLAG, isMaster);
   logOperation("Master flag saved", isMaster ? "Master" : "Node");
 }
 
@@ -214,8 +94,7 @@ bool EepromManager::loadDevFlag() {
   if (!ensureInitialized())
     return false;
 
-  uint8_t flag = EEPROM.read(EEPROM_ADDRESSES::DEV_FLAG);
-  bool isDev = (flag == 1);
+  bool isDev = _prefs.getBool(NVS_KEYS::DEV_FLAG, false);
   logOperation("Dev flag loaded", isDev ? "Development" : "Production");
   return isDev;
 }
@@ -224,12 +103,11 @@ void EepromManager::saveDevFlag(bool isDev) {
   if (!ensureInitialized())
     return;
   if (isDevMode) {
-    logOperation("Dev flag save skipped", "Dev mode - no EEPROM storage");
+    logOperation("Dev flag save skipped", "Dev mode - no NVS storage");
     return;
   }
 
-  EEPROM.write(EEPROM_ADDRESSES::DEV_FLAG, isDev ? 1 : 0);
-  markDirty();
+  _prefs.putBool(NVS_KEYS::DEV_FLAG, isDev);
   logOperation("Dev flag saved", isDev ? "Development" : "Production");
 }
 
@@ -242,8 +120,10 @@ bool EepromManager::loadMeshKey(uint8_t* key, size_t keySize) {
     return false;
   }
 
-  for (int i = 0; i < EEPROM_SIZES::MESH_KEY_SIZE; ++i) {
-    key[i] = EEPROM.read(EEPROM_ADDRESSES::MESH_KEY + i);
+  size_t len = _prefs.getBytes(NVS_KEYS::MESH_KEY, key, keySize);
+  if (len != keySize) {
+    // Key not found or wrong size
+    return false;
   }
   logOperation("Mesh key loaded");
   return true;
@@ -257,19 +137,15 @@ void EepromManager::saveMeshKey(const uint8_t* key, size_t keySize) {
     return;
   }
   if (isDevMode) {
-    logOperation("Mesh key save skipped", "Dev mode - no EEPROM storage");
+    logOperation("Mesh key save skipped", "Dev mode - no NVS storage");
     return;
   }
 
-  for (int i = 0; i < EEPROM_SIZES::MESH_KEY_SIZE; ++i) {
-    EEPROM.write(EEPROM_ADDRESSES::MESH_KEY + i, key[i]);
-  }
-  markDirty();
+  _prefs.putBytes(NVS_KEYS::MESH_KEY, key, keySize);
   logOperation("Mesh key saved");
 }
 
 // Peer list operations
-// Each peer record is PEER_RECORD_SIZE (38) bytes: 6-byte MAC + 32-byte Curve25519 public key.
 bool EepromManager::loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
   lattice::err::check(peerRecords != nullptr, lattice::utils::ErrorType::CONFIG_ERROR,
                       "loadPeerList: peerRecords null");
@@ -280,9 +156,16 @@ bool EepromManager::loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
     return false;
   }
 
-  for (int i = 0; i < static_cast<int>(maxPeers * EEPROM_SIZES::PEER_RECORD_SIZE); ++i) {
-    peerRecords[i] = EEPROM.read(EEPROM_ADDRESSES::PEER_LIST + i);
+  size_t expectedLen = maxPeers * EEPROM_SIZES::PEER_RECORD_SIZE;
+  size_t len = _prefs.getBytes(NVS_KEYS::PEER_LIST, peerRecords, expectedLen);
+  
+  if (len == 0) {
+    // No peers stored — fill with 0xFF and return false
+    memset(peerRecords, 0xFF, expectedLen);
+    logOperation("Peer list loaded", "No peers found");
+    return false;
   }
+
   logOperation("Peer list loaded", String(maxPeers).c_str());
   return true;
 }
@@ -297,19 +180,17 @@ void EepromManager::savePeerList(const uint8_t* peerRecords, size_t numPeers) {
     return;
   }
   if (isDevMode) {
-    logOperation("Peer list save skipped", "Dev mode - no EEPROM storage");
+    logOperation("Peer list save skipped", "Dev mode - no NVS storage");
     return;
   }
 
-  // Write all-0xFF first to blank slots, then new data, single commit at the end.
-  // Never commit between clear and write — power loss would erase the list permanently.
-  for (int i = 0; i < EEPROM_SIZES::PEER_LIST_SIZE; ++i) {
-    EEPROM.write(EEPROM_ADDRESSES::PEER_LIST + i, 0xFF);
+  size_t len = numPeers * EEPROM_SIZES::PEER_RECORD_SIZE;
+  if (numPeers == 0) {
+    // Clear peer list
+    _prefs.remove(NVS_KEYS::PEER_LIST);
+  } else {
+    _prefs.putBytes(NVS_KEYS::PEER_LIST, peerRecords, len);
   }
-  for (int i = 0; i < static_cast<int>(numPeers * EEPROM_SIZES::PEER_RECORD_SIZE); ++i) {
-    EEPROM.write(EEPROM_ADDRESSES::PEER_LIST + i, peerRecords[i]);
-  }
-  markDirty(); // Deferred commit — periodic flush coalesces burst writes
   logOperation("Peer list saved", String(numPeers).c_str());
 }
 
@@ -317,22 +198,14 @@ bool EepromManager::hasPeers() {
   if (!ensureInitialized())
     return false;
 
-  for (int i = 0; i < EEPROM_SIZES::PEER_LIST_SIZE; ++i) {
-    if (EEPROM.read(EEPROM_ADDRESSES::PEER_LIST + i) != 0xFF) {
-      return true;
-    }
-  }
-  return false;
+  return _prefs.isKey(NVS_KEYS::PEER_LIST);
 }
 
 void EepromManager::clearPeerList() {
   if (!ensureInitialized())
     return;
 
-  for (int i = 0; i < EEPROM_SIZES::PEER_LIST_SIZE; ++i) {
-    EEPROM.write(EEPROM_ADDRESSES::PEER_LIST + i, 0xFF);
-  }
-  markDirty();
+  _prefs.remove(NVS_KEYS::PEER_LIST);
   logOperation("Peer list cleared");
 }
 
@@ -341,10 +214,7 @@ uint8_t EepromManager::loadAdapterType() {
   if (!ensureInitialized())
     return 0xFF;
 
-  uint8_t adapterType = EEPROM.read(EEPROM_ADDRESSES::ADAPTER_TYPE);
-  if (adapterType == 0xFF) {
-    adapterType = 0; // Default to PIR adapter
-  }
+  uint8_t adapterType = _prefs.getUChar(NVS_KEYS::ADAPTER_TYPE, 0);
   logOperation("Adapter type loaded", String(adapterType).c_str());
   return adapterType;
 }
@@ -353,12 +223,11 @@ void EepromManager::saveAdapterType(uint8_t adapterType) {
   if (!ensureInitialized())
     return;
   if (isDevMode) {
-    logOperation("Adapter type save skipped", "Dev mode - no EEPROM storage");
+    logOperation("Adapter type save skipped", "Dev mode - no NVS storage");
     return;
   }
 
-  EEPROM.write(EEPROM_ADDRESSES::ADAPTER_TYPE, adapterType);
-  markDirty();
+  _prefs.putUChar(NVS_KEYS::ADAPTER_TYPE, adapterType);
   logOperation("Adapter type saved", String(adapterType).c_str());
 }
 
@@ -366,24 +235,25 @@ void EepromManager::saveAdapterType(uint8_t adapterType) {
 uint8_t EepromManager::loadRebootCount() {
   if (!ensureInitialized())
     return 0;
-  return EEPROM.read(EEPROM_ADDRESSES::REBOOT_COUNT);
+  return _prefs.getUChar(NVS_KEYS::REBOOT_COUNT, 0);
 }
+
 void EepromManager::saveRebootCount(uint8_t count) {
   if (!ensureInitialized() || isDevMode)
     return;
-  EEPROM.write(EEPROM_ADDRESSES::REBOOT_COUNT, count);
-  markDirty();
+  _prefs.putUChar(NVS_KEYS::REBOOT_COUNT, count);
 }
+
 void EepromManager::saveRebootReason(uint8_t reason) {
   if (!ensureInitialized() || isDevMode)
     return;
-  EEPROM.write(EEPROM_ADDRESSES::REBOOT_REASON, reason);
-  markDirty();
+  _prefs.putUChar(NVS_KEYS::REBOOT_REASON, reason);
 }
+
 uint8_t EepromManager::loadRebootReason() {
   if (!ensureInitialized())
     return 0xFF;
-  return EEPROM.read(EEPROM_ADDRESSES::REBOOT_REASON);
+  return _prefs.getUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
 }
 
 // CRC16 (CCITT) over a byte buffer
@@ -401,77 +271,81 @@ static uint16_t crc16(const uint8_t* data, size_t len) {
 bool EepromManager::loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
   if (!ensureInitialized())
     return false;
-  for (int i = 0; i < 32; ++i) {
-    privateKey32[i] = EEPROM.read(EEPROM_ADDRESSES::PRIVATE_KEY + i);
-    publicKey32[i] = EEPROM.read(EEPROM_ADDRESSES::PUBLIC_KEY + i);
+
+  size_t privLen = _prefs.getBytes(NVS_KEYS::PRIVATE_KEY, privateKey32, 32);
+  size_t pubLen = _prefs.getBytes(NVS_KEYS::PUBLIC_KEY, publicKey32, 32);
+
+  if (privLen != 32 || pubLen != 32) {
+    Logger::logln("EEPROM", "Keypair not found or incomplete", LogLevel::LOG_WARN);
+    return false;
   }
-  uint16_t stored = static_cast<uint16_t>(EEPROM.read(EEPROM_ADDRESSES::KEYPAIR_CRC)) |
-                    (static_cast<uint16_t>(EEPROM.read(EEPROM_ADDRESSES::KEYPAIR_CRC + 1)) << 8);
+
+  uint16_t stored = _prefs.getUInt(NVS_KEYS::KEYPAIR_CRC, 0);
   uint8_t both[64];
   memcpy(both, privateKey32, 32);
   memcpy(both + 32, publicKey32, 32);
   uint16_t computed = crc16(both, 64);
+
   if (stored != computed) {
     Logger::logln("EEPROM", "Keypair CRC mismatch — keys unset or corrupted", LogLevel::LOG_WARN);
     return false;
   }
+
   return true;
 }
 
 void EepromManager::saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32) {
   if (!ensureInitialized() || isDevMode)
     return;
-  for (int i = 0; i < 32; ++i) {
-    EEPROM.write(EEPROM_ADDRESSES::PRIVATE_KEY + i, privateKey32[i]);
-    EEPROM.write(EEPROM_ADDRESSES::PUBLIC_KEY + i, publicKey32[i]);
-  }
+
+  _prefs.putBytes(NVS_KEYS::PRIVATE_KEY, privateKey32, 32);
+  _prefs.putBytes(NVS_KEYS::PUBLIC_KEY, publicKey32, 32);
+
   uint8_t both[64];
   memcpy(both, privateKey32, 32);
   memcpy(both + 32, publicKey32, 32);
   uint16_t crc = crc16(both, 64);
-  EEPROM.write(EEPROM_ADDRESSES::KEYPAIR_CRC, static_cast<uint8_t>(crc & 0xFF));
-  EEPROM.write(EEPROM_ADDRESSES::KEYPAIR_CRC + 1, static_cast<uint8_t>((crc >> 8) & 0xFF));
-  EEPROM.commit();
+  _prefs.putUInt(NVS_KEYS::KEYPAIR_CRC, crc);
+
   logOperation("Keypair saved");
 }
 
 bool EepromManager::loadEnrolledFlag() {
   if (!ensureInitialized())
     return false;
-  return EEPROM.read(EEPROM_ADDRESSES::ENROLLED_FLAG) == 0x01;
+  return _prefs.getBool(NVS_KEYS::ENROLLED_FLAG, false);
 }
 
 void EepromManager::saveEnrolledFlag(bool enrolled) {
   if (!ensureInitialized() || isDevMode)
     return;
-  EEPROM.write(EEPROM_ADDRESSES::ENROLLED_FLAG, enrolled ? 0x01 : 0xFF);
-  EEPROM.commit();
+  _prefs.putBool(NVS_KEYS::ENROLLED_FLAG, enrolled);
 }
 
 uint32_t EepromManager::loadBootEpoch() {
   if (!ensureInitialized())
     return 0;
-  uint32_t epoch = 0;
-  for (int i = 0; i < 4; ++i)
-    epoch |= static_cast<uint32_t>(EEPROM.read(EEPROM_ADDRESSES::BOOT_EPOCH + i)) << (i * 8);
-  return (epoch == 0xFFFFFFFF) ? 0 : epoch;
+  return _prefs.getUInt(NVS_KEYS::BOOT_EPOCH, 0);
 }
 
 void EepromManager::saveBootEpoch(uint32_t epoch) {
   if (!ensureInitialized() || isDevMode)
     return;
-  for (int i = 0; i < 4; ++i)
-    EEPROM.write(EEPROM_ADDRESSES::BOOT_EPOCH + i, static_cast<uint8_t>((epoch >> (i * 8)) & 0xFF));
-  EEPROM.commit();
+  _prefs.putUInt(NVS_KEYS::BOOT_EPOCH, epoch);
 }
 
 // TOFU master MAC operations
 bool EepromManager::loadKnownMasterMac(uint8_t* mac) {
   if (!ensureInitialized())
     return false;
-  for (int i = 0; i < 6; ++i)
-    mac[i] = EEPROM.read(EEPROM_ADDRESSES::KNOWN_MASTER_MAC + i);
-  // All 0xFF means unset (factory state)
+
+  size_t len = _prefs.getBytes(NVS_KEYS::KNOWN_MASTER_MAC, mac, 6);
+  if (len != 6) {
+    // Not found
+    return false;
+  }
+
+  // Check if all 0xFF (unset sentinel)
   bool allFF = true;
   for (int i = 0; i < 6; ++i) {
     if (mac[i] != 0xFF) {
@@ -485,18 +359,14 @@ bool EepromManager::loadKnownMasterMac(uint8_t* mac) {
 void EepromManager::saveKnownMasterMac(const uint8_t* mac) {
   if (!ensureInitialized() || isDevMode)
     return;
-  for (int i = 0; i < 6; ++i)
-    EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC + i, mac[i]);
-  EEPROM.commit(); // Immediate commit — TOFU security anchor must survive power loss
+  _prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC, mac, 6);
   logOperation("Known master MAC saved");
 }
 
 void EepromManager::clearKnownMasterMac() {
   if (!ensureInitialized() || isDevMode)
     return;
-  for (int i = 0; i < 6; ++i)
-    EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC + i, 0xFF);
-  EEPROM.commit(); // Immediate commit — TOFU security anchor must survive power loss
+  _prefs.remove(NVS_KEYS::KNOWN_MASTER_MAC);
   logOperation("Known master MAC cleared");
 }
 
@@ -504,8 +374,13 @@ void EepromManager::clearKnownMasterMac() {
 bool EepromManager::loadKnownMasterMacSecondary(uint8_t* mac) {
   if (!ensureInitialized())
     return false;
-  for (int i = 0; i < 6; ++i)
-    mac[i] = EEPROM.read(EEPROM_ADDRESSES::KNOWN_MASTER_MAC_SECONDARY + i);
+
+  size_t len = _prefs.getBytes(NVS_KEYS::KNOWN_MASTER_MAC_SECONDARY, mac, 6);
+  if (len != 6) {
+    // Not found
+    return false;
+  }
+
   bool allFF = true;
   for (int i = 0; i < 6; ++i) {
     if (mac[i] != 0xFF) {
@@ -519,26 +394,23 @@ bool EepromManager::loadKnownMasterMacSecondary(uint8_t* mac) {
 void EepromManager::saveKnownMasterMacSecondary(const uint8_t* mac) {
   if (!ensureInitialized() || isDevMode)
     return;
-  for (int i = 0; i < 6; ++i)
-    EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC_SECONDARY + i, mac[i]);
-  EEPROM.commit();
+  _prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC_SECONDARY, mac, 6);
   logOperation("Known secondary master MAC saved");
 }
 
 void EepromManager::clearKnownMasterMacSecondary() {
   if (!ensureInitialized() || isDevMode)
     return;
-  for (int i = 0; i < 6; ++i)
-    EEPROM.write(EEPROM_ADDRESSES::KNOWN_MASTER_MAC_SECONDARY + i, 0xFF);
-  EEPROM.commit(); // TOFU security anchor must survive power loss
+  _prefs.remove(NVS_KEYS::KNOWN_MASTER_MAC_SECONDARY);
 }
 
 // TX power preset operations
 lattice::config::TxPowerPreset EepromManager::loadTxPowerPreset() {
   if (!ensureInitialized())
     return lattice::config::DEFAULT_TX_POWER_PRESET;
-  uint8_t val = EEPROM.read(EEPROM_ADDRESSES::TX_POWER_PRESET);
-  if (val > 2) // covers the 0xFF erased-EEPROM sentinel
+  
+  uint8_t val = _prefs.getUChar(NVS_KEYS::TX_POWER_PRESET, static_cast<uint8_t>(lattice::config::DEFAULT_TX_POWER_PRESET));
+  if (val > 2)
     return lattice::config::DEFAULT_TX_POWER_PRESET;
   return static_cast<lattice::config::TxPowerPreset>(val);
 }
@@ -546,8 +418,7 @@ lattice::config::TxPowerPreset EepromManager::loadTxPowerPreset() {
 void EepromManager::saveTxPowerPreset(lattice::config::TxPowerPreset preset) {
   if (!ensureInitialized() || isDevMode)
     return;
-  EEPROM.write(EEPROM_ADDRESSES::TX_POWER_PRESET, static_cast<uint8_t>(preset));
-  EEPROM.commit(); // Immediate commit — deployment config must survive reboot
+  _prefs.putUChar(NVS_KEYS::TX_POWER_PRESET, static_cast<uint8_t>(preset));
   logOperation("TX power preset saved");
 }
 
@@ -555,16 +426,14 @@ void EepromManager::saveTxPowerPreset(lattice::config::TxPowerPreset preset) {
 void EepromManager::saveNodeId(uint8_t nodeId) {
   if (!ensureInitialized())
     return;
-  EEPROM.write(EEPROM_ADDRESSES::NODE_ID, nodeId);
-  markDirty();
+  _prefs.putUChar(NVS_KEYS::NODE_ID, nodeId);
   logOperation("saveNodeId");
 }
 
 uint8_t EepromManager::loadNodeId() {
   if (!ensureInitialized())
     return 0;
-  uint8_t raw = EEPROM.read(EEPROM_ADDRESSES::NODE_ID);
-  return (raw == 0xFF) ? 0 : raw;
+  return _prefs.getUChar(NVS_KEYS::NODE_ID, 0);
 }
 
 // Utility operations
@@ -572,31 +441,8 @@ void EepromManager::clearAll() {
   if (!ensureInitialized())
     return;
 
-  for (int i = 0; i < EEPROM_SIZES::TOTAL_SIZE; ++i) {
-    EEPROM.write(static_cast<uint16_t>(i), 0xFF);
-  }
-  EEPROM.commit();
-  logOperation("All EEPROM cleared");
-}
-
-void EepromManager::clearRange(uint16_t startAddr, uint16_t endAddr) {
-  if (!ensureInitialized())
-    return;
-  if (!isAddressValid(startAddr) || !isAddressValid(endAddr) || startAddr > endAddr) {
-    Logger::logln("EEPROM", "Invalid address range for clear", LogLevel::LOG_ERROR);
-    return;
-  }
-
-  for (uint16_t i = startAddr; i <= endAddr; ++i) {
-    EEPROM.write(i, 0xFF);
-  }
-  EEPROM.commit();
-  String msg = String(startAddr) + " to " + String(endAddr);
-  logOperation("EEPROM range cleared", msg.c_str());
-}
-
-bool EepromManager::isAddressValid(uint16_t address) {
-  return address < EEPROM_SIZES::TOTAL_SIZE;
+  _prefs.clear();
+  logOperation("All NVS cleared");
 }
 
 // Debug and diagnostics
@@ -604,41 +450,9 @@ void EepromManager::dumpEEPROM() {
   if (!ensureInitialized())
     return;
 
-  Logger::logln("EEPROM", "=== EEPROM Dump ===", LogLevel::LOG_INFO);
-  for (uint16_t i = 0; i < EEPROM_SIZES::TOTAL_SIZE; i += 16) {
-    String line = String(i, HEX) + ": ";
-    for (uint8_t j = 0; j < 16 && (i + j) < EEPROM_SIZES::TOTAL_SIZE; ++j) {
-      uint16_t addr = static_cast<uint16_t>(i + j);
-      // Skip keypair range — private key must never appear in debug output
-      if (addr >= EEPROM_ADDRESSES::PRIVATE_KEY && addr <= EEPROM_ADDRESSES::KEYPAIR_CRC + 1) {
-        line += "XX ";
-        continue;
-      }
-      uint8_t val = EEPROM.read(addr);
-      if (val < 16)
-        line += "0";
-      line += String(val, HEX) + " ";
-    }
-    Logger::logln("EEPROM", line, LogLevel::LOG_DEBUG);
-  }
-}
-
-void EepromManager::printAddress(uint16_t address, uint16_t length) {
-  if (!ensureInitialized())
-    return;
-  if (!isAddressValid(address) || !isAddressValid(address + length - 1)) {
-    Logger::logln("EEPROM", "Invalid address range for print", LogLevel::LOG_ERROR);
-    return;
-  }
-
-  String line = "Addr " + String(address) + ": ";
-  for (uint16_t i = 0; i < length; ++i) {
-    uint8_t val = EEPROM.read(static_cast<uint16_t>(address + i));
-    if (val < 16)
-      line += "0";
-    line += String(val, HEX) + " ";
-  }
-  Logger::logln("EEPROM", line, LogLevel::LOG_DEBUG);
+  Logger::logln("EEPROM", "=== NVS Dump (key-value store) ===", LogLevel::LOG_INFO);
+  // NVS doesn't support iteration in the Preferences API, so this is a no-op
+  // or could be extended to dump known keys
 }
 
 } // namespace utils

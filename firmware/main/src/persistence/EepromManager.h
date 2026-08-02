@@ -2,84 +2,48 @@
 #define EEPROM_MANAGER_H
 
 #include <Arduino.h>
-#include <EEPROM.h>
+#include <Preferences.h>
 #include "src/logging/Logger.h"
 #include "../../project_config.h"
 
 namespace lattice {
 namespace utils {
 
-// EEPROM address constants - centralized in one place
-// Layout (v2 — Tasks 10-11 restructured keypair/reboot tracking; Task 18 adds formal versioning):
-//   0   MASTER_FLAG      (1 byte)
-//   1   DEV_FLAG         (1 byte)
-//   8   ADAPTER_TYPE     (1 byte)
-//  16   MESH_KEY         (16 bytes, ends 31)
-//  32   PEER_LIST        (380 bytes: 10 × 38B records, ends 411)
-// 412   REBOOT_REASON    (1 byte)
-// 413   REBOOT_COUNT     (1 byte)
-// 414   RESERVED         (3 bytes: 414-416)
-// 417   PRIVATE_KEY      (32 bytes, ends 448)
-// 449   PUBLIC_KEY       (32 bytes, ends 480)
-// 481   KEYPAIR_CRC      (2 bytes, ends 482)
-// 483   ENROLLED_FLAG    (1 byte)
-// 484   BOOT_EPOCH       (4 bytes, ends 487) — boot count for replay protection
-// 488   KNOWN_MASTER_MAC (6 bytes, ends 493) — TOFU master MAC (0xFF×6 = unset)
-// 494   SCHEMA_VERSION   (1 byte) — EEPROM layout version for migration gating
-// 495   TX_POWER_PRESET  (1 byte) — TxPowerPreset enum value (0=SHORT_RANGE 1=INDOOR 2=OUTDOOR)
-// 496   NODE_ID          (1 byte) — logical node ID assigned by server (0 = unset, 0xFF = erased)
-// 497   KNOWN_MASTER_MAC_SECONDARY (6 bytes, ends 502) — TOFU secondary master MAC (0xFF×6 = unset)
-// Total used: 503 bytes — fits in 512
-namespace EEPROM_ADDRESSES {
-constexpr uint16_t MASTER_FLAG = 0;        // Master flag (1 byte)
-constexpr uint16_t DEV_FLAG = 1;           // Dev mode flag (1 byte)
-constexpr uint16_t ADAPTER_TYPE = 8;       // Adapter type (1 byte)
-constexpr uint16_t MESH_KEY = 16;          // Mesh encryption key (16 bytes)
-constexpr uint16_t PEER_LIST = 32;         // Peer records: 10 × (6 MAC + 32 pubkey) = 380 bytes
-constexpr uint16_t REBOOT_REASON = 412;    // 1 byte: last reset reason
-constexpr uint16_t REBOOT_COUNT = 413;     // 1 byte: consecutive unexpected reboot count
-constexpr uint16_t RESERVED = 414;         // Reserved for future use (3 bytes: 414-416)
-constexpr uint16_t PRIVATE_KEY = 417;      // 32 bytes: Curve25519 private key
-constexpr uint16_t PUBLIC_KEY = 449;       // 32 bytes: Curve25519 public key
-constexpr uint16_t KEYPAIR_CRC = 481;      // 2 bytes: CRC16 over private+public key
-constexpr uint16_t ENROLLED_FLAG = 483;    // 1 byte: 0x01 = enrolled, 0xFF = not enrolled
-constexpr uint16_t BOOT_EPOCH = 484;       // 4 bytes: boot count for replay protection (ends 487)
-constexpr uint16_t KNOWN_MASTER_MAC = 488; // 6 bytes: TOFU master MAC (0xFF×6 = unset, ends 493)
-constexpr uint16_t SCHEMA_VERSION = 494;   // 1 byte: EEPROM layout version for migration gating
-constexpr uint16_t TX_POWER_PRESET =
-    495;                          // 1 byte: TxPowerPreset (0=SHORT_RANGE 1=INDOOR 2=OUTDOOR)
-constexpr uint16_t NODE_ID = 496; // 1 byte: logical node ID assigned by server (0 = unset)
-constexpr uint16_t KNOWN_MASTER_MAC_SECONDARY =
-    497; // 6 bytes: TOFU secondary master MAC (0xFF×6 = unset, ends 502)
+// NVS key constants
+namespace NVS_KEYS {
+constexpr const char* MASTER_FLAG = "master";
+constexpr const char* DEV_FLAG = "dev";
+constexpr const char* ADAPTER_TYPE = "adapter";
+constexpr const char* MESH_KEY = "meshkey";
+constexpr const char* PEER_LIST = "peers";
+constexpr const char* REBOOT_REASON = "rboot_rsn";
+constexpr const char* REBOOT_COUNT = "rboot_cnt";
+constexpr const char* PRIVATE_KEY = "privkey";
+constexpr const char* PUBLIC_KEY = "pubkey";
+constexpr const char* KEYPAIR_CRC = "keypair_crc";
+constexpr const char* ENROLLED_FLAG = "enrolled";
+constexpr const char* BOOT_EPOCH = "boot_epoch";
+constexpr const char* KNOWN_MASTER_MAC = "master_mac";
+constexpr const char* KNOWN_MASTER_MAC_SECONDARY = "master_mac2";
+constexpr const char* TX_POWER_PRESET = "tx_power";
+constexpr const char* NODE_ID = "node_id";
+} // namespace NVS_KEYS
 
-// Old v1 addresses (used only during migration in EepromManager::init())
-constexpr uint16_t V1_REBOOT_REASON = 92;
-constexpr uint16_t V1_REBOOT_COUNT = 93;
-constexpr uint16_t V1_PRIVATE_KEY = 97;
-constexpr uint16_t V1_PUBLIC_KEY = 129;
-constexpr uint16_t V1_KEYPAIR_CRC = 161;
-constexpr uint16_t V1_ENROLLED_FLAG = 163;
-} // namespace EEPROM_ADDRESSES
-
-// EEPROM size constants
+// EEPROM size constants - retained for compatibility with other modules
 namespace EEPROM_SIZES {
-constexpr uint16_t TOTAL_SIZE = 512;
 constexpr uint8_t MESH_KEY_SIZE = 16;
 constexpr uint8_t MAX_PEERS = 10;
 constexpr uint8_t PEER_MAC_SIZE = 6;
 constexpr uint8_t PEER_PUBLIC_KEY_SIZE = 32;
 constexpr uint8_t PEER_RECORD_SIZE = PEER_MAC_SIZE + PEER_PUBLIC_KEY_SIZE; // 38 bytes
 constexpr uint16_t PEER_LIST_SIZE = MAX_PEERS * PEER_RECORD_SIZE;          // 380 bytes
-constexpr uint8_t CURRENT_SCHEMA_VERSION = 3; // Current EEPROM schema version
 } // namespace EEPROM_SIZES
 
 class EepromManager {
 private:
   bool isInitialized;
   bool isDevMode;
-  bool _dirty;
-  uint32_t _lastFlushMs;
-  static constexpr uint32_t EEPROM_FLUSH_INTERVAL_MS = 5000;
+  Preferences _prefs;
 
   // Private constructor for singleton pattern
   EepromManager();
@@ -87,9 +51,6 @@ private:
   // Helper methods
   bool ensureInitialized();
   void logOperation(const char* operation, const char* details = nullptr);
-  bool beginEEPROM();
-  void handleInitFailure();
-  void markDirty();
 
 public:
   // Singleton pattern
@@ -162,18 +123,15 @@ public:
   uint8_t loadNodeId();
   void saveNodeId(uint8_t nodeId);
 
-  // Deferred flush API
+  // Deferred flush API (no-ops for NVS)
   void flushIfDirty();
   void forceFlush();
 
   // Utility operations
   void clearAll();
-  void clearRange(uint16_t startAddr, uint16_t endAddr);
-  bool isAddressValid(uint16_t address);
 
   // Debug and diagnostics
   void dumpEEPROM();
-  void printAddress(uint16_t address, uint16_t length);
 
   // Destructor
   ~EepromManager();

@@ -69,6 +69,7 @@ set(FIRMWARE_SOURCES
   mocks/serial_mock.cpp
   mocks/Arduino.cpp
   mocks/EEPROM.cpp
+  mocks/Preferences.cpp
   mocks/WiFi.cpp
   ../firmware/main/src/mesh/PeerRegistry.cpp
   ../firmware/main/src/mesh/Mesh.cpp
