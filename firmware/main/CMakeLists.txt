@@ -1,0 +1,55 @@
+# ESP-IDF component CMakeLists.txt for lattice-nodes main component
+idf_component_register(
+  SRCS
+    "main.cpp"
+    "src/adapter/Adapter.cpp"
+    "src/adapter/AdapterFactory.cpp"
+    "src/adapter/pir/PirAdapter.cpp"
+    "src/adapter/serial/SerialAdapter.cpp"
+    "src/adapter/serial/SerialFraming.cpp"
+    "src/app/BootManager.h"
+    "src/app/ButtonHandler.h"
+    "src/app/DisplayManager.h"
+    "src/error/ErrorCore.cpp"
+    "src/hardware/input/GpioInput.cpp"
+    "src/hardware/input/Pir.cpp"
+    "src/hardware/output/GpioOutput.cpp"
+    "src/hardware/output/Led.cpp"
+    "src/hardware/output/SevenSegDisplay.cpp"
+    "src/logging/Logger.cpp"
+    "src/mesh/Mesh.cpp"
+    "src/mesh/Enrollment.cpp"
+    "src/mesh/PeerRegistry.cpp"
+    "src/mesh/serialization/mesh.pb.c"
+    "src/mesh/serialization/nanopb/pb_encode.c"
+    "src/mesh/serialization/nanopb/pb_decode.c"
+    "src/mesh/serialization/nanopb/pb_common.c"
+    "src/persistence/EepromManager.cpp"
+  INCLUDE_DIRS
+    "."
+    "src"
+    "lib"
+  REQUIRES
+    esp_wifi
+    nvs_flash
+    driver
+    mbedtls
+)
+
+# Add all source directories for IDE/IntelliSense
+target_include_directories(${COMPONENT_LIB} PUBLIC
+  src/adapter
+  src/adapter/pir
+  src/adapter/serial
+  src/app
+  src/error
+  src/hardware
+  src/hardware/input
+  src/hardware/output
+  src/logging
+  src/mesh
+  src/mesh/serialization
+  src/mesh/serialization/nanopb
+  src/network
+  src/persistence
+)

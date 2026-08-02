@@ -17,6 +17,10 @@
 #include <memory>
 #include <esp_task_wdt.h>
 
+// Forward declarations (Arduino .ino auto-generates these)
+void setup();
+void loop();
+
 constexpr unsigned long MASTER_BEACON_INTERVAL_MS = lattice::config::MASTER_BEACON_INTERVAL_MS;
 
 using namespace lattice::utils;
