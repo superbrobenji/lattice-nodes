@@ -368,14 +368,13 @@ bool EepromManager::_persistOrEscalate(const char* key, size_t got, size_t want,
     return true;
   }
   if (securityRelevant) {
-    lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY,
-                       lattice::core::ModuleDigit::EEPROM, 5,
+    lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 5,
                        "NVS write failed (security-relevant key)");
-    return false;  // unreachable outside UNIT_TEST
+    return false; // unreachable outside UNIT_TEST
   }
-  Logger::logln("NVS", String("write failed key=") + key +
-                          " got=" + String((unsigned)got) +
-                          " want=" + String((unsigned)want),
+  Logger::logln("NVS",
+                String("write failed key=") + key + " got=" + String((unsigned)got) +
+                    " want=" + String((unsigned)want),
                 LogLevel::LOG_ERROR);
   return false;
 }
