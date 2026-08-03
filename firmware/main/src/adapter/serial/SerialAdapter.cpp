@@ -45,19 +45,12 @@ void SerialAdapter::sendHealthReport() {
                     " Uptime: " + String(uptimeSec) + "s",
                 LogLevel::LOG_DEBUG);
 
-  if (lattice::mesh::Mesh::transmit) {
-    // This report is ABOUT this node, so use transmitSelfOriginated(): on a
-    // master node, plain transmit() would only broadcast it to mesh peers
-    // (who don't need it) and never deliver it to the master's own serial
-    // port — the only place the server can ever see it.
-    lattice::mesh::Mesh::transmitSelfOriginated(adapter_types::SERIAL_ADAPTER, data);
-    Logger::logln("Serial_Adapter", "Health report sent via mesh", LogLevel::LOG_DEBUG);
-  } else {
-    Logger::logln("Serial_Adapter", "Mesh transmit function not available for health report",
-                  LogLevel::LOG_WARN);
-    lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::ADAPTER, 1,
-                       "Serial_Adapter: Mesh transmit not available");
-  }
+  // This report is ABOUT this node, so use transmitSelfOriginated(): on a
+  // master node, plain transmit() would only broadcast it to mesh peers
+  // (who don't need it) and never deliver it to the master's own serial
+  // port — the only place the server can ever see it.
+  lattice::mesh::Mesh::transmitSelfOriginated(adapter_types::SERIAL_ADAPTER, data);
+  Logger::logln("Serial_Adapter", "Health report sent via mesh", LogLevel::LOG_DEBUG);
 }
 
 SerialAdapter::SerialAdapter(int pin) : Adapter(pin), lastReportedHopCount(0) {
