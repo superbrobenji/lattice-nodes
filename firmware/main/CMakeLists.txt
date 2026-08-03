@@ -14,6 +14,7 @@ idf_component_register(
     "src/adapter/serial/SerialAdapter.cpp"
     "src/adapter/serial/SerialFraming.cpp"
     "src/error/ErrorCore.cpp"
+    "src/hardware/input/Button.cpp"
     "src/hardware/input/GpioInput.cpp"
     "src/hardware/input/Pir.cpp"
     "src/hardware/output/GpioOutput.cpp"

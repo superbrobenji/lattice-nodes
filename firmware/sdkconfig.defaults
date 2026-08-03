@@ -21,6 +21,9 @@ CONFIG_MBEDTLS_CHACHAPOLY_C=y
 CONFIG_MBEDTLS_HARDWARE_AES=y
 CONFIG_MBEDTLS_HARDWARE_SHA=y
 
+# mbedtls: HKDF used by E2ECrypto::deriveE2EKeys to expand ECDH secret
+CONFIG_MBEDTLS_HKDF_C=y
+
 # mbedtls: trim unused suites (node has no TLS — keep X25519 + chachapoly + SHA-256)
 CONFIG_MBEDTLS_TLS_ENABLED=n
 
