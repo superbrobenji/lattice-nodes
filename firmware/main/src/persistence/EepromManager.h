@@ -10,23 +10,23 @@ namespace lattice {
 namespace utils {
 
 namespace NVS_KEYS {
-constexpr const char* NAMESPACE        = "lattice";
-constexpr const char* MASTER_FLAG      = "master";
-constexpr const char* DEV_FLAG         = "dev";
-constexpr const char* ADAPTER_TYPE     = "adapter";
-constexpr const char* MESH_KEY         = "meshkey";
-constexpr const char* PEER_LIST        = "peers";
-constexpr const char* REBOOT_REASON    = "rbt_reason";
-constexpr const char* REBOOT_COUNT     = "rbt_count";
-constexpr const char* PRIVATE_KEY      = "privkey";
-constexpr const char* PUBLIC_KEY       = "pubkey";
-constexpr const char* KEYPAIR_CRC      = "kp_crc";
-constexpr const char* ENROLLED_FLAG    = "enrolled";
-constexpr const char* BOOT_EPOCH       = "epoch";
+constexpr const char* NAMESPACE = "lattice";
+constexpr const char* MASTER_FLAG = "master";
+constexpr const char* DEV_FLAG = "dev";
+constexpr const char* ADAPTER_TYPE = "adapter";
+constexpr const char* MESH_KEY = "meshkey";
+constexpr const char* PEER_LIST = "peers";
+constexpr const char* REBOOT_REASON = "rbt_reason";
+constexpr const char* REBOOT_COUNT = "rbt_count";
+constexpr const char* PRIVATE_KEY = "privkey";
+constexpr const char* PUBLIC_KEY = "pubkey";
+constexpr const char* KEYPAIR_CRC = "kp_crc";
+constexpr const char* ENROLLED_FLAG = "enrolled";
+constexpr const char* BOOT_EPOCH = "epoch";
 constexpr const char* KNOWN_MASTER_MAC = "master_mac";
 constexpr const char* KNOWN_MASTER_MAC_SEC = "master_mac2";
-constexpr const char* TX_POWER_PRESET  = "txpower";
-constexpr const char* NODE_ID          = "node_id";
+constexpr const char* TX_POWER_PRESET = "txpower";
+constexpr const char* NODE_ID = "node_id";
 } // namespace NVS_KEYS
 
 namespace EEPROM_SIZES {

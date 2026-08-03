@@ -131,8 +131,7 @@ void EepromManager::savePeerList(const uint8_t* peerRecords, size_t numPeers) {
   if (numPeers == 0) {
     _prefs.remove(NVS_KEYS::PEER_LIST);
   } else {
-    _prefs.putBytes(NVS_KEYS::PEER_LIST, peerRecords,
-                    numPeers * EEPROM_SIZES::PEER_RECORD_SIZE);
+    _prefs.putBytes(NVS_KEYS::PEER_LIST, peerRecords, numPeers * EEPROM_SIZES::PEER_RECORD_SIZE);
   }
   logOperation("Peer list saved", String(numPeers).c_str());
 }
