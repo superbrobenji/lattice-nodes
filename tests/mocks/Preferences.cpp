@@ -82,6 +82,9 @@ size_t Preferences::getBytes(const char* key, void* buf, size_t maxLen) {
 }
 
 size_t Preferences::putUChar(const char* key, uint8_t value) {
+  if (_shortWriteKey && std::strcmp(key, _shortWriteKey) == 0) {
+    return 0; // simulate short write
+  }
   std::string nskey = _nsKey(key);
   _store[nskey] = std::vector<uint8_t>{value};
   return 1;
