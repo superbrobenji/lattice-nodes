@@ -23,8 +23,9 @@ Mesh* Mesh::instance = nullptr;
 
 Mesh::Mesh()
     : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0),
+      relayPendingAt(0), relayPending(false),
       _dualMasterMode(lattice::config::DUAL_MASTER_MODE), recvQueueHead(0), recvQueueTail(0),
-      lastBeaconMs(0), lastRouteReportMs(0), relayPending(false), relayPendingAt(0) {
+      lastBeaconMs(0), lastRouteReportMs(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
