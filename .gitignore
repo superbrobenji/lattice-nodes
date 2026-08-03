@@ -1,3 +1,8 @@
-
 # ESP32/arduino-cli build artifacts
 build/
+
+# Superpowers subagent worktrees
+.cave/
+
+# legacy pre-restructure submodule path
+main/lib/

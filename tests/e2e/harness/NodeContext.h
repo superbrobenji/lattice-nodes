@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdint>
 #include "EEPROM.h"
+#include "Preferences.h"
 #include "serial_mock.h"
 #include "esp_now_mock.h"
 
@@ -27,6 +28,7 @@ struct NodeContext {
   // Mock layer
   std::array<uint8_t, 512> eepromData;
   int eepromCommitCount = 0;
+  std::map<std::string, std::vector<uint8_t>> prefsStore;
   std::vector<uint8_t> serialWritten;
   std::string serialOutput;
   std::deque<uint8_t> serialRx;

@@ -34,11 +34,11 @@ FetchContent_MakeAvailable(mbedtls)
 # Mocks shadow real hardware headers via include order
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/mocks
-  ${CMAKE_CURRENT_SOURCE_DIR}/../main/src
-  ${CMAKE_CURRENT_SOURCE_DIR}/../main
-  ${CMAKE_CURRENT_SOURCE_DIR}/../main/lib
-  ${CMAKE_CURRENT_SOURCE_DIR}/../main/src/mesh/serialization/nanopb
-  ${CMAKE_CURRENT_SOURCE_DIR}/../main/src/mesh/serialization
+  ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main
+  ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/lib
+  ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/src/mesh/serialization/nanopb
+  ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/src/mesh/serialization
 )
 
 # UNIT_TEST enables friend declarations in Mesh.h for test fixture access
@@ -46,33 +46,34 @@ add_compile_definitions(UNIT_TEST)
 
 # Firmware source files compilable on host (hardware-independent or mockable)
 set(FIRMWARE_SOURCES
-  ../main/src/mesh/serialization/mesh.pb.c
-  ../main/src/mesh/serialization/nanopb/pb_encode.c
-  ../main/src/mesh/serialization/nanopb/pb_decode.c
-  ../main/src/mesh/serialization/nanopb/pb_common.c
-  ../main/src/persistence/EepromManager.cpp
-  ../main/src/adapter/AdapterFactory.cpp
-  ../main/src/adapter/Adapter.cpp
-  ../main/src/adapter/serial/SerialFraming.cpp
-  ../main/src/adapter/serial/SerialAdapter.cpp
-  ../main/src/adapter/pir/PirAdapter.cpp
-  ../main/src/logging/Logger.cpp
-  ../main/src/error/ErrorCore.cpp
-  ../main/src/hardware/output/GpioOutput.cpp
-  ../main/src/hardware/output/Led.cpp
-  ../main/src/hardware/output/SevenSegDisplay.cpp
-  ../main/src/hardware/input/GpioInput.cpp
-  ../main/src/hardware/input/Pir.cpp
+  ../firmware/main/src/mesh/serialization/mesh.pb.c
+  ../firmware/main/src/mesh/serialization/nanopb/pb_encode.c
+  ../firmware/main/src/mesh/serialization/nanopb/pb_decode.c
+  ../firmware/main/src/mesh/serialization/nanopb/pb_common.c
+  ../firmware/main/src/persistence/EepromManager.cpp
+  ../firmware/main/src/adapter/AdapterFactory.cpp
+  ../firmware/main/src/adapter/Adapter.cpp
+  ../firmware/main/src/adapter/serial/SerialFraming.cpp
+  ../firmware/main/src/adapter/serial/SerialAdapter.cpp
+  ../firmware/main/src/adapter/pir/PirAdapter.cpp
+  ../firmware/main/src/logging/Logger.cpp
+  ../firmware/main/src/error/ErrorCore.cpp
+  ../firmware/main/src/hardware/output/GpioOutput.cpp
+  ../firmware/main/src/hardware/output/Led.cpp
+  ../firmware/main/src/hardware/output/SevenSegDisplay.cpp
+  ../firmware/main/src/hardware/input/GpioInput.cpp
+  ../firmware/main/src/hardware/input/Pir.cpp
   mocks/esp_now_mock.cpp
   mocks/esp_wifi_mock.cpp
   mocks/time_mock.cpp
   mocks/serial_mock.cpp
   mocks/Arduino.cpp
   mocks/EEPROM.cpp
+  mocks/Preferences.cpp
   mocks/WiFi.cpp
-  ../main/src/mesh/PeerRegistry.cpp
-  ../main/src/mesh/Mesh.cpp
-  ../main/src/mesh/Enrollment.cpp
+  ../firmware/main/src/mesh/PeerRegistry.cpp
+  ../firmware/main/src/mesh/Mesh.cpp
+  ../firmware/main/src/mesh/Enrollment.cpp
 )
 
 enable_testing()

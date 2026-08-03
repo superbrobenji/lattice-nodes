@@ -1,0 +1,41 @@
+# ESP-IDF default configuration for lattice-nodes firmware
+# Approach: arduino-esp32 as IDF component (spec §Phase 0)
+
+# Arduino-as-component: provides app_main() that calls setup()/loop()
+CONFIG_AUTOSTART_ARDUINO=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ARDUINO_LOOP_STACK_SIZE=8192
+
+# Partition table (no EEPROM partition — NVS replaces it)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Bluetooth: disabled — unused, saves ~10KB flash + heap
+CONFIG_BT_ENABLED=n
+
+# mbedtls: enable ChaCha20-Poly1305 (E2E AEAD, spec §1)
+# All three required — CHACHAPOLY depends on the other two
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_POLY1305_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+CONFIG_MBEDTLS_HARDWARE_AES=y
+CONFIG_MBEDTLS_HARDWARE_SHA=y
+
+# mbedtls: HKDF used by E2ECrypto::deriveE2EKeys to expand ECDH secret
+CONFIG_MBEDTLS_HKDF_C=y
+
+# mbedtls: trim unused suites (node has no TLS — keep X25519 + chachapoly + SHA-256)
+CONFIG_MBEDTLS_TLS_ENABLED=n
+
+# ESP-NOW and WiFi
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
+
+# NVS Flash
+CONFIG_NVS_ENCRYPTION=n
+
+# Task watchdog
+CONFIG_ESP_TASK_WDT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_TASK_WDT_PANIC=y

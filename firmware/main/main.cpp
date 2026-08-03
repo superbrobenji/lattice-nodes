@@ -13,9 +13,12 @@
 #include "src/app/ButtonHandler.h"
 #include "project_config.h"
 #include <esp_wifi.h>
-#include <esp_bt.h>
 #include <memory>
 #include <esp_task_wdt.h>
+
+// Forward declarations (Arduino .ino auto-generates these)
+void setup();
+void loop();
 
 constexpr unsigned long MASTER_BEACON_INTERVAL_MS = lattice::config::MASTER_BEACON_INTERVAL_MS;
 
@@ -152,8 +155,7 @@ void setup() {
                           "EEPROM Manager init failed!");
   }
 
-  // Disable Bluetooth — unused, saves 20-30mA
-  btStop();
+  // Bluetooth disabled via CONFIG_BT_ENABLED=n in sdkconfig
 
   // Check if we're in dev mode (compile-time constant takes precedence)
   isDevMode = DEV_MODE;

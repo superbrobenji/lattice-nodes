@@ -50,7 +50,7 @@ jobs:
 
       - name: Check formatting
         run: |
-          find main/src \( -name '*.cpp' -o -name '*.h' \) \
+          find firmware/main/src \( -name '*.cpp' -o -name '*.h' \) \
             ! -path '*/nanopb/*' \
             ! -name 'mesh.pb.h' \
             ! -name 'mesh.pb.c' | \
@@ -75,7 +75,7 @@ jobs:
             --suppress=missingIncludeSystem \
             --suppress=unmatchedSuppression \
             --inline-suppr \
-            -I main/src \
-            -i main/src/mesh/serialization/nanopb \
-            -i main/src/mesh/serialization/mesh.pb.c \
-            main/src/ 2>&1
+            -I firmware/main/src \
+            -i firmware/main/src/mesh/serialization/nanopb \
+            -i firmware/main/src/mesh/serialization/mesh.pb.c \
+            firmware/main/src/ 2>&1
