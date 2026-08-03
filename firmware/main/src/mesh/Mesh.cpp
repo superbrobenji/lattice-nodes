@@ -749,17 +749,6 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   memcpy(lastSeenMasterMac, msg.origin_mac_address, 6);
   lastMasterBeaconReceivedMs = millis();
 
-  uint8_t newDistance = msg.hop_count + 1;
-  if (currentMaster.distance == 0xFF ||
-      lattice::utils::MacAddress(currentMaster.mac) !=
-          lattice::utils::MacAddress(msg.origin_mac_address) ||
-      newDistance < currentMaster.distance) {
-    memcpy(currentMaster.mac, msg.origin_mac_address, 6);
-    currentMaster.distance = newDistance;
-    Logger::logln("MESH", "Updated route to master. Distance: " + String(newDistance),
-                  LogLevel::LOG_INFO);
-  }
-
   // Multi-hop routing (spec §3): the node we heard this beacon THROUGH
   // (last_hop) is a forwarding candidate. msg.hop_count is last_hop's OWN
   // distance to the master (this receiving node's distance is one more, per
@@ -768,6 +757,18 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   // (hop_count == 0, last_hop == master) must record the master itself as a
   // distance-0 neighbor. Learned here, not from enrollment — routing only.
   neighbors.observe(msg.last_hop_mac_address, msg.hop_count, millis());
+
+  // Derive currentMaster.distance from live NeighborTable state (issue #45).
+  // Sticky-min replaced by a pure function of neighbor state: rises monotonically
+  // as shorter-path neighbors age out; no oscillation because state can only
+  // flap if NeighborTable itself flaps.
+  memcpy(currentMaster.mac, msg.origin_mac_address, 6);
+  uint8_t min_d = neighbors.minFreshDistance(millis());
+  uint8_t derived = (min_d == 0xFF) ? 0xFF : static_cast<uint8_t>(min_d + 1);
+  if (derived != currentMaster.distance) {
+    currentMaster.distance = derived;
+    Logger::logln("MESH", "Route distance derived: " + String(derived), LogLevel::LOG_INFO);
+  }
 
   if (!isMaster) {
     // C10 fix: only relay if this beacon is newer than the last one we relayed
@@ -787,7 +788,11 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     // Jitter window: 10–73 ms (10 + esp_random() % RELAY_JITTER_MAX_MS)
     uint8_t jitterMs = static_cast<uint8_t>(esp_random() % lattice::config::RELAY_JITTER_MAX_MS);
     relayPendingMsg = msg;
-    relayPendingMsg.hop_count = newDistance;
+    // Relay carries this node's just-derived distance (`derived`, above), not
+    // the naive msg.hop_count + 1 for this specific beacon's path — if a
+    // shorter fresh neighbor already exists, downstream nodes should hear
+    // this node's true (possibly smaller) distance, not an inflated one.
+    relayPendingMsg.hop_count = derived;
     memcpy(relayPendingMsg.last_hop_mac_address, deviceMacAddress, 6);
     relayPendingAt = millis() + 10 + jitterMs;
     relayPending = true;

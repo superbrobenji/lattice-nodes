@@ -1716,3 +1716,100 @@ TEST_F(MeshEpochRollbackTest, SameEpochSameSeq_Fatal) {
   mesh._checkEpochRollback(3, 7);
   EXPECT_THROW(mesh._checkEpochRollback(3, 7), lattice::err::FatalError);
 }
+
+// --- currentMaster.distance derivation from NeighborTable (issue #45) ---
+//
+// In UNIT_TEST builds all of Mesh's members are public (see the
+// `#ifdef UNIT_TEST public: #else private: #endif` at the top of the class
+// body in Mesh.h), so test bodies read/set `mesh.enrollment` and
+// `mesh.currentMaster` directly — same pattern MeshLogicTest and
+// MeshEpochRollbackTest above already use (e.g. `mesh._checkEpochRollback`,
+// `mesh.enrollment.hasMasterMac`). No `_enrollmentForTest()` /
+// `_currentMasterForTest()` accessors or `friend class` declaration needed.
+class MeshDistanceDerivationTest : public ::testing::Test {
+protected:
+  lattice::mesh::Mesh mesh;
+  void SetUp() override { resetMillis(); }
+};
+
+TEST_F(MeshDistanceDerivationTest, DirectBeacon_DistanceIs1) {
+  // Build a beacon: hop_count=0, last_hop=master, origin=master
+  mesh_message m{};
+  const uint8_t master[6] = {0xAA, 0, 0, 0, 0, 1};
+  memcpy(m.origin_mac_address, master, 6);
+  memcpy(m.last_hop_mac_address, master, 6);
+  m.message_type = MESH_TYPE_MASTER_BEACON;
+  m.hop_count = 0;
+  // Set enrollment.knownMasterMac so the TOFU fromPrimary branch accepts.
+  memcpy(mesh.enrollment.knownMasterMac, master, 6);
+  mesh.enrollment.hasMasterMac = true;
+  mesh.processMasterBeacon(m);
+  EXPECT_EQ(mesh.currentMaster.distance, 1);
+}
+
+TEST_F(MeshDistanceDerivationTest, SinglePathAgeOut_DistanceRises) {
+  const uint8_t master[6] = {0xAA, 0, 0, 0, 0, 1};
+  const uint8_t relay[6] = {0xAA, 0, 0, 0, 0, 2};
+  memcpy(mesh.enrollment.knownMasterMac, master, 6);
+  mesh.enrollment.hasMasterMac = true;
+
+  // First beacon direct from master → distance=1.
+  mesh_message direct{};
+  memcpy(direct.origin_mac_address, master, 6);
+  memcpy(direct.last_hop_mac_address, master, 6);
+  direct.message_type = MESH_TYPE_MASTER_BEACON;
+  direct.hop_count = 0;
+  mesh.processMasterBeacon(direct);
+  ASSERT_EQ(mesh.currentMaster.distance, 1);
+
+  // Advance clock past STALE_PEER_THRESHOLD_MS — the direct master neighbor
+  // entry ages out.
+  advanceMillis(lattice::config::STALE_PEER_THRESHOLD_MS + 1);
+
+  // Second beacon via a relay at distance 2 from the master (still the same
+  // origin master MAC, just heard via a longer path) → distance=3.
+  mesh_message relayed{};
+  memcpy(relayed.origin_mac_address, master, 6);
+  memcpy(relayed.last_hop_mac_address, relay, 6);
+  relayed.message_type = MESH_TYPE_MASTER_BEACON;
+  relayed.hop_count = 2;
+  mesh.processMasterBeacon(relayed);
+  EXPECT_EQ(mesh.currentMaster.distance, 3);
+}
+
+TEST_F(MeshDistanceDerivationTest, TwoPathsDifferentLength_NoOscillation) {
+  const uint8_t master[6] = {0xAA, 0, 0, 0, 0, 1};
+  const uint8_t relay[6] = {0xAA, 0, 0, 0, 0, 2};
+  memcpy(mesh.enrollment.knownMasterMac, master, 6);
+  mesh.enrollment.hasMasterMac = true;
+
+  mesh_message direct{};
+  memcpy(direct.origin_mac_address, master, 6);
+  memcpy(direct.last_hop_mac_address, master, 6);
+  direct.message_type = MESH_TYPE_MASTER_BEACON;
+  direct.hop_count = 0;
+
+  mesh_message relayed{};
+  memcpy(relayed.origin_mac_address, master, 6);
+  memcpy(relayed.last_hop_mac_address, relay, 6);
+  relayed.message_type = MESH_TYPE_MASTER_BEACON;
+  relayed.hop_count = 2;
+
+  // Interleave direct + relayed beacons while both neighbor entries stay
+  // fresh — the direct (distance-0) neighbor always wins minFreshDistance,
+  // so currentMaster.distance must stay 1 throughout. No oscillation.
+  mesh.processMasterBeacon(direct);
+  EXPECT_EQ(mesh.currentMaster.distance, 1);
+
+  advanceMillis(10);
+  mesh.processMasterBeacon(relayed);
+  EXPECT_EQ(mesh.currentMaster.distance, 1) << "shorter path still fresh — must not rise";
+
+  advanceMillis(10);
+  mesh.processMasterBeacon(direct);
+  EXPECT_EQ(mesh.currentMaster.distance, 1);
+
+  advanceMillis(10);
+  mesh.processMasterBeacon(relayed);
+  EXPECT_EQ(mesh.currentMaster.distance, 1) << "must not oscillate";
+}

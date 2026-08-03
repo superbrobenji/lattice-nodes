@@ -63,6 +63,23 @@ public:
     return true;
   }
 
+  // Smallest masterDistance across valid entries within STALE_PEER_THRESHOLD_MS
+  // of nowMillis. 0xFF if none are fresh. Used by Mesh::processMasterBeacon to
+  // derive currentMaster.distance from live neighbor state (issue #45).
+  uint8_t minFreshDistance(uint32_t nowMillis) const {
+    uint8_t best = 0xFF;
+    for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i) {
+      const Entry& e = entries[i];
+      if (!e.valid)
+        continue;
+      if (nowMillis - e.lastSeenMillis >= config::STALE_PEER_THRESHOLD_MS)
+        continue;
+      if (e.masterDistance < best)
+        best = e.masterDistance;
+    }
+    return best;
+  }
+
   bool contains(const uint8_t* mac) const {
     for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i)
       if (entries[i].valid && memcmp(entries[i].mac, mac, 6) == 0)
