@@ -47,11 +47,11 @@ void Mesh::readMacAddress() {
   }
 }
 
-void Mesh::printMeshMessage(const mesh_message& msg) {
-  auto macToStr = [](const uint8_t (&mac)[6]) {
-    return lattice::utils::MacAddress(mac).toString();
-  };
+static String macToStr(const uint8_t (&mac)[6]) {
+  return lattice::utils::MacAddress(mac).toString();
+}
 
+void Mesh::printMeshMessage(const mesh_message& msg) {
   Logger::logln("MESH", "------ Mesh Message ------", LogLevel::LOG_DEBUG);
   Logger::logln("MESH", "Origin:    " + macToStr(msg.origin_mac_address), LogLevel::LOG_DEBUG);
   Logger::logln("MESH", "Target:    " + macToStr(msg.target_mac_address), LogLevel::LOG_DEBUG);

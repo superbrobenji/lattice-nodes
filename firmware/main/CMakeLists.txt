@@ -1,7 +1,9 @@
 # ESP-IDF component CMakeLists.txt for lattice-nodes main component
 #
-# arduino-as-component: the arduino REQUIRES pulls in Arduino.h, Serial,
-# WiFi, String, Preferences, esp_now, and all other Arduino API headers.
+# arduino-as-component: `espressif/arduino-esp32` (v3.x) is pulled in by
+# idf_component.yml and registers the ESP-IDF component name `arduino-esp32`.
+# Listing it in REQUIRES exposes Arduino.h, Serial, WiFi, String, Preferences,
+# esp_now, and the rest of the Arduino API headers.
 # CONFIG_AUTOSTART_ARDUINO=y (sdkconfig.defaults) provides app_main().
 idf_component_register(
   SRCS
@@ -31,7 +33,7 @@ idf_component_register(
     "src"
     "lib"
   REQUIRES
-    arduino
+    arduino-esp32
     esp_wifi
     nvs_flash
     driver
