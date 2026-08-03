@@ -43,6 +43,7 @@ private:
   bool isInitialized;
   bool isDevMode;
   Preferences _prefs;
+  uint32_t _devEpoch = 0;  // DEV_MODE RAM-only monotonic boot-epoch seed (issue #43)
 
   EepromManager();
   bool ensureInitialized();

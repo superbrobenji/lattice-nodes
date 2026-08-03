@@ -484,3 +484,32 @@ TEST_F(EEPROMMgrTest, ForceFlush_IsNoOp) {
   mgr.forceFlush(); // Should be a no-op
   EXPECT_EQ(mgr.loadNodeId(), 42u); // Data should already be persisted
 }
+
+// -----------------------------------------------------------------------
+// Boot epoch — DEV-mode RAM-only seed (issue #43)
+// -----------------------------------------------------------------------
+
+TEST_F(EEPROMMgrTest, SaveBootEpoch_DevMode_UsesRAMSeed) {
+  auto& mgr = EepromManager::getInstance();
+  mgr.setDevMode(true);
+  mgr.saveBootEpoch(5);
+  EXPECT_EQ(mgr.loadBootEpoch(), 5u);
+  mgr.saveBootEpoch(7);
+  EXPECT_EQ(mgr.loadBootEpoch(), 7u);
+}
+
+TEST_F(EEPROMMgrTest, SaveBootEpoch_DevMode_DoesNotTouchNVS) {
+  auto& mgr = EepromManager::getInstance();
+  Preferences::_store.clear();
+  mgr.setDevMode(true);
+  mgr.saveBootEpoch(42);
+  // NVS store must be empty — DEV never persists.
+  EXPECT_TRUE(Preferences::_store.empty());
+}
+
+TEST_F(EEPROMMgrTest, SaveBootEpoch_ProdMode_Persists) {
+  auto& mgr = EepromManager::getInstance();
+  mgr.setDevMode(false);
+  mgr.saveBootEpoch(9);
+  EXPECT_EQ(mgr.loadBootEpoch(), 9u);
+}

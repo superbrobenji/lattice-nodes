@@ -244,12 +244,18 @@ void EepromManager::saveEnrolledFlag(bool enrolled) {
 uint32_t EepromManager::loadBootEpoch() {
   if (!ensureInitialized())
     return 0;
+  if (isDevMode)
+    return _devEpoch;
   return _prefs.getUInt(NVS_KEYS::BOOT_EPOCH, 0);
 }
 
 void EepromManager::saveBootEpoch(uint32_t epoch) {
-  if (!ensureInitialized() || isDevMode)
+  if (!ensureInitialized())
     return;
+  if (isDevMode) {
+    _devEpoch = epoch;
+    return;
+  }
   _prefs.putUInt(NVS_KEYS::BOOT_EPOCH, epoch);
 }
 
