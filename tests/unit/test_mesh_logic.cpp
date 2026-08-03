@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <array>
 #include <vector>
+#include "error/Error.h"
 #include "mesh/Mesh.h"
 #include "mesh/MeshCrypto.h"
 #include "mesh/E2ECrypto.h"
@@ -1677,4 +1678,41 @@ TEST_F(EnrollmentRelayCallbackTest, QueueHoldsAndDrainsMultipleConcurrentRelays)
   EXPECT_EQ(memcmp(drained[0].data(), kMacA, 6), 0) << "FIFO order: A first";
   EXPECT_EQ(memcmp(drained[1].data(), kMacB, 6), 0) << "FIFO order: B second";
   EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u);
+}
+
+// --- Seal-time AEAD epoch-rollback guard (Phase A Task 3) ---
+
+class MeshEpochRollbackTest : public ::testing::Test {
+protected:
+  lattice::mesh::Mesh mesh;
+  void SetUp() override { /* mesh default-constructed; _lastSealedEpoch = UINT32_MAX */ }
+};
+
+TEST_F(MeshEpochRollbackTest, FirstCall_Snapshots) {
+  EXPECT_NO_THROW(mesh._checkEpochRollback(3, 7));
+}
+
+TEST_F(MeshEpochRollbackTest, HigherEpoch_Passes) {
+  mesh._checkEpochRollback(3, 7);
+  EXPECT_NO_THROW(mesh._checkEpochRollback(4, 0));
+}
+
+TEST_F(MeshEpochRollbackTest, SameEpochHigherSeq_Passes) {
+  mesh._checkEpochRollback(3, 7);
+  EXPECT_NO_THROW(mesh._checkEpochRollback(3, 8));
+}
+
+TEST_F(MeshEpochRollbackTest, LowerEpoch_Fatal) {
+  mesh._checkEpochRollback(3, 7);
+  EXPECT_THROW(mesh._checkEpochRollback(2, 0), lattice::err::FatalError);
+}
+
+TEST_F(MeshEpochRollbackTest, SameEpochLowerSeq_Fatal) {
+  mesh._checkEpochRollback(3, 7);
+  EXPECT_THROW(mesh._checkEpochRollback(3, 6), lattice::err::FatalError);
+}
+
+TEST_F(MeshEpochRollbackTest, SameEpochSameSeq_Fatal) {
+  mesh._checkEpochRollback(3, 7);
+  EXPECT_THROW(mesh._checkEpochRollback(3, 7), lattice::err::FatalError);
 }
