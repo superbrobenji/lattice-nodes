@@ -1,7 +1,8 @@
-<<<<<<< HEAD
-
 # ESP32/arduino-cli build artifacts
 build/
-=======
+
+# Superpowers subagent worktrees
 .cave/
->>>>>>> d069f23 (feat: rewrite EepromManager onto NVS/Preferences (closes #50))
+
+# legacy pre-restructure submodule path
+main/lib/
