@@ -22,10 +22,9 @@ Mesh* Mesh::instance = nullptr;
 // no longer need macEquals helper – use MacAddress equality directly
 
 Mesh::Mesh()
-    : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0),
-      relayPendingAt(0), relayPending(false),
-      _dualMasterMode(lattice::config::DUAL_MASTER_MODE), recvQueueHead(0), recvQueueTail(0),
-      lastBeaconMs(0), lastRouteReportMs(0) {
+    : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0), relayPendingAt(0),
+      relayPending(false), _dualMasterMode(lattice::config::DUAL_MASTER_MODE), recvQueueHead(0),
+      recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
@@ -49,7 +48,9 @@ void Mesh::readMacAddress() {
 }
 
 void Mesh::printMeshMessage(const mesh_message& msg) {
-  auto macToStr = [](const uint8_t(&mac)[6]) { return lattice::utils::MacAddress(mac).toString(); };
+  auto macToStr = [](const uint8_t (&mac)[6]) {
+    return lattice::utils::MacAddress(mac).toString();
+  };
 
   Logger::logln("MESH", "------ Mesh Message ------", LogLevel::LOG_DEBUG);
   Logger::logln("MESH", "Origin:    " + macToStr(msg.origin_mac_address), LogLevel::LOG_DEBUG);

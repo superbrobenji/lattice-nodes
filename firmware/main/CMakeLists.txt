@@ -1,4 +1,8 @@
 # ESP-IDF component CMakeLists.txt for lattice-nodes main component
+#
+# arduino-as-component: the arduino REQUIRES pulls in Arduino.h, Serial,
+# WiFi, String, Preferences, esp_now, and all other Arduino API headers.
+# CONFIG_AUTOSTART_ARDUINO=y (sdkconfig.defaults) provides app_main().
 idf_component_register(
   SRCS
     "main.cpp"
@@ -7,9 +11,6 @@ idf_component_register(
     "src/adapter/pir/PirAdapter.cpp"
     "src/adapter/serial/SerialAdapter.cpp"
     "src/adapter/serial/SerialFraming.cpp"
-    "src/app/BootManager.h"
-    "src/app/ButtonHandler.h"
-    "src/app/DisplayManager.h"
     "src/error/ErrorCore.cpp"
     "src/hardware/input/GpioInput.cpp"
     "src/hardware/input/Pir.cpp"
@@ -30,13 +31,14 @@ idf_component_register(
     "src"
     "lib"
   REQUIRES
+    arduino
     esp_wifi
     nvs_flash
     driver
     mbedtls
 )
 
-# Add all source directories for IDE/IntelliSense
+# Subdirectory includes for IDE/IntelliSense and internal #include resolution
 target_include_directories(${COMPONENT_LIB} PUBLIC
   src/adapter
   src/adapter/pir
