@@ -105,7 +105,8 @@ void EepromManager::saveMeshKey(const uint8_t* key, size_t keySize) {
     return;
   if (keySize != EEPROM_SIZES::MESH_KEY_SIZE)
     return;
-  _prefs.putBytes(NVS_KEYS::MESH_KEY, key, keySize);
+  size_t n = _prefs.putBytes(NVS_KEYS::MESH_KEY, key, keySize);
+  _persistOrEscalate(NVS_KEYS::MESH_KEY, n, keySize, /*securityRelevant=*/true);
   logOperation("Mesh key saved");
 }
 
@@ -244,13 +245,20 @@ void EepromManager::saveEnrolledFlag(bool enrolled) {
 uint32_t EepromManager::loadBootEpoch() {
   if (!ensureInitialized())
     return 0;
+  if (isDevMode)
+    return _devEpoch;
   return _prefs.getUInt(NVS_KEYS::BOOT_EPOCH, 0);
 }
 
 void EepromManager::saveBootEpoch(uint32_t epoch) {
-  if (!ensureInitialized() || isDevMode)
+  if (!ensureInitialized())
     return;
-  _prefs.putUInt(NVS_KEYS::BOOT_EPOCH, epoch);
+  if (isDevMode) {
+    _devEpoch = epoch;
+    return;
+  }
+  size_t n = _prefs.putUInt(NVS_KEYS::BOOT_EPOCH, epoch);
+  _persistOrEscalate(NVS_KEYS::BOOT_EPOCH, n, sizeof(uint32_t), /*securityRelevant=*/true);
 }
 
 bool EepromManager::loadKnownMasterMac(uint8_t* mac) {
@@ -272,7 +280,8 @@ bool EepromManager::loadKnownMasterMac(uint8_t* mac) {
 void EepromManager::saveKnownMasterMac(const uint8_t* mac) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC, mac, 6);
+  size_t n = _prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC, mac, 6);
+  _persistOrEscalate(NVS_KEYS::KNOWN_MASTER_MAC, n, 6, /*securityRelevant=*/true);
   logOperation("Known master MAC saved");
 }
 
@@ -302,7 +311,8 @@ bool EepromManager::loadKnownMasterMacSecondary(uint8_t* mac) {
 void EepromManager::saveKnownMasterMacSecondary(const uint8_t* mac) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC_SEC, mac, 6);
+  size_t n = _prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC_SEC, mac, 6);
+  _persistOrEscalate(NVS_KEYS::KNOWN_MASTER_MAC_SEC, n, 6, /*securityRelevant=*/true);
   logOperation("Known secondary master MAC saved");
 }
 
@@ -350,6 +360,23 @@ void EepromManager::clearAll() {
 
 void EepromManager::dumpEEPROM() {
   Logger::logln("NVS", "NVS dump not implemented (use idf.py nvs-dump)", LogLevel::LOG_INFO);
+}
+
+bool EepromManager::_persistOrEscalate(const char* key, size_t got, size_t want,
+                                       bool securityRelevant) {
+  if (got == want) {
+    return true;
+  }
+  if (securityRelevant) {
+    lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 5,
+                       "NVS write failed (security-relevant key)");
+    return false; // unreachable outside UNIT_TEST
+  }
+  Logger::logln("NVS",
+                String("write failed key=") + key + " got=" + String((unsigned)got) +
+                    " want=" + String((unsigned)want),
+                LogLevel::LOG_ERROR);
+  return false;
 }
 
 } // namespace utils

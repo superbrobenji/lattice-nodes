@@ -8,7 +8,8 @@ enum class ErrorTypeDigit : uint8_t {
   COMM = 3,
   MEMORY = 4,
   HARDWARE = 5,
-  CONFIG = 6
+  CONFIG = 6,
+  CRYPTO = 7, // AEAD/ECDH failures — Phase A adds AEAD_EPOCH_ROLLBACK sub=1
 };
 enum class ModuleDigit : uint8_t { CORE = 1, ADAPTER = 2, MESH = 3, EEPROM = 4, HW = 5 };
 constexpr uint16_t makeErrorCode(ErrorTypeDigit t, ModuleDigit m, uint8_t sub) {

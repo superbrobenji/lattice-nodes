@@ -9,6 +9,10 @@ public:
   // Static shared store across all instances
   static std::map<std::string, std::vector<uint8_t>> _store;
 
+  // Test hook: when non-null, the next put*(key,...) call whose key matches
+  // returns 0 (simulating a short/failed NVS write) instead of writing.
+  static const char* _shortWriteKey;
+
   Preferences() = default;
   ~Preferences() = default;
 

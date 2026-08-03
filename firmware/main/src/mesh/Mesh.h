@@ -25,6 +25,7 @@
 // friend declarations inside lattice::mesh::Mesh are valid.
 class ReplayCacheTest;
 class MeshLogicTest;
+class MeshEpochRollbackTest;
 #endif
 
 namespace lattice {
@@ -132,6 +133,21 @@ private:
   // wrap would reuse an AEAD nonce. On wrap, bumps + persists the boot epoch
   // before redrawing so the new sequence starts under a fresh epoch.
   uint16_t nextSeqGuarded();
+
+  // Seal-time AEAD nonce-reuse guard (Phase A, complements nextSeqGuarded's
+  // wrap handling above): tracks the (epoch, seq) of the last frame this node
+  // sealed. Called immediately before every sealPayload() call-site; halts
+  // the node via lattice::err::fail(CRYPTO, MESH, 1) if the new (epoch, seq)
+  // does not strictly advance, since that would reuse an AEAD nonce prefix
+  // under the same key. UINT32_MAX in _lastSealedEpoch is the sentinel for
+  // "no seal observed yet" (first call always passes).
+  uint32_t _lastSealedEpoch = UINT32_MAX;
+  uint16_t _lastSealedSeq = 0;
+  void _checkEpochRollback(uint32_t epoch, uint16_t seq);
+
+#ifdef UNIT_TEST
+  friend class MeshEpochRollbackTest;
+#endif
 
 #ifdef UNIT_TEST
   ReplayCache& testReplay() { return replay; }

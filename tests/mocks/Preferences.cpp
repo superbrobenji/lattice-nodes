@@ -3,6 +3,7 @@
 
 // Static storage definition
 std::map<std::string, std::vector<uint8_t>> Preferences::_store;
+const char* Preferences::_shortWriteKey = nullptr;
 
 bool Preferences::begin(const char* name, bool readOnly) {
   _namespace = name ? name : "";
@@ -81,12 +82,18 @@ size_t Preferences::getBytes(const char* key, void* buf, size_t maxLen) {
 }
 
 size_t Preferences::putUChar(const char* key, uint8_t value) {
+  if (_shortWriteKey && std::strcmp(key, _shortWriteKey) == 0) {
+    return 0; // simulate short write
+  }
   std::string nskey = _nsKey(key);
   _store[nskey] = std::vector<uint8_t>{value};
   return 1;
 }
 
 size_t Preferences::putUInt(const char* key, uint32_t value) {
+  if (_shortWriteKey && std::strcmp(key, _shortWriteKey) == 0) {
+    return 0; // simulate short write
+  }
   std::string nskey = _nsKey(key);
   std::vector<uint8_t> buf(4);
   memcpy(buf.data(), &value, 4);
@@ -95,12 +102,18 @@ size_t Preferences::putUInt(const char* key, uint32_t value) {
 }
 
 size_t Preferences::putBool(const char* key, bool value) {
+  if (_shortWriteKey && std::strcmp(key, _shortWriteKey) == 0) {
+    return 0; // simulate short write
+  }
   std::string nskey = _nsKey(key);
   _store[nskey] = std::vector<uint8_t>{static_cast<uint8_t>(value ? 1 : 0)};
   return 1;
 }
 
 size_t Preferences::putBytes(const char* key, const void* buf, size_t len) {
+  if (_shortWriteKey && std::strcmp(key, _shortWriteKey) == 0) {
+    return 0; // simulate short write
+  }
   std::string nskey = _nsKey(key);
   const uint8_t* bytes = static_cast<const uint8_t*>(buf);
   _store[nskey] = std::vector<uint8_t>(bytes, bytes + len);

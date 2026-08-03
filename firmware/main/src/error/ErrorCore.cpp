@@ -37,6 +37,11 @@ void ErrorCore::signalError(ErrorTypeDigit t, ModuleDigit m, uint8_t sub, const 
     lt = ErrorType::MEMORY_ERROR;
   else if (t == ErrorTypeDigit::CONFIG)
     lt = ErrorType::CONFIG_ERROR;
+  else if (t == ErrorTypeDigit::CRYPTO)
+    // AEAD/ECDH failures (e.g. Phase A epoch-rollback guard) are security-
+    // critical and must halt the node, same as a hardware fault — there is no
+    // safe way to continue running past a would-be AEAD nonce reuse.
+    lt = ErrorType::HARDWARE_FAILURE;
   signalError(lt, msg);
 }
 void ErrorCore::signalError(ErrorType type, const char* msg) {

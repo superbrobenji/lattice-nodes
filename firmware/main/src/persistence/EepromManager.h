@@ -43,10 +43,17 @@ private:
   bool isInitialized;
   bool isDevMode;
   Preferences _prefs;
+  uint32_t _devEpoch = 0; // DEV_MODE RAM-only monotonic boot-epoch seed (issue #43)
 
   EepromManager();
   bool ensureInitialized();
   void logOperation(const char* operation, const char* details = nullptr);
+
+  // Tiered NVS write-return handling (issue #43). `got`/`want` are the
+  // bytes actually written vs. requested by the preceding put* call.
+  // securityRelevant=true escalates a short write via lattice::err::fail
+  // (halts the node); false logs at ERROR and lets the caller continue.
+  bool _persistOrEscalate(const char* key, size_t got, size_t want, bool securityRelevant);
 
 public:
   static EepromManager& getInstance();

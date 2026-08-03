@@ -34,6 +34,29 @@ Mesh::Mesh()
   memset(&relayPendingMsg, 0, sizeof(relayPendingMsg));
 }
 
+// Seal-time AEAD nonce-reuse guard — see declaration comment in Mesh.h. Must
+// be called immediately before every sealPayload() call-site with the
+// (epoch, seq) about to be sealed; a rollback halts the node before the
+// encryption call ever runs.
+void Mesh::_checkEpochRollback(uint32_t epoch, uint16_t seq) {
+  if (_lastSealedEpoch == UINT32_MAX) {
+    _lastSealedEpoch = epoch;
+    _lastSealedSeq = seq;
+    return;
+  }
+  if (epoch > _lastSealedEpoch) {
+    _lastSealedEpoch = epoch;
+    _lastSealedSeq = seq;
+    return;
+  }
+  if (epoch == _lastSealedEpoch && seq > _lastSealedSeq) {
+    _lastSealedSeq = seq;
+    return;
+  }
+  lattice::err::fail(lattice::core::ErrorTypeDigit::CRYPTO, lattice::core::ModuleDigit::MESH, 1,
+                     "AEAD epoch rollback — refusing seal");
+}
+
 void Mesh::readMacAddress() {
   esp_err_t ret = esp_wifi_get_mac(WIFI_IF_STA, deviceMacAddress);
   if (ret != ESP_OK) {
@@ -451,6 +474,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
   // (msgOverride with foreign origin) are already sealed — forward untouched.
   if (!isMaster && selfOriginated && isSealedType(msg.message_type)) {
     const uint8_t *kUp, *kDown;
+    _checkEpochRollback(msg.epoch_num, msg.seq_num);
     if (!masterE2EKeys(&kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kUp, msg)) {
       Logger::logln("MESH", "E2E seal unavailable — uplink dropped", LogLevel::LOG_WARN);
       return;
@@ -589,6 +613,7 @@ void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const 
   memcpy(msg.target_mac_address, destMac, 6); // AAD-bound destination — set before sealing
 
   const uint8_t *kUp, *kDown;
+  _checkEpochRollback(msg.epoch_num, msg.seq_num);
   if (!peerE2EKeys(destMac, &kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kDown, msg)) {
     Logger::logln("MESH", "downlink seal unavailable — dropped", LogLevel::LOG_WARN);
     return;

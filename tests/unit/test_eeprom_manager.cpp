@@ -3,6 +3,7 @@
 #include "persistence/EepromManager.h"
 #include "mesh/Mesh.h" // for PeerInfo and PEER_RECORD_SIZE constants
 #include <Preferences.h>
+#include "error/Error.h"
 
 using lattice::mesh::PeerInfo;
 using lattice::utils::EepromManager;
@@ -483,4 +484,74 @@ TEST_F(EEPROMMgrTest, ForceFlush_IsNoOp) {
   mgr.saveNodeId(42);
   mgr.forceFlush(); // Should be a no-op
   EXPECT_EQ(mgr.loadNodeId(), 42u); // Data should already be persisted
+}
+
+// -----------------------------------------------------------------------
+// Boot epoch — DEV-mode RAM-only seed (issue #43)
+// -----------------------------------------------------------------------
+
+TEST_F(EEPROMMgrTest, SaveBootEpoch_DevMode_UsesRAMSeed) {
+  auto& mgr = EepromManager::getInstance();
+  mgr.setDevMode(true);
+  mgr.saveBootEpoch(5);
+  EXPECT_EQ(mgr.loadBootEpoch(), 5u);
+  mgr.saveBootEpoch(7);
+  EXPECT_EQ(mgr.loadBootEpoch(), 7u);
+}
+
+TEST_F(EEPROMMgrTest, SaveBootEpoch_DevMode_DoesNotTouchNVS) {
+  auto& mgr = EepromManager::getInstance();
+  Preferences::_store.clear();
+  mgr.setDevMode(true);
+  mgr.saveBootEpoch(42);
+  // NVS store must be empty — DEV never persists.
+  EXPECT_TRUE(Preferences::_store.empty());
+}
+
+TEST_F(EEPROMMgrTest, SaveBootEpoch_ProdMode_Persists) {
+  auto& mgr = EepromManager::getInstance();
+  mgr.setDevMode(false);
+  mgr.saveBootEpoch(9);
+  EXPECT_EQ(mgr.loadBootEpoch(), 9u);
+}
+
+// -----------------------------------------------------------------------
+// Tiered NVS write-return escalation (issue #43)
+// -----------------------------------------------------------------------
+
+TEST_F(EEPROMMgrTest, SaveBootEpoch_ProdMode_ShortWrite_Fatal) {
+  auto& mgr = EepromManager::getInstance();
+  mgr.setDevMode(false);
+  Preferences::_shortWriteKey =
+      lattice::utils::NVS_KEYS::BOOT_EPOCH; // mock: next putUInt for this key returns 0
+  EXPECT_THROW(mgr.saveBootEpoch(1), lattice::err::FatalError);
+  Preferences::_shortWriteKey = nullptr;
+}
+
+TEST_F(EEPROMMgrTest, SaveKnownMasterMac_ShortWrite_Fatal) {
+  auto& mgr = EepromManager::getInstance();
+  mgr.setDevMode(false);
+  uint8_t mac[6] = {1,2,3,4,5,6};
+  Preferences::_shortWriteKey = lattice::utils::NVS_KEYS::KNOWN_MASTER_MAC;
+  EXPECT_THROW(mgr.saveKnownMasterMac(mac), lattice::err::FatalError);
+  Preferences::_shortWriteKey = nullptr;
+}
+
+TEST_F(EEPROMMgrTest, SaveBootEpoch_ProdMode_FullWrite_NoFatal) {
+  auto& mgr = EepromManager::getInstance();
+  mgr.setDevMode(false);
+  int before = lattice_test_errFailCount;
+  mgr.saveBootEpoch(3);
+  EXPECT_EQ(lattice_test_errFailCount, before);
+  EXPECT_EQ(mgr.loadBootEpoch(), 3u);
+}
+
+TEST_F(EEPROMMgrTest, SaveRebootCount_ShortWrite_WarnsNoFatal) {
+  auto& mgr = EepromManager::getInstance();
+  mgr.setDevMode(false);
+  int before = lattice_test_errFailCount;
+  Preferences::_shortWriteKey = lattice::utils::NVS_KEYS::REBOOT_COUNT;
+  mgr.saveRebootCount(1);                 // Non-security setter: must NOT escalate
+  EXPECT_EQ(lattice_test_errFailCount, before);
+  Preferences::_shortWriteKey = nullptr;
 }
