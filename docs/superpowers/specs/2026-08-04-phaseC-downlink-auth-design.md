@@ -20,7 +20,7 @@ Add one new field to `MeshMessage`:
 
 ```go
 // message/message.go
-AuthPath [8]byte `c:"uint8_t[8]" proto:"17,bytes,opt,authPath"`
+AuthPath [8]byte `c:"uint8_t[8]" proto:"17,bytes,optional,authPath"`
 ```
 
 Truncated to 8 bytes (64-bit security). Chained MAC — single field, not per-hop array — so wire cost is fixed regardless of `MAX_HOPS`. `WireSize` becomes 242 + 8 = **250 bytes**, exactly at the ESP-NOW payload cap. Codegen's `static_assert(sizeof(mesh_message) == 250, ...)` enforces the fit.
