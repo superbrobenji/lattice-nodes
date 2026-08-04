@@ -12,6 +12,7 @@
 #include "MeshCrypto.h"
 #include "E2ECrypto.h"
 #include "RouteMac.h"
+#include "config/master_pubkey_pin_wrapper.h"
 
 namespace lattice {
 namespace mesh {
@@ -241,6 +242,14 @@ bool Mesh::init() {
   EepromManager::getInstance().saveBootEpoch(epoch);
   replay.init(epoch);
   Logger::logln("MESH", "Boot epoch: " + String(replay.bootEpoch), LogLevel::LOG_INFO);
+
+  // Phase D (#42): DEV_MODE bypasses the beacon origin-MAC pin (dev firmware
+  // regenerates a fresh keypair/MAC each boot, so pinning would reject the
+  // dev master). Make that state visible in operator logs.
+  if (lattice::config::DEV_MODE) {
+    Logger::logln("MESH", "DEV_MODE: master pubkey pin disabled — do not ship this build",
+                  LogLevel::LOG_WARN);
+  }
 
   // 3. Configure Wi-Fi
   if (!setupWiFi())
@@ -715,6 +724,22 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   // would TOFU-learn itself as knownMasterMac and record a bogus route to itself.
   if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
     return;
+
+  // Master MAC pin (Phase D, #42): the beacon's origin_mac_address must match
+  // the deployment-provisioned master MAC pinned at build time. Weaker
+  // guarantee than the JOIN_ACK pubkey pin — WiFi MACs are trivially
+  // spoofable, so this only rejects naive attackers, not a MAC-spoofing RF
+  // attacker. Runs BEFORE any TOFU state mutation. DEV_MODE (compile-time)
+  // bypasses this in dev firmware builds; the UNIT_TEST-only runtime bypass
+  // lets tests toggle it without recompiling.
+  if (!lattice::config::DEV_MODE && !lattice::mesh::pin::isTestBypassed()) {
+    if (memcmp(msg.origin_mac_address, lattice::mesh::pin::MASTER_MAC,
+               sizeof(lattice::mesh::pin::MASTER_MAC)) != 0) {
+      Logger::logln("MESH", "Beacon origin MAC mismatch pin — drop",
+                    LogLevel::LOG_ERROR);
+      return;
+    }
+  }
 
   // Guard: drop beacon if hop count would overflow uint8_t or exceed limit
   if (msg.hop_count >= lattice::config::MAX_HOPS) {

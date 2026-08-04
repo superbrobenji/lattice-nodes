@@ -19,6 +19,14 @@ protected:
     EEPROM.reset();
     resetMillis();
     resetEspNowMock();
+    // Phase D (#42): pin-active by default so tests exercise production
+    // behaviour; individual tests below opt into the runtime bypass where
+    // the scenario under test (stale-master hotswap, dual-master TOFU) uses
+    // a MAC that legitimately differs from lattice::mesh::pin::MASTER_MAC.
+    lattice::mesh::pin::setTestBypass(false);
+  }
+  void TearDown() override {
+    lattice::mesh::pin::setTestBypass(false);
   }
 
   mesh_message makeBeacon(const uint8_t masterMac[6], uint32_t epoch, uint16_t seq) {
@@ -78,6 +86,12 @@ TEST_F(MeshLogicTest, TOFU_BeaconFromImpostorMAC_Rejected_WhenMasterAlive) {
 }
 
 TEST_F(MeshLogicTest, TOFU_NewMasterAccepted_AfterStaleTimeout) {
+  // Phase D (#42): stale-hotswap-to-a-genuinely-different-MAC is pre-pin TOFU
+  // behaviour — production now pins the primary MAC, so a real deployment
+  // can't hotswap to different hardware without re-provisioning. This test
+  // exercises the underlying hotswap logic in isolation (still reachable in
+  // DEV_MODE / via the runtime bypass), hence the explicit bypass.
+  lattice::mesh::pin::setTestBypass(true);
   Mesh mesh;
   const uint8_t oldMaster[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t newMaster[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
@@ -129,6 +143,13 @@ TEST_F(MeshLogicTest, BeaconRelay_NewerSeq_AllowsRelay) {
 // --- Dual master mode ---
 
 TEST_F(MeshLogicTest, DualMaster_SecondBeaconFromNewMAC_LearnedAsSecondary) {
+  // Phase D (#42): only the primary MAC is pinned (design §5) — a secondary
+  // master's beacon fails the pin unconditionally in production, so
+  // beacon-TOFU-learn-secondary is now pre-pin-only behaviour (production
+  // dual-master trust for the secondary comes from the primary's
+  // pin-authenticated JOIN_ACK instead, per design). Bypass to keep
+  // exercising this still-present logic in isolation.
+  lattice::mesh::pin::setTestBypass(true);
   Mesh mesh;
   mesh.setDualMasterMode(true);
   const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
@@ -165,6 +186,12 @@ TEST_F(MeshLogicTest, DualMaster_BeaconFromPrimaryMAC_Accepted) {
 }
 
 TEST_F(MeshLogicTest, DualMaster_BeaconFromSecondaryMAC_Accepted) {
+  // Phase D (#42): the secondary's MAC differs from the pinned primary MAC,
+  // so every beacon it sends now fails the beacon pin unconditionally in
+  // production (design §5 — secondary trust comes from the pin-authenticated
+  // JOIN_ACK relay path, not beacon TOFU). Bypass to keep exercising the
+  // underlying known-secondary relay-acceptance logic in isolation.
+  lattice::mesh::pin::setTestBypass(true);
   Mesh mesh;
   mesh.setDualMasterMode(true);
   const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
@@ -182,6 +209,12 @@ TEST_F(MeshLogicTest, DualMaster_BeaconFromSecondaryMAC_Accepted) {
 }
 
 TEST_F(MeshLogicTest, DualMaster_ImpostorMAC_Rejected_WhenBothMastersKnown) {
+  // Phase D (#42): needs a beacon-TOFU-learned secondary as precondition
+  // (pre-pin behaviour, see DualMaster_SecondBeaconFromNewMAC_LearnedAsSecondary
+  // above) so the "impostor rejected while both masters known" app-layer
+  // logic — as opposed to plain pin rejection — is what's actually exercised
+  // for the impostor beacon itself.
+  lattice::mesh::pin::setTestBypass(true);
   Mesh mesh;
   mesh.setDualMasterMode(true);
   const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
@@ -217,6 +250,58 @@ TEST_F(MeshLogicTest, SingleMaster_SecondBeaconFromNewMAC_Rejected_WhenMasterAli
       << "Known master MAC must not change";
   EXPECT_FALSE(mesh.enrollment.hasMasterMacSecondary);
   EXPECT_EQ(espNowSentPackets.size(), sendsBefore);
+}
+
+// ─── MeshBeaconPinTest ───────────────────────────────────────────────────────
+// Phase D (#42): Mesh::processMasterBeacon now requires the beacon's
+// origin_mac_address to match the compile-time-pinned
+// lattice::mesh::pin::MASTER_MAC before any TOFU learn/accept logic runs.
+// Weaker guarantee than the JOIN_ACK pubkey pin (WiFi MACs are spoofable),
+// but rejects naive attackers before any state mutation.
+
+class MeshBeaconPinTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    resetMillis();
+    lattice::mesh::pin::setTestBypass(false);
+  }
+  void TearDown() override {
+    lattice::mesh::pin::setTestBypass(false);
+  }
+};
+
+TEST_F(MeshBeaconPinTest, ProcessMasterBeacon_ValidOriginMac_Learns) {
+  lattice::mesh::Mesh m;
+  mesh_message b{};
+  memcpy(b.origin_mac_address, lattice::mesh::pin::MASTER_MAC, 6);
+  memcpy(b.last_hop_mac_address, lattice::mesh::pin::MASTER_MAC, 6);
+  b.message_type = MESH_TYPE_MASTER_BEACON;
+  b.hop_count = 0;
+  m.processMasterBeacon(b);
+  EXPECT_TRUE(m.enrollment.hasMasterMac);
+}
+
+TEST_F(MeshBeaconPinTest, ProcessMasterBeacon_WrongOriginMac_Drops) {
+  lattice::mesh::Mesh m;
+  mesh_message b{};
+  memcpy(b.origin_mac_address, lattice::mesh::pin::MASTER_MAC, 6);
+  b.origin_mac_address[0] ^= 0xFF;
+  memcpy(b.last_hop_mac_address, b.origin_mac_address, 6);
+  b.message_type = MESH_TYPE_MASTER_BEACON;
+  m.processMasterBeacon(b);
+  EXPECT_FALSE(m.enrollment.hasMasterMac);
+}
+
+TEST_F(MeshBeaconPinTest, ProcessMasterBeacon_TestBypass_SkipsCheck) {
+  lattice::mesh::pin::setTestBypass(true);
+  lattice::mesh::Mesh m;
+  mesh_message b{};
+  memcpy(b.origin_mac_address, lattice::mesh::pin::MASTER_MAC, 6);
+  b.origin_mac_address[0] ^= 0xFF;
+  memcpy(b.last_hop_mac_address, b.origin_mac_address, 6);
+  b.message_type = MESH_TYPE_MASTER_BEACON;
+  m.processMasterBeacon(b);
+  EXPECT_TRUE(m.enrollment.hasMasterMac);
 }
 
 // ─── relayDownlink ───────────────────────────────────────────────────────────
@@ -1841,7 +1926,9 @@ protected:
 TEST_F(MeshDistanceDerivationTest, DirectBeacon_DistanceIs1) {
   // Build a beacon: hop_count=0, last_hop=master, origin=master
   mesh_message m{};
-  const uint8_t master[6] = {0xAA, 0, 0, 0, 0, 1};
+  // Origin MAC must equal the pinned master MAC (Phase D, #42) or the beacon
+  // pin check drops it before distance derivation ever runs.
+  const uint8_t* master = lattice::mesh::pin::MASTER_MAC;
   memcpy(m.origin_mac_address, master, 6);
   memcpy(m.last_hop_mac_address, master, 6);
   m.message_type = MESH_TYPE_MASTER_BEACON;
@@ -1854,7 +1941,9 @@ TEST_F(MeshDistanceDerivationTest, DirectBeacon_DistanceIs1) {
 }
 
 TEST_F(MeshDistanceDerivationTest, SinglePathAgeOut_DistanceRises) {
-  const uint8_t master[6] = {0xAA, 0, 0, 0, 0, 1};
+  // Origin MAC must equal the pinned master MAC (Phase D, #42) or the beacon
+  // pin check drops it before distance derivation ever runs.
+  const uint8_t* master = lattice::mesh::pin::MASTER_MAC;
   const uint8_t relay[6] = {0xAA, 0, 0, 0, 0, 2};
   memcpy(mesh.enrollment.knownMasterMac, master, 6);
   mesh.enrollment.hasMasterMac = true;
@@ -1884,7 +1973,9 @@ TEST_F(MeshDistanceDerivationTest, SinglePathAgeOut_DistanceRises) {
 }
 
 TEST_F(MeshDistanceDerivationTest, TwoPathsDifferentLength_NoOscillation) {
-  const uint8_t master[6] = {0xAA, 0, 0, 0, 0, 1};
+  // Origin MAC must equal the pinned master MAC (Phase D, #42) or the beacon
+  // pin check drops it before distance derivation ever runs.
+  const uint8_t* master = lattice::mesh::pin::MASTER_MAC;
   const uint8_t relay[6] = {0xAA, 0, 0, 0, 0, 2};
   memcpy(mesh.enrollment.knownMasterMac, master, 6);
   mesh.enrollment.hasMasterMac = true;
