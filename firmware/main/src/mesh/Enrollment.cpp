@@ -109,8 +109,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   if (!lattice::config::DEV_MODE && !lattice::mesh::pin::isTestBypassed()) {
     if (memcmp(msg.enrollment_public_key, lattice::mesh::pin::MASTER_PUBKEY,
                sizeof(lattice::mesh::pin::MASTER_PUBKEY)) != 0) {
-      Logger::logln("ENROLL", "JOIN_ACK master pubkey mismatch pin — drop",
-                    LogLevel::LOG_ERROR);
+      Logger::logln("ENROLL", "JOIN_ACK master pubkey mismatch pin — drop", LogLevel::LOG_ERROR);
       return;
     }
   }

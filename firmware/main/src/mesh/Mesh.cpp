@@ -735,8 +735,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   if (!lattice::config::DEV_MODE && !lattice::mesh::pin::isTestBypassed()) {
     if (memcmp(msg.origin_mac_address, lattice::mesh::pin::MASTER_MAC,
                sizeof(lattice::mesh::pin::MASTER_MAC)) != 0) {
-      Logger::logln("MESH", "Beacon origin MAC mismatch pin — drop",
-                    LogLevel::LOG_ERROR);
+      Logger::logln("MESH", "Beacon origin MAC mismatch pin — drop", LogLevel::LOG_ERROR);
       return;
     }
   }
