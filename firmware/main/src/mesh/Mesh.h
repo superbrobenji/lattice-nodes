@@ -266,8 +266,10 @@ public:
   // isMaster flag. Called from init() and on live role changes (issue #51 —
   // RouteTable is ~2.25 KB static RAM that leaves never use).
   void reevaluateRouteTable() {
-    if (isMaster && !routes) routes = std::make_unique<RouteTable>();
-    if (!isMaster && routes) routes.reset();
+    if (isMaster && !routes)
+      routes = std::make_unique<RouteTable>();
+    if (!isMaster && routes)
+      routes.reset();
   }
 
   // Static trampoline for Adapter usage. NOTE: keep this exact 2-arg

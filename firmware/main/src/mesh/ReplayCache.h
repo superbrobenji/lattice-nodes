@@ -9,11 +9,11 @@ namespace mesh {
 
 struct ReplayCache {
   struct Entry {
-    uint8_t  mac[6];
+    uint8_t mac[6];
     uint32_t epoch;
     uint16_t seq;
     uint32_t lastSeenMs;
-    bool     used;
+    bool used;
   };
 
   Entry cache[config::LATTICE_REPLAY_MAX_ORIGINS]{};
@@ -45,7 +45,8 @@ struct ReplayCache {
       if (cache[i].used && memcmp(cache[i].mac, msg.origin_mac_address, 6) == 0) {
         bool newer = (msg.epoch_num > cache[i].epoch) ||
                      (msg.epoch_num == cache[i].epoch && msg.seq_num > cache[i].seq);
-        if (!newer) return true;
+        if (!newer)
+          return true;
         cache[i].epoch = msg.epoch_num;
         cache[i].seq = msg.seq_num;
         cache[i].lastSeenMs = nowMs;
@@ -56,12 +57,17 @@ struct ReplayCache {
     size_t slot = 0;
     bool foundEmpty = false;
     for (size_t i = 0; i < config::LATTICE_REPLAY_MAX_ORIGINS; ++i) {
-      if (!cache[i].used) { slot = i; foundEmpty = true; break; }
+      if (!cache[i].used) {
+        slot = i;
+        foundEmpty = true;
+        break;
+      }
     }
     if (!foundEmpty) {
       slot = 0;
       for (size_t i = 1; i < config::LATTICE_REPLAY_MAX_ORIGINS; ++i) {
-        if (cache[i].lastSeenMs < cache[slot].lastSeenMs) slot = i;
+        if (cache[i].lastSeenMs < cache[slot].lastSeenMs)
+          slot = i;
       }
     }
     memcpy(cache[slot].mac, msg.origin_mac_address, 6);
