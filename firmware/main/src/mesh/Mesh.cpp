@@ -688,8 +688,7 @@ void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const 
     // Defensive clamp (issue #47 item 4) before indexing path[]/msg.route_path
     // with pathLen below — see downlinkRouteLenExceedsMaxHops() above.
     if (downlinkRouteLenExceedsMaxHops(pathLen)) {
-      Logger::logln("MESH", "downlink route_len exceeds MAX_HOPS — dropping",
-                    LogLevel::LOG_ERROR);
+      Logger::logln("MESH", "downlink route_len exceeds MAX_HOPS — dropping", LogLevel::LOG_ERROR);
       return;
     }
     // RouteTable stores the path in origin->master order (as accumulated by
