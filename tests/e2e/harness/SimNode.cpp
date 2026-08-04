@@ -58,6 +58,12 @@ void SimNode::boot() {
       // First boot: seed role + adapter type (a provisioned device's EEPROM)
       em.saveMasterFlag(cfg_.isMaster);
       lattice::adapter::AdapterFactory::saveAdapterTypeToEEPROM(cfg_.adapterType);
+      // Phase D (#42): seed a fixed keypair BEFORE mesh_->init() (below) calls
+      // Enrollment::init(), so its loadKeypair() succeeds and skips generating a
+      // fresh random one — see NodeConfig::seedPrivateKey32/seedPublicKey32.
+      if (cfg_.seedPrivateKey32 && cfg_.seedPublicKey32) {
+        em.saveKeypair(cfg_.seedPrivateKey32, cfg_.seedPublicKey32);
+      }
       em.forceFlush();
     }
 
@@ -70,16 +76,28 @@ void SimNode::boot() {
     if (!mesh_->init())
       throw lattice::err::FatalError("SimNode: mesh init failed");
 
-    // PeerRegistry::loadFromEEPROM() falls back to lattice::config::DEFAULT_PEERS
-    // (two placeholder MACs meant to be replaced before real flashing) whenever a
-    // freshly-provisioned node's persisted peer list is empty -- which every SimNode
-    // is on first boot. Those placeholder MACs don't correspond to any node in a
-    // simulated world, so the moment a broadcast actually targets them,
-    // VirtualBus::deliver() throws ("frame to unknown MAC"). Strip them here, once,
-    // for every node, so tests observe real firmware/mesh behavior instead of
-    // crashing on this harness/config artifact.
-    for (int i = 0; i < lattice::config::NUM_DEFAULT_PEERS; ++i)
-      mesh_->peers.removeAndPersist(lattice::config::DEFAULT_PEERS[i]);
+    if (!booted_) {
+      // PeerRegistry::loadFromEEPROM() falls back to lattice::config::DEFAULT_PEERS
+      // (two placeholder MACs meant to be replaced before real flashing) whenever a
+      // freshly-provisioned node's persisted peer list is empty -- which every SimNode
+      // is on first boot. Those placeholder MACs don't correspond to any node in a
+      // simulated world, so the moment a broadcast actually targets them,
+      // VirtualBus::deliver() throws ("frame to unknown MAC"). Strip them here, once,
+      // for every node, so tests observe real firmware/mesh behavior instead of
+      // crashing on this harness/config artifact.
+      //
+      // Phase D (#42) fix: this MUST run only on first boot (matching the comment's
+      // stated intent -- it didn't, previously: it ran unconditionally on every
+      // boot() call, including reboots). lattice::config::DEFAULT_PEERS[0] is
+      // {0xAA,0xBB,0xCC,0xDD,0xEE,0x01}, which is also lattice::mesh::pin::MASTER_MAC
+      // (tests/mocks/master_pubkey_pin.h) -- now that the pinned e2e master's real
+      // MAC equals that same value (see MeshSimTest::MAC_MASTER), re-running this
+      // strip on every reboot would remove a node's legitimately-enrolled master
+      // peer entry on its next reboot, mistaking it for the unprovisioned
+      // placeholder and corrupting PeerRegistry state.
+      for (int i = 0; i < lattice::config::NUM_DEFAULT_PEERS; ++i)
+        mesh_->peers.removeAndPersist(lattice::config::DEFAULT_PEERS[i]);
+    }
 
     mesh_->setEnrollmentRelayFn(lattice::adapter::SerialAdapter::relayEnrollmentToServer);
     mesh_->setIsMaster(EepromManager::getInstance().loadMasterFlag());
