@@ -107,3 +107,48 @@ TEST(NeighborTable, ClearEmptiesTable) {
   uint8_t out[6];
   EXPECT_FALSE(t.selectNextHop(2, 1000, out));
 }
+
+// --- minFreshDistance (issue #45) ---
+
+class NeighborTableTest : public ::testing::Test {};
+
+TEST_F(NeighborTableTest, MinFreshDistance_Empty_Returns0xFF) {
+  NeighborTable nt;
+  EXPECT_EQ(nt.minFreshDistance(1000), 0xFF);
+}
+
+TEST_F(NeighborTableTest, MinFreshDistance_SingleFresh_ReturnsIt) {
+  NeighborTable nt;
+  uint8_t mac[6] = {1,2,3,4,5,6};
+  nt.observe(mac, 3, 1000);
+  EXPECT_EQ(nt.minFreshDistance(1000), 3);
+}
+
+TEST_F(NeighborTableTest, MinFreshDistance_MultipleFresh_ReturnsMin) {
+  NeighborTable nt;
+  uint8_t m1[6] = {1,0,0,0,0,1};
+  uint8_t m2[6] = {1,0,0,0,0,2};
+  uint8_t m3[6] = {1,0,0,0,0,3};
+  nt.observe(m1, 5, 1000);
+  nt.observe(m2, 2, 1000);
+  nt.observe(m3, 4, 1000);
+  EXPECT_EQ(nt.minFreshDistance(1000), 2);
+}
+
+TEST_F(NeighborTableTest, MinFreshDistance_AllStale_Returns0xFF) {
+  NeighborTable nt;
+  uint8_t mac[6] = {1,2,3,4,5,6};
+  nt.observe(mac, 3, 1000);
+  uint32_t future = 1000 + lattice::config::STALE_PEER_THRESHOLD_MS + 1;
+  EXPECT_EQ(nt.minFreshDistance(future), 0xFF);
+}
+
+TEST_F(NeighborTableTest, MinFreshDistance_MixedFreshStale_IgnoresStale) {
+  NeighborTable nt;
+  uint8_t stale[6] = {1,0,0,0,0,1};
+  uint8_t fresh[6] = {1,0,0,0,0,2};
+  nt.observe(stale, 1, 1000);
+  nt.observe(fresh, 4, 1000 + lattice::config::STALE_PEER_THRESHOLD_MS + 1);
+  uint32_t now = 1000 + lattice::config::STALE_PEER_THRESHOLD_MS + 2;
+  EXPECT_EQ(nt.minFreshDistance(now), 4);   // stale's 1 ignored
+}

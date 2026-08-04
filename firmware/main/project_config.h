@@ -118,6 +118,10 @@ inline constexpr size_t LATTICE_E2E_KEYCACHE_MAX = 10; // = MAX_PEERS
 // Multi-hop uplink routing (spec §3): max beacon-learned forwarding neighbors
 // tracked per node. One entry per distinct upstream relay a node can hear.
 inline constexpr size_t LATTICE_NEIGHBOR_MAX = 8;
+// Per-origin ReplayCache slot count (issue #46). Bounds memory to
+// LATTICE_REPLAY_MAX_ORIGINS × sizeof(ReplayCache::Entry). Size to
+// (expected concurrent origins × 1.5). Default matches the old ring size.
+constexpr size_t LATTICE_REPLAY_MAX_ORIGINS = 16;
 // Downlink source routing (spec §4): max node->path entries the master tracks.
 // Master is hub-side with RAM headroom; raise for large deployments.
 inline constexpr size_t LATTICE_ROUTE_TABLE_MAX = 32;

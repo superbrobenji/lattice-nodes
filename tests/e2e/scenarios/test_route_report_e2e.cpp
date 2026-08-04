@@ -74,7 +74,8 @@ TEST_F(MeshSimTest, RouteReportCarriesHopChain) {
   uint8_t path[lattice::config::MAX_HOPS * 6] = {};
   uint8_t pathLen = 0;
   master->with([&](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {
-    found = m.testRoutes().lookup(leaf->mac(), path, &pathLen);
+    lattice::mesh::RouteTable* routes = m.testRoutes();
+    found = routes && routes->lookup(leaf->mac(), path, &pathLen);
     return 0;
   });
   ASSERT_TRUE(found) << "master must record a route to the leaf from its route reports";
