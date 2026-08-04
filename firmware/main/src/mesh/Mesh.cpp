@@ -156,6 +156,21 @@ void Mesh::registerDownlinkPeer(const uint8_t* mac) {
       currentMaster.distance != 0xFF &&
       lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(currentMaster.mac);
   if (peers.find(mac) || isCurrentMaster) {
+    // Defense-in-depth (issue #47 item 5): if this MAC was already parked in
+    // the downlink forwarding-peer LRU from earlier churn (before it became
+    // enrolled or the current master), evict it here — its peering is now
+    // owned by PeerRegistry/enrollment, not this LRU. This branch is taken on
+    // every call once a MAC is enrolled/master (it short-circuits ahead of
+    // the LRU-touch loop below), so without this eviction a stale entry
+    // would sit in downlinkPeerLru indefinitely instead of freeing its slot.
+    for (size_t i = 0; i < downlinkPeerLruCount; ++i) {
+      if (lattice::utils::MacAddress(downlinkPeerLru[i]) == lattice::utils::MacAddress(mac)) {
+        for (size_t j = i; j + 1 < downlinkPeerLruCount; ++j)
+          memcpy(downlinkPeerLru[j], downlinkPeerLru[j + 1], 6);
+        downlinkPeerLruCount--;
+        break;
+      }
+    }
     lattice::mesh::crypto::registerPeerWithEspNow(mac);
     return;
   }
@@ -638,6 +653,22 @@ void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data, bool de
   }
 }
 
+// Defense-in-depth (issue #47 item 4): true when a route path length would
+// overflow route_path[]/MAX_HOPS bounds. RouteTable::record() already clamps
+// pathLen at write time (parse-safety: `if (pathLen > config::MAX_HOPS) return;`
+// in RouteTable.h), so this branch is not reachable via any current
+// legitimate call path into sendDownlinkToNode() — routes->lookup() can only
+// ever hand back a pathLen that record() previously accepted. The check below
+// stays local to sendDownlinkToNode rather than relying solely on
+// RouteTable's own guard, so the bound survives a future refactor of either
+// side. Pure/stack-only (no allocation) — a free function (external linkage,
+// not a Mesh member) so it stays directly unit-testable without needing to
+// drive an integration path around RouteTable's guard, which is otherwise
+// unreachable from outside RouteTable.h.
+bool downlinkRouteLenExceedsMaxHops(uint8_t pathLen) {
+  return pathLen > lattice::config::MAX_HOPS;
+}
+
 void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const uint8_t* data) {
   if (!isMaster)
     return;
@@ -654,6 +685,13 @@ void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const 
   uint8_t path[lattice::config::MAX_HOPS * 6];
   uint8_t pathLen = 0;
   if (routes && routes->lookup(destMac, path, &pathLen) && pathLen > 0) {
+    // Defensive clamp (issue #47 item 4) before indexing path[]/msg.route_path
+    // with pathLen below — see downlinkRouteLenExceedsMaxHops() above.
+    if (downlinkRouteLenExceedsMaxHops(pathLen)) {
+      Logger::logln("MESH", "downlink route_len exceeds MAX_HOPS — dropping",
+                    LogLevel::LOG_ERROR);
+      return;
+    }
     // RouteTable stores the path in origin->master order (as accumulated by
     // relays on the uplink route report); reverse it into master->origin order
     // for the downlink source route.
