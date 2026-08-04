@@ -2,16 +2,17 @@
 
 **Status:** Approved
 **Date:** 2026-08-04
-**Repo:** lattice-nodes (only).
-**Scope:** flash-size trims + RAM-residency shrinks. Measurement-gated on the ESP-IDF `firmware-build.yml` size job (Phase 0). No wire-format changes (compact form is nodes-side RAM only). No cross-repo work.
+**Repos:** lattice-protocol + lattice-nodes + lattice-hub (cross-repo, flag-day protocol v6).
+**Scope:** flash-size trims + RAM-residency shrinks + wire-level shrink 250→200B via protocol v6.
 **Parent:** `docs/superpowers/specs/2026-07-22-close-all-open-issues-design.md` (Phase G).
 **Depends on:** Phase 0 (ESP-IDF build + size job), Phase A (NVS rewrite), Phase B (RouteTable pointer + per-origin ReplayCache) — all done.
 
 ## Context
 
-Two enhancement issues, bundled per umbrella Phase G:
+Two enhancement issues + wire shrink, bundled per umbrella Phase G:
 - **#52 flash:** `docs/memory_usage.md` P1 levers under the current ESP-IDF toolchain — logging `.rodata`, `-Os`/LTO/gc-sections, single AEAD.
 - **#53 RAM:** `docs/memory_usage.md` P3 remainder — compact in-RAM residency for `mesh_message` and right-size `recvQueue`/`ROUTE_TABLE_MAX`/`REPLAY_MAX_ORIGINS` bounds.
+- **Wire shrink (added per session decision):** protocol v6 flag-day — move secondary-master fields into JOIN_ACK `data[64]` payload (−38B) + reduce `MAX_HOPS` 10 → 8 (`routePath[60→48]`, −12B). Wire drops from 250 → 200B, restoring ESP-NOW headroom.
 
 Success measured via CI's `firmware-build.yml` `idf.py size` job — deltas reported in the PR body, no local ESP32 required.
 
@@ -109,7 +110,7 @@ Per-origin high-water (Phase B). 12 × sizeof(Entry) ≈ 12 × 21B = ~250 B (vs 
 
 **Where:** `firmware/main/src/mesh/CompactMessage.h` (new), `Mesh.h::recvQueue`, `Mesh::messageProcessor` decode/encode boundary.
 
-**Constraint:** wire form (`mesh_message`, protocol v0.5.0, 250B) stays exactly as-is. Compact form is a NODES-side RAM optimisation only. Every field in the wire struct is used somewhere; a wire shrink would need protocol v6 (flag-day) for uncertain win and require sub-ESP-NOW-cap coordination across all consumers. Scope-defer that.
+**Constraint:** wire form (post-Phase G, protocol v0.6.0, 200B) is the source of truth. Compact form drops the wire fields that vary by message-type (`enrollment_public_key`, `routePath`, `authTag`, `authPath`, JOIN_ACK-only secondary fields inside `data[64]`) from RAM residency in the recvQueue.
 
 **Compact form:**
 
@@ -158,7 +159,51 @@ void toWire(const CompactMessage& src, mesh_message& dst);
 
 **Est. saving:** ~600B queue + reduced stack pressure. Worth the refactor if measurements confirm.
 
-### 8. CI size measurement
+### 8. Wire shrink — protocol v6 flag-day (cross-repo)
+
+**Wire target:** 250B → 200B (−50B / 20%). ESP-NOW headroom restored from 0B to 50B.
+
+**Two changes to `MeshMessage`:**
+
+**(a) Move secondary-master fields into JOIN_ACK `data[64]`.** Drop top-level `SecondaryMasterMac[6]` and `SecondaryPublicKey[32]` (proto fields 15+16). In JOIN_ACK frames only, hub packs them into `data[]` at fixed offsets:
+
+```
+data[0..4]   = node pubkey fingerprint (existing)
+data[4..10]  = secondaryMasterMac (new, JOIN_ACK dual-master only, zero if single-master)
+data[10..42] = secondaryPublicKey (new, JOIN_ACK dual-master only, zero if single-master)
+data[42..64] = zero
+```
+
+Firmware Phase 4+5 `Enrollment::processJoinAck` reads secondary from `data[4..42]` iff `msg.message_type == JOIN_ACK && secondaryMasterMac != all-zero`. Hub `ApproveEnrollment` packs same layout. AEAD `authTag` still covers `data[64]` exactly — secondary bytes are AEAD-protected.
+
+Savings: −38B/frame on every non-JOIN_ACK frame. JOIN_ACK uses previously-wasted `data[]` bytes for what was previously top-level fields.
+
+**(b) Reduce `MAX_HOPS` 10 → 8** in `lattice::config::MAX_HOPS` and shrink `RoutePath[60→48]`. Nanopb `max_size` for `routePath` becomes 48. Deployment-topology cap tightens from 10 to 8 hops; observed deployments never exceeded 4 hops so this is safe with margin.
+
+Savings: −12B/frame.
+
+**Protocol v0.6.0 changes:**
+- `message/message.go`: drop `SecondaryMasterMac`, `SecondaryPublicKey`; shrink `RoutePath [60]byte` → `[48]byte`.
+- Regen `c/mesh_message.h` (WireSize 200B, static_assert updated).
+- Regen `proto/mesh.proto`.
+- Tag `v0.6.0`; README versioning table.
+
+**Nodes changes:**
+- Submodule pin bump v0.5.0 → v0.6.0.
+- `Enrollment.cpp::processJoinAck` reads secondary from `data[4..42]` (post-pin verify, pre-registration).
+- `Mesh.cpp` verify `route_len ≤ MAX_HOPS` (now 8, not 10). Existing Phase E clamp already handles.
+- `PROTO_VERSION` 4 → 5.
+
+**Hub changes:**
+- `go.mod` protocol v0.5.0 → v0.6.0; regen `mesh.pb.go`.
+- `ApproveEnrollment` packs secondary bytes into `data[4..42]` when secondary configured (currently sets top-level fields).
+- `ProtoVersion` gate 4 → 5 (atomic flag-day, same as Phase C).
+
+**Release-flow order** (per umbrella rule):
+1. Protocol PR merges + `v0.6.0` tag.
+2. Nodes + hub PRs open in parallel; must merge together (flag-day).
+
+### 9. CI size measurement
 
 Use existing `firmware-build.yml` `idf.py size` job. Post the size delta in the PR body:
 
@@ -176,13 +221,12 @@ Numbers illustrative; PR body carries actuals.
 
 ## Non-goals
 
-- No wire-format changes. `mesh_message` stays exactly 250 B.
-- No protocol repo touches.
-- No hub touches.
 - No new features.
 - Not deep-tuning mbedtls beyond disabling AES/GCM/CCM.
 - Not refactoring `Logger` runtime dispatch — only add compile-time macros.
-- Not touching MAX_HOPS (Phase B held it at 10; changing it would rebalance route_path wire cost).
+- Not truncating `authTag` (security downgrade; ChaCha20-Poly1305 128-bit stays).
+- Not dropping `enrollment_public_key` — Phase D pin check needs it on the wire.
+- Not doing nanopb variable-length wire encoding (too broad; deferred).
 
 ## Testing
 
@@ -198,14 +242,29 @@ Numbers illustrative; PR body carries actuals.
 
 ## Files touched (estimate)
 
-- `firmware/main/project_config.h` — 3 bound tunings + `LATTICE_DEFAULT_LOG_LEVEL` compile-time constant (~10 LOC).
-- `firmware/sdkconfig.defaults` — `-Os`/LTO/mbedtls trim knobs (~10 LOC).
+**lattice-protocol (v0.6.0 tag):**
+- `message/message.go` — drop 2 fields, shrink `RoutePath` array (~5 LOC).
+- Regen `c/mesh_message.h`, `proto/mesh.proto`, `proto/mesh.options` (nanopb `max_size`).
+- README versioning table.
+
+**lattice-nodes:**
+- `firmware/main/lib/lattice-protocol` submodule pin bump.
+- `firmware/main/project_config.h` — `RECV_QUEUE_SIZE`, `LATTICE_ROUTE_TABLE_MAX`, `LATTICE_REPLAY_MAX_ORIGINS`, `MAX_HOPS`, `LATTICE_DEFAULT_LOG_LEVEL` (~15 LOC).
+- `firmware/sdkconfig.defaults` — `-Os`/LTO/mbedtls trim (~10 LOC).
 - `firmware/main/src/logging/Logger.h` — new macros (~20 LOC).
 - All log-call sites — mechanical `Logger::log*` → `LATTICE_LOG*` (grep + rewrite; ~100 sites).
-- `firmware/main/src/mesh/CompactMessage.{h,cpp}` — new (~120 LOC).
-- `firmware/main/src/mesh/Mesh.h` — `recvQueue` type change.
+- `firmware/main/src/mesh/Enrollment.cpp` — read secondary from `data[4..42]` in JOIN_ACK path.
+- `firmware/main/src/mesh/Mesh.h` — `recvQueue` type change; `PROTO_VERSION` 4 → 5.
 - `firmware/main/src/mesh/Mesh.cpp` — decode/encode boundary edits.
+- `firmware/main/src/mesh/CompactMessage.{h,cpp}` — new (~120 LOC).
 - `tests/unit/test_compact_message.cpp` — new (~80 LOC).
-- Existing tests may need `CompactMessage`-aware fixture updates.
+- `tests/unit/test_enrollment.cpp` (or `test_mesh_logic.cpp`) — dual-master JOIN_ACK read from `data[]` cases.
 
-Rough size: ~300 LOC production + tooling; ~80 LOC test.
+**lattice-hub:**
+- `server/orchestrator/go.mod` — protocol v0.6.0.
+- `server/orchestrator/mesh/mesh.pb.go` — regen.
+- `server/orchestrator/mesh/server.go::ApproveEnrollment` — pack secondary into `data[4..42]` when configured; drop top-level secondary field writes.
+- `server/orchestrator/mesh/server.go` — `ProtoVersion` gate 4 → 5 atomically.
+- Test fixtures updated for the layout change.
+
+Rough size: nodes ~400 LOC production + 200 LOC test; hub ~50 LOC; protocol ~5 LOC + regen.
