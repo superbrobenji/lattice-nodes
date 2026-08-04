@@ -111,10 +111,11 @@ inline void buildNonce(const mesh_message& msg, uint8_t nonce[E2E_NONCE_LEN]) {
 inline void buildAad(const mesh_message& msg, uint8_t aad[E2E_AAD_LEN]) {
   aad[0] = msg.proto_version;
   aad[1] = msg.message_type;
-  aad[2] = static_cast<uint8_t>(msg.data_type);
-  aad[3] = static_cast<uint8_t>(msg.data_type >> 8);
-  aad[4] = static_cast<uint8_t>(msg.data_type >> 16);
-  aad[5] = static_cast<uint8_t>(msg.data_type >> 24);
+  uint32_t dt = static_cast<uint32_t>(msg.data_type);
+  aad[2] = static_cast<uint8_t>(dt);
+  aad[3] = static_cast<uint8_t>(dt >> 8);
+  aad[4] = static_cast<uint8_t>(dt >> 16);
+  aad[5] = static_cast<uint8_t>(dt >> 24);
   memcpy(aad + 6, msg.origin_mac_address, 6);
   memcpy(aad + 12, msg.target_mac_address, 6);
   aad[18] = static_cast<uint8_t>(msg.epoch_num);
