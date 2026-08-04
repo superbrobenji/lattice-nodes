@@ -261,6 +261,10 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterRecordsRouteFromReport) {
   const uint8_t r2[6]        = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0x02};
   Mesh mesh;
   mesh.isMaster = true;
+  // isMaster is set directly above (not via setIsMaster()+init()), so the
+  // RouteTable allocation Mesh::init() would normally trigger never runs —
+  // do it explicitly (issue #51).
+  mesh.reevaluateRouteTable();
 
   // Task 6 (E2E AEAD): master opens the sealed payload before delivering to
   // the callback — register the origin as a keyed peer and seal accordingly.
@@ -292,7 +296,8 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterRecordsRouteFromReport) {
 
   uint8_t out[60];
   uint8_t len = 0;
-  ASSERT_TRUE(mesh.testRoutes().lookup(originMac, out, &len));
+  ASSERT_NE(mesh.testRoutes(), nullptr);
+  ASSERT_TRUE(mesh.testRoutes()->lookup(originMac, out, &len));
   EXPECT_EQ(len, 2);
   EXPECT_EQ(memcmp(&out[0], r1, 6), 0);
   EXPECT_EQ(memcmp(&out[6], r2, 6), 0);

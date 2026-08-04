@@ -8,6 +8,7 @@
 #include <esp_wifi.h>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include "src/adapter/Adapter.h"
 #include "src/persistence/EepromManager.h"
 #include "../../project_config.h" // Added for global limits/config
@@ -152,7 +153,7 @@ private:
 #ifdef UNIT_TEST
   ReplayCache& testReplay() { return replay; }
   NeighborTable& testNeighbors() { return neighbors; }
-  RouteTable& testRoutes() { return routes; }
+  RouteTable* testRoutes() { return routes.get(); }
   uint32_t testMillisNow() { return millis(); } // exposes the node's mocked clock to tests
   const uint8_t* testDeviceMac() const { return deviceMacAddress; }
 #endif
@@ -193,8 +194,15 @@ private:
   // beacons (spec §3). Routing only — never consulted for E2E crypto.
   NeighborTable neighbors;
   // Master-side node -> relay path store, populated from route reports
-  // (spec §4), consulted for downlink source routing.
-  RouteTable routes;
+  // (spec §4), consulted for downlink source routing. Allocated only when
+  // this node is a master (issue #51) — see reevaluateRouteTable(). A
+  // unique_ptr (not a raw pointer + hand-written Mesh destructor) so Mesh
+  // keeps its compiler-generated move constructor — a user-declared
+  // destructor would suppress it, and Mesh's copy constructor is already
+  // implicitly deleted (RouteTable/NeighborTable/E2EKeyStore each delete
+  // theirs), so move is the only thing letting Mesh be returned by value
+  // from the test factory helpers (see those types' header comments).
+  std::unique_ptr<RouteTable> routes;
   // Holds a NeighborTable-resolved next hop (not an enrolled peer) so
   // findNextHopToMaster() can return a stable PeerInfo* for a pure relay,
   // which is never added to `peers` (enrollment-only rule).
@@ -246,7 +254,21 @@ private:
 
 public:
   Mesh();
+  // No user-declared destructor here (deliberately — see `routes` member
+  // comment below): one would suppress Mesh's implicit move constructor,
+  // which is the only thing that lets Mesh be returned by value from the
+  // test factory helpers (RouteTable/NeighborTable/E2EKeyStore already
+  // delete their own copy ctor for the same reason, so Mesh's copy ctor is
+  // already implicitly deleted and it depends entirely on move).
   bool init();
+
+  // Re-evaluate whether this node needs a RouteTable, honouring the current
+  // isMaster flag. Called from init() and on live role changes (issue #51 —
+  // RouteTable is ~2.25 KB static RAM that leaves never use).
+  void reevaluateRouteTable() {
+    if (isMaster && !routes) routes = std::make_unique<RouteTable>();
+    if (!isMaster && routes) routes.reset();
+  }
 
   // Static trampoline for Adapter usage. NOTE: keep this exact 2-arg
   // signature — it's assigned by address to Adapter::TransmitPtr
@@ -276,7 +298,16 @@ public:
   void loop();
 
   // Node role config
-  void setIsMaster(bool value) { isMaster = value; }
+  // Re-evaluates the RouteTable allocation (issue #51) on every role change,
+  // not just from init(): both main.cpp and the e2e SimNode harness call
+  // setIsMaster() AFTER init() (to apply the persisted/dev-mode master flag
+  // once EEPROM/adapter setup has run), so relying on init() alone would
+  // leave a real master's routes permanently nullptr. reevaluateRouteTable()
+  // is a cheap no-op when the role hasn't actually changed.
+  void setIsMaster(bool value) {
+    isMaster = value;
+    reevaluateRouteTable();
+  }
   bool getIsMaster() const { return isMaster; }
   void setDualMasterMode(bool value) { _dualMasterMode = value; }
   bool getDualMasterMode() const { return _dualMasterMode; }

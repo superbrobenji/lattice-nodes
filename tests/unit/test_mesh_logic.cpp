@@ -590,6 +590,10 @@ protected:
     memcpy(leaf.publicKey, leafPub, 32);
     leaf.lastSeenMillis = 0;
     mesh.peers.append(leaf);
+    // isMaster is set directly above (not via setIsMaster()+init()), so the
+    // RouteTable allocation Mesh::init() would normally trigger never runs —
+    // do it explicitly (issue #51).
+    mesh.reevaluateRouteTable();
     return mesh;
   }
 
@@ -878,7 +882,8 @@ TEST_F(JoinAckRelayTest, DownlinkSourceRoutesViaFirstHop) {
   uint8_t path[12];
   memcpy(path, R1, 6);
   memcpy(path + 6, R2, 6); // origin->R1->R2->master
-  master.testRoutes().record(leaf, path, 2, 1000);
+  ASSERT_NE(master.testRoutes(), nullptr) << "master fixture must allocate RouteTable";
+  master.testRoutes()->record(leaf, path, 2, 1000);
 
   resetEspNowMock();
   uint8_t cmd[64] = {};
@@ -1812,4 +1817,35 @@ TEST_F(MeshDistanceDerivationTest, TwoPathsDifferentLength_NoOscillation) {
   advanceMillis(10);
   mesh.processMasterBeacon(relayed);
   EXPECT_EQ(mesh.currentMaster.distance, 1) << "must not oscillate";
+}
+
+// Task 3 (issue #51): RouteTable is heap-allocated only when this node is a
+// master, freed on demotion — leaves must never pay its ~2.25 KB static RAM.
+class MeshRouteTableAllocationTest : public ::testing::Test {
+protected:
+  void SetUp() override { resetMillis(); }
+};
+
+TEST_F(MeshRouteTableAllocationTest, LeafRole_RoutesIsNullptr) {
+  lattice::mesh::Mesh mesh;
+  mesh.setIsMaster(false);
+  mesh.init();
+  EXPECT_EQ(mesh.testRoutes(), nullptr);
+}
+
+TEST_F(MeshRouteTableAllocationTest, MasterPromotion_AllocatesRoutes) {
+  lattice::mesh::Mesh mesh;
+  mesh.setIsMaster(true);
+  mesh.init();
+  EXPECT_NE(mesh.testRoutes(), nullptr);
+}
+
+TEST_F(MeshRouteTableAllocationTest, MasterDemotion_FreesRoutes) {
+  lattice::mesh::Mesh mesh;
+  mesh.setIsMaster(true);
+  mesh.init();
+  ASSERT_NE(mesh.testRoutes(), nullptr);
+  mesh.setIsMaster(false);
+  mesh.reevaluateRouteTable(); // new helper: honours current isMaster state
+  EXPECT_EQ(mesh.testRoutes(), nullptr);
 }

@@ -231,6 +231,10 @@ bool Mesh::init() {
   // 1. Load persisted peers/keys
   loadPersistentState();
 
+  // Allocate (or free) the RouteTable per the current role (issue #51) —
+  // masters need it for downlink source routing, leaves never do.
+  reevaluateRouteTable();
+
   // 2. Increment and save boot epoch (replay protection)
   uint32_t epoch = EepromManager::getInstance().loadBootEpoch() + 1;
   EepromManager::getInstance().saveBootEpoch(epoch);
@@ -621,7 +625,7 @@ void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const 
 
   uint8_t path[lattice::config::MAX_HOPS * 6];
   uint8_t pathLen = 0;
-  if (routes.lookup(destMac, path, &pathLen) && pathLen > 0) {
+  if (routes && routes->lookup(destMac, path, &pathLen) && pathLen > 0) {
     // RouteTable stores the path in origin->master order (as accumulated by
     // relays on the uplink route report); reverse it into master->origin order
     // for the downlink source route.
@@ -1128,7 +1132,9 @@ void Mesh::processRouteReport(const mesh_message& msg) {
     // Learn the origin's relay path for downlink source routing (spec §4).
     // route_path/route_len are plaintext header fields (accumulated by relays);
     // bounds-checked by RouteTable::record.
-    routes.record(msg.origin_mac_address, msg.route_path, msg.route_len, millis());
+    if (routes) {
+      routes->record(msg.origin_mac_address, msg.route_path, msg.route_len, millis());
+    }
     // Terminal endpoint — deliver to server via external callback
     if (externalRecvCallback)
       externalRecvCallback(opened);
