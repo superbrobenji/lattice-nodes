@@ -364,7 +364,7 @@ void Mesh::drainRecvQueue() {
 
     // Replay check
     if (msg.proto_version == PROTO_VERSION && msg.epoch_num > 0) {
-      if (replay.isReplay(msg)) {
+      if (replay.isReplay(msg, millis())) {
         Logger::logln("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
         continue;
       }
