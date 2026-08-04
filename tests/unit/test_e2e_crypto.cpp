@@ -47,7 +47,7 @@ TEST(E2ECrypto, DifferentPeersDifferentKeys) {
 
 static mesh_message makeMsg() {
   mesh_message m = {};
-  m.proto_version = 3;
+  m.proto_version = 4;
   m.message_type = 0; // MESH_TYPE_ADAPTER_DATA
   m.data_type = 1;
   const uint8_t origin[6] = {0x02, 0, 0, 0, 0, 0x01};
