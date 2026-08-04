@@ -155,7 +155,7 @@ void SerialAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
 void SerialAdapter::relayEnrollmentToServer(const uint8_t* mac, const uint8_t* pubKey) {
   lattice::mesh::mesh_message msg = {};
   msg.message_type = MESH_TYPE_ENROLLMENT;
-  msg.proto_version = 1;
+  msg.proto_version = lattice::mesh::PROTO_VERSION;
   memcpy(msg.origin_mac_address, mac, 6);
   memcpy(msg.enrollment_public_key, pubKey, 32);
 

@@ -8,6 +8,7 @@
 #include <esp_now.h>
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
+#include "MbedtlsGuard.h"
 
 namespace lattice {
 namespace mesh {
@@ -35,18 +36,16 @@ inline void generateKeypair(uint8_t* priv32Out, uint8_t* pub32Out) {
   mbedtls_ecp_group grp;
   mbedtls_mpi d;
   mbedtls_ecp_point Q;
-  mbedtls_entropy_context entropy;
-  mbedtls_ctr_drbg_context ctr_drbg;
+  lattice::mesh::mbedtls_guard::EntropyCtx entropy;
+  lattice::mesh::mbedtls_guard::CtrDrbgCtx ctr_drbg;
 
   mbedtls_ecp_group_init(&grp);
   mbedtls_mpi_init(&d);
   mbedtls_ecp_point_init(&Q);
-  mbedtls_entropy_init(&entropy);
-  mbedtls_ctr_drbg_init(&ctr_drbg);
 
   const char* pers = "lattice_keygen";
   int ret;
-  ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+  ret = mbedtls_ctr_drbg_seed(ctr_drbg, mbedtls_entropy_func, entropy,
                               reinterpret_cast<const uint8_t*>(pers), strlen(pers));
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 1,
@@ -59,7 +58,7 @@ inline void generateKeypair(uint8_t* priv32Out, uint8_t* pub32Out) {
                         "MESH: keypair gen — ecp_group_load failed");
   }
 
-  ret = mbedtls_ecdh_gen_public(&grp, &d, &Q, mbedtls_ctr_drbg_random, &ctr_drbg);
+  ret = mbedtls_ecdh_gen_public(&grp, &d, &Q, mbedtls_ctr_drbg_random, ctr_drbg);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 3,
                         "MESH: keypair gen — ecdh_gen_public failed");
@@ -73,8 +72,6 @@ inline void generateKeypair(uint8_t* priv32Out, uint8_t* pub32Out) {
   mbedtls_ecp_group_free(&grp);
   mbedtls_mpi_free(&d);
   mbedtls_ecp_point_free(&Q);
-  mbedtls_ctr_drbg_free(&ctr_drbg);
-  mbedtls_entropy_free(&entropy);
 }
 
 } // namespace crypto

@@ -1122,6 +1122,74 @@ TEST_F(JoinAckRelayTest, DownlinkRelayForward_BoundsAutoRegisteredPeers_NeverEvi
       << "enrolled peer must never be evicted by downlink forwarding-peer churn";
 }
 
+// ─── sendDownlinkToNode clamp / registerDownlinkPeer LRU runtime guard ──────
+// Defense-in-depth items from Phase E (issue #47 items 4 + 5).
+
+// Not declared in any header — it's a plain (external-linkage) helper
+// function defined next to sendDownlinkToNode() in Mesh.cpp, kept out of
+// Mesh.h/RouteTable.h deliberately (this task's file list is Mesh.cpp +
+// this test file only). Forward-declared here so the test below can call it.
+namespace lattice {
+namespace mesh {
+bool downlinkRouteLenExceedsMaxHops(uint8_t pathLen);
+}
+}
+
+// Item 4: sendDownlinkToNode() clamps pathLen against MAX_HOPS before
+// indexing msg.route_path. RouteTable::record() already clamps pathLen to
+// MAX_HOPS at write time (RouteTable.h: `if (pathLen > config::MAX_HOPS)
+// return;`), and route-report processing rejects route_len > MAX_HOPS before
+// it ever reaches RouteTable::record() (Mesh.cpp's processRouteReport, ~line
+// 1175 pre-patch). Between those two guards there is no legitimate call path
+// — and no public RouteTable API — that can hand routes->lookup() (and
+// therefore sendDownlinkToNode) a pathLen > MAX_HOPS; RouteTable::Entry
+// storage is private with no test hook to poke an oversized value directly,
+// and adding one would mean touching RouteTable.h, outside this task's file
+// list. So rather than trying to drive an integration path the codebase's
+// own guards make unreachable, this exercises the extracted pure/stack-only
+// predicate directly — the same one sendDownlinkToNode uses for the clamp.
+TEST(MeshDownlinkClamp, OversizedRouteLen_Drops) {
+  EXPECT_FALSE(lattice::mesh::downlinkRouteLenExceedsMaxHops(lattice::config::MAX_HOPS))
+      << "pathLen == MAX_HOPS must NOT be flagged as oversized";
+  EXPECT_TRUE(lattice::mesh::downlinkRouteLenExceedsMaxHops(lattice::config::MAX_HOPS + 1))
+      << "pathLen == MAX_HOPS + 1 must be flagged as oversized (dropped)";
+  EXPECT_TRUE(lattice::mesh::downlinkRouteLenExceedsMaxHops(0xFF))
+      << "an arbitrary out-of-range pathLen must be flagged as oversized";
+}
+
+// Item 5: registerDownlinkPeer's enrolled/master short-circuit (the `if
+// (peers.find(mac) || isCurrentMaster)` branch at the top of the function)
+// fires on EVERY call once a MAC is enrolled/master, ahead of the
+// LRU-touch loop further down — so that loop is unreachable for an
+// already-enrolled MAC. The eviction of a stale LRU entry therefore has to
+// happen inside the short-circuit branch itself (see the comment at
+// Mesh.cpp::registerDownlinkPeer); this test asserts that actually happens,
+// not just that the short-circuit continues to skip re-touching the LRU.
+TEST(RegisterDownlinkPeer, LRUEntryBecomesEnrolled_EvictsOnTouch) {
+  resetEspNowMock();
+  lattice::mesh::Mesh m;
+  uint8_t mac[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+
+  // 1. Register mac into the LRU (not yet enrolled/master).
+  m.registerDownlinkPeer(mac);
+  EXPECT_EQ(m.downlinkPeerLruCount, 1u);
+
+  // 2. mac becomes enrolled. PeerRegistry::peerMacs/peerCount/append() are
+  //    all public (see PeerRegistry.h) — no addForTest hook exists or is
+  //    needed; append() is the same public API other tests in this file use
+  //    to seed peers directly (e.g. RelayedAdapterDataKeepsOriginTarget above).
+  PeerInfo enrolled{};
+  memcpy(enrolled.mac, mac, 6);
+  enrolled.lastSeenMillis = 0;
+  ASSERT_TRUE(m.peers.append(enrolled));
+
+  // 3. Call registerDownlinkPeer(mac) again.
+  m.registerDownlinkPeer(mac);
+
+  // 4. LRU no longer contains mac — it was evicted, not just left untouched.
+  EXPECT_EQ(m.downlinkPeerLruCount, 0u);
+}
+
 // ─── enrollPeer: secondary-master identity stamped into JOIN_ACK ────────────
 // Helpers to inspect the broadcast JOIN_ACK by message_type — mirror
 // wasSentTo/lastEspNowSentTo above, but keyed on the broadcast dest (FF:FF:…)

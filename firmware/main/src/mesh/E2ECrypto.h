@@ -10,6 +10,7 @@
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
+#include "MbedtlsGuard.h"
 
 namespace lattice {
 namespace mesh {
@@ -19,49 +20,47 @@ namespace crypto {
 // without the LMK KDF step. err::fatal digits 20-25 (LMK path uses 10-19).
 inline void computeSharedSecret(const uint8_t* ownPrivateKey32, const uint8_t* peerPublicKey32,
                                 uint8_t* secret32Out) {
-  mbedtls_ecdh_context ecdh;
-  mbedtls_entropy_context entropy;
-  mbedtls_ctr_drbg_context ctr_drbg;
-  mbedtls_ecdh_init(&ecdh);
-  mbedtls_entropy_init(&entropy);
-  mbedtls_ctr_drbg_init(&ctr_drbg);
+  lattice::mesh::mbedtls_guard::EcdhCtx ecdh;
+  lattice::mesh::mbedtls_guard::EntropyCtx entropy;
+  lattice::mesh::mbedtls_guard::CtrDrbgCtx ctr_drbg;
 
   const char* pers = "lattice_ecdh_e2e";
-  int ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+  int ret = mbedtls_ctr_drbg_seed(ctr_drbg, mbedtls_entropy_func, entropy,
                                   reinterpret_cast<const uint8_t*>(pers), strlen(pers));
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 20,
                         "MESH: computeSharedSecret — ctr_drbg_seed failed");
   }
-  ret = mbedtls_ecdh_setup(&ecdh, MBEDTLS_ECP_DP_CURVE25519);
+  ret = mbedtls_ecdh_setup(ecdh, MBEDTLS_ECP_DP_CURVE25519);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 21,
                         "MESH: computeSharedSecret — ecdh_setup failed");
   }
   ret = mbedtls_mpi_read_binary(
-      &ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(d), ownPrivateKey32,
+      &ecdh.ctx.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(d), ownPrivateKey32,
       32);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 22,
                         "MESH: computeSharedSecret — mpi_read_binary (private key) failed");
   }
   ret = mbedtls_mpi_read_binary(
-      &ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(X),
+      &ecdh.ctx.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(
+          X),
       peerPublicKey32, 32);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 23,
                         "MESH: computeSharedSecret — mpi_read_binary (peer public key) failed");
   }
   ret = mbedtls_mpi_lset(
-      &ecdh.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(Z),
+      &ecdh.ctx.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(
+          Z),
       1);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 24,
                         "MESH: computeSharedSecret — mpi_lset (Qp.Z) failed");
   }
   size_t outLen = 0;
-  ret =
-      mbedtls_ecdh_calc_secret(&ecdh, &outLen, secret32Out, 32, mbedtls_ctr_drbg_random, &ctr_drbg);
+  ret = mbedtls_ecdh_calc_secret(ecdh, &outLen, secret32Out, 32, mbedtls_ctr_drbg_random, ctr_drbg);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 25,
                         "MESH: computeSharedSecret — ecdh_calc_secret failed");
@@ -70,9 +69,6 @@ inline void computeSharedSecret(const uint8_t* ownPrivateKey32, const uint8_t* p
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 27,
                         "MESH: computeSharedSecret — unexpected shared-secret length");
   }
-  mbedtls_ecdh_free(&ecdh);
-  mbedtls_ctr_drbg_free(&ctr_drbg);
-  mbedtls_entropy_free(&entropy);
 }
 
 // Direction-split E2E keys (spec §2): HKDF-SHA256 over the ECDH secret.
@@ -116,10 +112,11 @@ inline void buildNonce(const mesh_message& msg, uint8_t nonce[E2E_NONCE_LEN]) {
 inline void buildAad(const mesh_message& msg, uint8_t aad[E2E_AAD_LEN]) {
   aad[0] = msg.proto_version;
   aad[1] = msg.message_type;
-  aad[2] = static_cast<uint8_t>(msg.data_type);
-  aad[3] = static_cast<uint8_t>(msg.data_type >> 8);
-  aad[4] = static_cast<uint8_t>(msg.data_type >> 16);
-  aad[5] = static_cast<uint8_t>(msg.data_type >> 24);
+  uint32_t dt = static_cast<uint32_t>(msg.data_type);
+  aad[2] = static_cast<uint8_t>(dt);
+  aad[3] = static_cast<uint8_t>(dt >> 8);
+  aad[4] = static_cast<uint8_t>(dt >> 16);
+  aad[5] = static_cast<uint8_t>(dt >> 24);
   memcpy(aad + 6, msg.origin_mac_address, 6);
   memcpy(aad + 12, msg.target_mac_address, 6);
   aad[18] = static_cast<uint8_t>(msg.epoch_num);
