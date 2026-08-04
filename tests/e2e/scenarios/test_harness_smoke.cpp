@@ -4,6 +4,7 @@
 #include "harness/SimNode.h"
 #include "harness/SimWorld.h"
 #include "harness/FakeHub.h"
+#include "harness/MasterKeypairFixture.h"
 #include "EEPROM.h"
 #include "esp_wifi_mock.h"
 #include "src/persistence/EepromManager.h"
@@ -103,7 +104,11 @@ TEST(SimNodeTest, RebootPreservesEeprom) {
 
 TEST(VirtualBusTest, BeaconReachesLinkedNodeOnly) {
   sim::SimWorld world;
-  auto* master = world.addNode({{0x02, 0, 0, 0, 0, 0x01}, true, lattice::adapter::SERIAL_ADAPTER});
+  // Phase D (#42): mac must equal lattice::mesh::pin::MASTER_MAC — this test's
+  // assertions hinge on Mesh::processMasterBeacon's TOFU learn, which the
+  // beacon-origin pin check now gates before any TOFU state mutation runs.
+  auto* master =
+      world.addNode({{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01}, true, lattice::adapter::SERIAL_ADAPTER});
   auto* near = world.addNode({{0x02, 0, 0, 0, 0, 0x02}, false, lattice::adapter::PIR_ADAPTER});
   auto* far = world.addNode({{0x02, 0, 0, 0, 0, 0x03}, false, lattice::adapter::PIR_ADAPTER});
   world.bus.link(master, near);
@@ -368,7 +373,17 @@ TEST(FakeHubTest, OriginMacsPreservedAndFiltersWork) {
 // receive the mesh-side broadcast regardless of the target_mac_address fix.
 TEST(ServerBroadcastTest, ConfigSetReachesNodeAdapterAndPersists) {
   sim::SimWorld world;
-  auto* master = world.addNode({{0x02, 0, 0, 0, 0, 0x31}, true, lattice::adapter::SERIAL_ADAPTER});
+  // Phase D (#42): mac/keypair seeded to match lattice::mesh::pin::MASTER_MAC /
+  // MASTER_PUBKEY — this test drives a real hub.approveEnrollment() JOIN_ACK
+  // round trip, which Enrollment::processJoinAck now pin-checks before enrolling.
+  static const uint8_t kPinnedMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  sim::NodeConfig masterCfg{};
+  memcpy(masterCfg.mac, kPinnedMasterMac, 6);
+  masterCfg.isMaster = true;
+  masterCfg.adapterType = lattice::adapter::SERIAL_ADAPTER;
+  masterCfg.seedPrivateKey32 = sim::fixture::MASTER_PRIVATE_KEY;
+  masterCfg.seedPublicKey32 = sim::fixture::MASTER_PUBLIC_KEY;
+  auto* master = world.addNode(masterCfg);
   auto* sensor = world.addNode({{0x02, 0, 0, 0, 0, 0x32}, false, lattice::adapter::PIR_ADAPTER});
   world.bus.link(master, sensor);
   sim::FakeHub hub(master);

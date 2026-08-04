@@ -17,12 +17,24 @@ jobs:
         with:
           submodules: recursive
 
+      # Phase D: real master_pubkey_pin.h is deployer-generated + gitignored.
+      # CI has no masterkey.json, so copy the committed placeholder into place
+      # so the build compiles. Deployer flashes with the real header.
+      - name: Stub master_pubkey_pin.h from placeholder for CI
+        run: cp firmware/main/config/master_pubkey_pin.h.example firmware/main/config/master_pubkey_pin.h
+
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.1
           target: esp32
           path: firmware
+
+      - name: Stub master_pubkey_pin.h from placeholder for size job
+        run: |
+          if [ ! -f firmware/main/config/master_pubkey_pin.h ]; then
+            cp firmware/main/config/master_pubkey_pin.h.example firmware/main/config/master_pubkey_pin.h
+          fi
 
       - name: Size report
         uses: espressif/esp-idf-ci-action@v1

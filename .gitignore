@@ -6,3 +6,6 @@ build/
 
 # legacy pre-restructure submodule path
 main/lib/
+
+# per-deployment master pubkey pin (generated via tools/gen_master_pubkey_pin.py)
+firmware/main/config/master_pubkey_pin.h

@@ -31,18 +31,25 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(mbedtls)
 
 # Mock layer + firmware source include paths
-# Mocks shadow real hardware headers via include order
+# Mocks shadow real hardware headers via include order — tests/mocks/ MUST
+# precede firmware/main/config/ so mocks/master_pubkey_pin.h wins over the
+# firmware .h.example placeholder via master_pubkey_pin_wrapper.h's
+# __has_include("master_pubkey_pin.h") lookup.
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/mocks
   ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/src
   ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main
   ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/lib
+  ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/src/mesh/serialization/nanopb
   ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/src/mesh/serialization
 )
 
-# UNIT_TEST enables friend declarations in Mesh.h for test fixture access
-add_compile_definitions(UNIT_TEST)
+# UNIT_TEST enables friend declarations in Mesh.h for test fixture access.
+# LATTICE_ALLOW_EXAMPLE_PIN lets master_pubkey_pin_wrapper.h fall back to the
+# placeholder/mock pin header on host builds (see include_directories above);
+# applies to every target below (add_unit_test macro targets + lattice_e2e).
+add_compile_definitions(UNIT_TEST LATTICE_ALLOW_EXAMPLE_PIN=1)
 
 # Firmware source files compilable on host (hardware-independent or mockable)
 set(FIRMWARE_SOURCES

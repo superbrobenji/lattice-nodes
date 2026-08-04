@@ -14,10 +14,29 @@
 #include "src/adapter/AdapterFactory.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "project_config.h"
+#include "config/master_pubkey_pin_wrapper.h"
 
+// Phase D (#42): lattice::mesh::pin::MASTER_MAC is a single compile-time value,
+// pinned to the PRIMARY master (design doc §5 — dual-master trust in the
+// secondary is transitive via the primary's authenticated JOIN_ACK, not a second
+// pin). Mesh::processMasterBeacon's pin check, however, applies unconditionally
+// to every beacon regardless of primary/secondary — so MAC_MASTER2's real beacon
+// origin can never simultaneously equal the same pin the primary's does. Seeding
+// the pin into this sim is therefore infeasible for this fixture (unlike every
+// other e2e fixture, which stays pin-active); fall back to the runtime bypass
+// per task-4 brief's documented fallback path.
 class DualMasterTest : public MeshSimTest {
 protected:
   static constexpr uint8_t MAC_MASTER2[6] = {0x02, 0, 0, 0, 0, 0x02};
+
+  void SetUp() override {
+    MeshSimTest::SetUp();
+    lattice::mesh::pin::setTestBypass(true);
+  }
+  void TearDown() override {
+    lattice::mesh::pin::setTestBypass(false);
+    MeshSimTest::TearDown();
+  }
 
   static void setDual(sim::SimNode* n) {
     n->with([](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) {

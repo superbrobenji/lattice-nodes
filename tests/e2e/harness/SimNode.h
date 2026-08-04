@@ -32,6 +32,16 @@ struct NodeConfig {
   uint8_t mac[6];
   bool isMaster;
   lattice::adapter::adapter_types adapterType;
+  // Phase D (#42), optional: if both are non-null, SimNode::boot() seeds this
+  // node's EEPROM with this exact (priv, pub) Curve25519 keypair BEFORE
+  // Mesh::init()/Enrollment::init() runs, so Enrollment::init()'s loadKeypair()
+  // finds it and skips its usual random mbedtls-entropy keygen. Used to put a
+  // sim master's mesh-advertised pubkey in lockstep with the compile-time
+  // lattice::mesh::pin::MASTER_PUBKEY test pin (see MasterKeypairFixture.h) so
+  // pin-active e2e scenarios enroll normally instead of being dropped. Not
+  // copied/owned — caller (e.g. a constexpr fixture array) must outlive the node.
+  const uint8_t* seedPrivateKey32 = nullptr;
+  const uint8_t* seedPublicKey32 = nullptr;
 };
 
 class SimNode {
