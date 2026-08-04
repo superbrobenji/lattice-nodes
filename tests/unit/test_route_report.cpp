@@ -2,6 +2,7 @@
 #include "mesh/Mesh.h"
 #include "mesh/MeshCrypto.h"
 #include "mesh/E2ECrypto.h"
+#include "mesh/RouteMac.h"
 #include "esp_now_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
@@ -62,6 +63,73 @@ protected:
   void deriveUpKey(uint8_t kUpOut[32]) {
     uint8_t kDown[32];
     lattice::mesh::crypto::deriveE2EKeys(myPriv, masterPub, kUpOut, kDown);
+  }
+
+  // Chain-MAC (Phase C, spec §4 / issue #44) shared fixture: sets `mesh` up
+  // as master with origin/r1/r2 all registered as keyed peers, and returns a
+  // sealed, valid 2-hop route report (origin -> r1 -> r2 -> master) with a
+  // correctly chained auth_path — the base case the tamper/unknown-hop tests
+  // below mutate from.
+  mesh_message buildValidTwoHopChain(Mesh& mesh, const uint8_t originMac[6],
+                                     const uint8_t r1[6], const uint8_t r2[6]) {
+    mesh.isMaster = true;
+    mesh.reevaluateRouteTable();
+
+    uint8_t originPriv[32], originPub[32];
+    uint8_t r1Priv[32], r1Pub[32];
+    uint8_t r2Priv[32], r2Pub[32];
+    lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
+    lattice::mesh::crypto::generateKeypair(originPriv, originPub);
+    lattice::mesh::crypto::generateKeypair(r1Priv, r1Pub);
+    lattice::mesh::crypto::generateKeypair(r2Priv, r2Pub);
+    memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
+    memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
+
+    PeerInfo origin{};
+    memcpy(origin.mac, originMac, 6);
+    memcpy(origin.publicKey, originPub, 32);
+    mesh.peers.append(origin);
+    PeerInfo relay1{};
+    memcpy(relay1.mac, r1, 6);
+    memcpy(relay1.publicKey, r1Pub, 32);
+    mesh.peers.append(relay1);
+    PeerInfo relay2{};
+    memcpy(relay2.mac, r2, 6);
+    memcpy(relay2.publicKey, r2Pub, 32);
+    mesh.peers.append(relay2);
+
+    uint8_t kUpOrigin[32], kDownOrigin[32];
+    lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUpOrigin, kDownOrigin);
+    uint8_t kUpR1[32], kDownR1[32];
+    lattice::mesh::crypto::deriveE2EKeys(r1Priv, masterPub, kUpR1, kDownR1);
+    uint8_t kUpR2[32], kDownR2[32];
+    lattice::mesh::crypto::deriveE2EKeys(r2Priv, masterPub, kUpR2, kDownR2);
+
+    mesh_message msg{};
+    msg.proto_version = PROTO_VERSION;
+    msg.message_type = MESH_TYPE_ROUTE_REPORT;
+    memcpy(msg.origin_mac_address, originMac, 6);
+    msg.route_len = 2;
+    memcpy(&msg.route_path[0], r1, 6);
+    memcpy(&msg.route_path[6], r2, 6);
+    msg.data[0] = OP_ROUTE_REPORT;
+    msg.data[1] = 2;
+
+    uint8_t computed[routemac::AUTH_PATH_LEN] = {0};
+    uint8_t prev_hop[6] = {0};
+    uint8_t ctx[routemac::HOP_CTX_LEN];
+    routemac::buildHopContext(msg, prev_hop, originMac, ctx);
+    routemac::chainStep(kUpOrigin, ctx, computed, computed);
+    memcpy(prev_hop, originMac, 6);
+    routemac::buildHopContext(msg, prev_hop, r1, ctx);
+    routemac::chainStep(kUpR1, ctx, computed, computed);
+    memcpy(prev_hop, r1, 6);
+    routemac::buildHopContext(msg, prev_hop, r2, ctx);
+    routemac::chainStep(kUpR2, ctx, computed, computed);
+    memcpy(msg.auth_path, computed, routemac::AUTH_PATH_LEN);
+
+    EXPECT_TRUE(lattice::mesh::crypto::sealPayload(kUpOrigin, msg));
+    return msg;
   }
 };
 
@@ -241,6 +309,18 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
   memcpy(msg.origin_mac_address, originMac, 6);
   msg.data[0] = OP_ROUTE_REPORT;
   msg.data[1] = 1;
+
+  // Chain-MAC (Phase C, spec §4 / issue #44): route_len == 0 (no relays), so
+  // the only hop in the chain is the origin itself (prev_hop zeroed) —
+  // mirrors what Mesh::transmitCore's origin seed would compute.
+  {
+    uint8_t ctx[routemac::HOP_CTX_LEN];
+    uint8_t prev_hop[6] = {0};
+    uint8_t zero_prev_mac[routemac::AUTH_PATH_LEN] = {0};
+    routemac::buildHopContext(msg, prev_hop, originMac, ctx);
+    routemac::chainStep(kUp, ctx, zero_prev_mac, msg.auth_path);
+  }
+
   ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
 
   mesh.processRouteReport(msg);
@@ -268,9 +348,17 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterRecordsRouteFromReport) {
 
   // Task 6 (E2E AEAD): master opens the sealed payload before delivering to
   // the callback — register the origin as a keyed peer and seal accordingly.
+  // Chain-MAC (Phase C, spec §4 / issue #44): the master also needs r1/r2
+  // registered as keyed peers (their own pairwise k_up with the master) so
+  // it can reconstruct their hops in the chain — mirrors what real relays
+  // enrolled with the master would have.
   uint8_t originPriv[32], originPub[32];
+  uint8_t r1Priv[32], r1Pub[32];
+  uint8_t r2Priv[32], r2Pub[32];
   lattice::mesh::crypto::generateKeypair(masterPriv, masterPub);
   lattice::mesh::crypto::generateKeypair(originPriv, originPub);
+  lattice::mesh::crypto::generateKeypair(r1Priv, r1Pub);
+  lattice::mesh::crypto::generateKeypair(r2Priv, r2Pub);
   memcpy(mesh.enrollment.devicePrivateKey, masterPriv, 32);
   memcpy(mesh.enrollment.devicePublicKey, masterPub, 32);
   PeerInfo origin{};
@@ -278,8 +366,22 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterRecordsRouteFromReport) {
   memcpy(origin.publicKey, originPub, 32);
   origin.lastSeenMillis = 0;
   mesh.peers.append(origin);
+  PeerInfo relay1{};
+  memcpy(relay1.mac, r1, 6);
+  memcpy(relay1.publicKey, r1Pub, 32);
+  relay1.lastSeenMillis = 0;
+  mesh.peers.append(relay1);
+  PeerInfo relay2{};
+  memcpy(relay2.mac, r2, 6);
+  memcpy(relay2.publicKey, r2Pub, 32);
+  relay2.lastSeenMillis = 0;
+  mesh.peers.append(relay2);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
+  uint8_t kUpR1[32], kDownR1[32];
+  lattice::mesh::crypto::deriveE2EKeys(r1Priv, masterPub, kUpR1, kDownR1);
+  uint8_t kUpR2[32], kDownR2[32];
+  lattice::mesh::crypto::deriveE2EKeys(r2Priv, masterPub, kUpR2, kDownR2);
 
   mesh_message msg{};
   msg.proto_version = PROTO_VERSION;
@@ -290,6 +392,24 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterRecordsRouteFromReport) {
   memcpy(&msg.route_path[6], r2, 6);
   msg.data[0] = OP_ROUTE_REPORT;
   msg.data[1] = 2;
+
+  // Chain-MAC (Phase C): hop0 = origin, hop1 = r1, hop2 = r2 — mirrors the
+  // real origin-seed + relay-extend accumulation path.
+  {
+    uint8_t computed[routemac::AUTH_PATH_LEN] = {0};
+    uint8_t prev_hop[6] = {0};
+    uint8_t ctx[routemac::HOP_CTX_LEN];
+    routemac::buildHopContext(msg, prev_hop, originMac, ctx);
+    routemac::chainStep(kUp, ctx, computed, computed);
+    memcpy(prev_hop, originMac, 6);
+    routemac::buildHopContext(msg, prev_hop, r1, ctx);
+    routemac::chainStep(kUpR1, ctx, computed, computed);
+    memcpy(prev_hop, r1, 6);
+    routemac::buildHopContext(msg, prev_hop, r2, ctx);
+    routemac::chainStep(kUpR2, ctx, computed, computed);
+    memcpy(msg.auth_path, computed, routemac::AUTH_PATH_LEN);
+  }
+
   ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
 
   mesh.processRouteReport(msg);
@@ -386,4 +506,82 @@ TEST_F(RouteReportTest, DrainRecvQueue_DispatchesRouteReport) {
   mesh.drainRecvQueue();
 
   EXPECT_GT(espNowSentPackets.size(), before); // relayed the message
+}
+
+// ---- Chain-MAC verify (Phase C, spec §4 / issue #44) ----
+
+TEST_F(RouteReportTest, MasterVerifiesValidChain_RecordsPath) {
+  const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  const uint8_t r1[6]        = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0x01};
+  const uint8_t r2[6]        = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0x02};
+  Mesh mesh;
+  mesh_message msg = buildValidTwoHopChain(mesh, originMac, r1, r2);
+
+  mesh.processRouteReport(msg);
+
+  uint8_t out[60];
+  uint8_t len = 0;
+  ASSERT_NE(mesh.testRoutes(), nullptr);
+  ASSERT_TRUE(mesh.testRoutes()->lookup(originMac, out, &len))
+      << "a validly chain-MAC'd route report must be recorded";
+  EXPECT_EQ(len, 2);
+  EXPECT_EQ(memcmp(&out[0], r1, 6), 0);
+  EXPECT_EQ(memcmp(&out[6], r2, 6), 0);
+}
+
+TEST_F(RouteReportTest, MasterRejectsTamperedRoutePath_NoRecord) {
+  const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  const uint8_t r1[6]        = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0x01};
+  const uint8_t r2[6]        = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0x02};
+  Mesh mesh;
+  mesh_message msg = buildValidTwoHopChain(mesh, originMac, r1, r2);
+
+  msg.route_path[0] ^= 0x01; // flip one byte in route_path AFTER MAC-ing
+
+  mesh.processRouteReport(msg);
+
+  uint8_t out[60];
+  uint8_t len = 0;
+  ASSERT_NE(mesh.testRoutes(), nullptr);
+  EXPECT_FALSE(mesh.testRoutes()->lookup(originMac, out, &len))
+      << "a route report with a tampered route_path must fail chain-MAC verify and not be recorded";
+}
+
+TEST_F(RouteReportTest, MasterRejectsTamperedAuthPath_NoRecord) {
+  const uint8_t originMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  const uint8_t r1[6]        = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0x01};
+  const uint8_t r2[6]        = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0x02};
+  Mesh mesh;
+  mesh_message msg = buildValidTwoHopChain(mesh, originMac, r1, r2);
+
+  msg.auth_path[0] ^= 0x01; // flip one byte in auth_path
+
+  mesh.processRouteReport(msg);
+
+  uint8_t out[60];
+  uint8_t len = 0;
+  ASSERT_NE(mesh.testRoutes(), nullptr);
+  EXPECT_FALSE(mesh.testRoutes()->lookup(originMac, out, &len))
+      << "a route report with a tampered auth_path must fail chain-MAC verify and not be recorded";
+}
+
+TEST_F(RouteReportTest, MasterRejectsUnknownHop_NoRecord) {
+  const uint8_t originMac[6]    = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  const uint8_t r1[6]           = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0x01};
+  const uint8_t r2[6]           = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0x02};
+  const uint8_t strangerMac[6]  = {0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0x03};
+  Mesh mesh;
+  mesh_message msg = buildValidTwoHopChain(mesh, originMac, r1, r2);
+
+  // Swap the second hop for a MAC that has no E2EKeyStore/peer entry on the
+  // master at all — an unenrolled/unknown hop.
+  memcpy(&msg.route_path[6], strangerMac, 6);
+
+  mesh.processRouteReport(msg);
+
+  uint8_t out[60];
+  uint8_t len = 0;
+  ASSERT_NE(mesh.testRoutes(), nullptr);
+  EXPECT_FALSE(mesh.testRoutes()->lookup(originMac, out, &len))
+      << "a route report naming an unknown hop must be dropped and not recorded";
 }
