@@ -9,6 +9,7 @@
 #include "time_mock.h"
 #include "EEPROM.h"
 #include "lib/lattice-protocol/c/opcodes.h"
+#include "config/master_pubkey_pin_wrapper.h"
 
 using namespace lattice::mesh;
 
@@ -682,13 +683,19 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
   Mesh mesh = makeIntermediateNode();
   ASSERT_EQ(mesh.peers.find(kMasterMac), nullptr) << "precondition: master not yet a peer";
 
-  // Real Curve25519 keypairs: ESP-NOW peer registration no longer derives a
-  // per-peer LMK (Task 8 — link layer is unencrypted; E2E AEAD is the security
-  // boundary), but the stored public key still feeds E2E key derivation
-  // elsewhere, so keep using real (non-zeroed) keys here.
-  uint8_t nodePriv[32], nodePub[32], masterPriv[32], masterKey[32];
+  // Real Curve25519 keypair for the node: ESP-NOW peer registration no longer
+  // derives a per-peer LMK (Task 8 — link layer is unencrypted; E2E AEAD is
+  // the security boundary), but the stored public key still feeds E2E key
+  // derivation elsewhere, so keep using a real (non-zeroed) key here.
+  // The master's key must equal the Phase D (#42) pin — masterKey is what the
+  // JOIN_ACK carries as enrollment_public_key, and Enrollment::processJoinAck
+  // now rejects anything that doesn't match lattice::mesh::pin::MASTER_PUBKEY.
+  // This test is about peer-registration mechanics, not pin verification, so
+  // seed the "master" key from the pin rather than a random keypair.
+  uint8_t nodePriv[32], nodePub[32];
+  uint8_t masterKey[32];
   lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
-  lattice::mesh::crypto::generateKeypair(masterPriv, masterKey);
+  memcpy(masterKey, lattice::mesh::pin::MASTER_PUBKEY, 32);
   memcpy(mesh.enrollment.devicePrivateKey, nodePriv, 32);
   memcpy(mesh.enrollment.devicePublicKey, nodePub, 32);
 
@@ -719,9 +726,16 @@ TEST_F(JoinAckRelayTest, ProcessJoinAckRegistersSecondaryMasterAndKeys) {
   // currentMaster.mac flips to it after failover.
   Mesh leaf = makeIntermediateNode(); // non-master, not yet enrolled with anyone
 
-  uint8_t leafPriv[32], leafPub[32], primPriv[32], primPub[32], secPriv[32], secPub[32];
+  // Primary's key must equal the Phase D (#42) pin: Enrollment::processJoinAck
+  // now rejects any enrollment_public_key that doesn't match
+  // lattice::mesh::pin::MASTER_PUBKEY, and this test is about secondary-master
+  // registration mechanics, not pin verification — the secondary's key is
+  // NOT pin-checked (spec §5: only the primary's identity is pinned), so it
+  // stays a real generated keypair.
+  uint8_t leafPriv[32], leafPub[32], secPriv[32], secPub[32];
+  uint8_t primPub[32];
   lattice::mesh::crypto::generateKeypair(leafPriv, leafPub);
-  lattice::mesh::crypto::generateKeypair(primPriv, primPub);
+  memcpy(primPub, lattice::mesh::pin::MASTER_PUBKEY, 32);
   lattice::mesh::crypto::generateKeypair(secPriv, secPub);
   memcpy(leaf.enrollment.devicePrivateKey, leafPriv, 32);
   memcpy(leaf.enrollment.devicePublicKey, leafPub, 32);
@@ -1234,7 +1248,14 @@ TEST_F(ConfigOpcodeInjectionTest, TargetedSealedConfigSet_StillDelivered) {
 // legitimate JOIN_ACK). The fingerprint check alone therefore does NOT
 // authenticate the sender — the registration path must additionally be gated by
 // TOFU origin and must never replace established key material.
-
+//
+// These tests exercise that defense-in-depth (origin gate / no-rekey) in
+// isolation, independent of the Phase D (#42) master pubkey pin: forged ACKs
+// here carry an attacker-generated key (attackerKey), which a real attacker
+// necessarily uses since it doesn't have the master's private key — the pin
+// alone would already reject every case below before the origin gate ever
+// runs. The pin bypass keeps this fixture actually exercising the origin/
+// no-rekey code paths rather than trivially passing on the pin check.
 class JoinAckForgeryTest : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -1244,6 +1265,10 @@ protected:
     lattice::mesh::crypto::generateKeypair(nodePriv, nodePub);
     lattice::mesh::crypto::generateKeypair(masterPriv, masterKey);
     lattice::mesh::crypto::generateKeypair(attackerPriv, attackerKey);
+    lattice::mesh::pin::setTestBypass(true);
+  }
+  void TearDown() override {
+    lattice::mesh::pin::setTestBypass(false);
   }
 
   static constexpr uint8_t kMyMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
@@ -1590,6 +1615,82 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
   EXPECT_EQ(memcmp(e.mac, kMac, 6), 0);
   EXPECT_EQ(memcmp(e.pubKey, kKey, 32), 0)
       << "Full 32-byte key must be copied without chunk reassembly";
+}
+
+// ─── EnrollmentPinTest ────────────────────────────────────────────────────────
+// Phase D (#42): Enrollment::processJoinAck now requires the JOIN_ACK's
+// enrollment_public_key to match the compile-time-pinned lattice::mesh::pin::
+// MASTER_PUBKEY before it will register the sender or TOFU-learn its MAC. This
+// closes the enrollment-instant MITM window on the pubkey side — an RF-present
+// attacker without the master's private key cannot forge a JOIN_ACK the pin
+// will accept.
+
+class EnrollmentPinTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    EEPROM.reset();
+    resetMillis();
+    resetEspNowMock();
+    // Ensure pin check is active for every test in this fixture unless the
+    // test explicitly bypasses.
+    lattice::mesh::pin::setTestBypass(false);
+  }
+  void TearDown() override {
+    lattice::mesh::pin::setTestBypass(false);
+  }
+};
+
+TEST_F(EnrollmentPinTest, ProcessJoinAck_ValidPubkey_Enrolls) {
+  // JOIN_ACK whose enrollment_public_key matches the pinned test value must
+  // be accepted: the node registers the master's MAC via TOFU.
+  mesh_message ack{};
+  ack.message_type = MESH_TYPE_JOIN_ACK;
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  memcpy(ack.origin_mac_address, kMasterMac, 6);
+  // fingerprint field left zeroed to match Enrollment's default (zeroed)
+  // devicePublicKey — msg.data untouched.
+  memcpy(ack.enrollment_public_key, lattice::mesh::pin::MASTER_PUBKEY, 32);
+
+  Enrollment enrollment;
+  enrollment.processJoinAck(ack, /*deviceMac*/ nullptr, /*registerFn*/ nullptr);
+
+  EXPECT_TRUE(enrollment.hasMasterMac);
+  EXPECT_EQ(memcmp(enrollment.knownMasterMac, kMasterMac, 6), 0);
+}
+
+TEST_F(EnrollmentPinTest, ProcessJoinAck_WrongPubkey_DropsNoEnroll) {
+  // A JOIN_ACK whose enrollment_public_key does NOT match the pin must be
+  // dropped before any state mutation — no TOFU-learn, no enrolled flag.
+  mesh_message ack{};
+  ack.message_type = MESH_TYPE_JOIN_ACK;
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  memcpy(ack.origin_mac_address, kMasterMac, 6);
+  memcpy(ack.enrollment_public_key, lattice::mesh::pin::MASTER_PUBKEY, 32);
+  ack.enrollment_public_key[0] ^= 0xFF; // corrupt first byte — mismatches pin
+
+  Enrollment enrollment;
+  enrollment.processJoinAck(ack, /*deviceMac*/ nullptr, /*registerFn*/ nullptr);
+
+  EXPECT_FALSE(enrollment.hasMasterMac);
+  EXPECT_FALSE(enrollment.isEnrolled());
+}
+
+TEST_F(EnrollmentPinTest, ProcessJoinAck_TestBypass_SkipsCheck) {
+  // The UNIT_TEST-only runtime bypass simulates DEV_MODE=true (which is a
+  // compile-time constant and can't be flipped from a test): with the bypass
+  // active, a wrong pubkey must still enrol.
+  lattice::mesh::pin::setTestBypass(true);
+  mesh_message ack{};
+  ack.message_type = MESH_TYPE_JOIN_ACK;
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  memcpy(ack.origin_mac_address, kMasterMac, 6);
+  memcpy(ack.enrollment_public_key, lattice::mesh::pin::MASTER_PUBKEY, 32);
+  ack.enrollment_public_key[0] ^= 0xFF; // wrong — but bypass active
+
+  Enrollment enrollment;
+  enrollment.processJoinAck(ack, /*deviceMac*/ nullptr, /*registerFn*/ nullptr);
+
+  EXPECT_TRUE(enrollment.hasMasterMac);
 }
 
 // ---- EnrollmentRelayCallbackTest ----

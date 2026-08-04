@@ -5,6 +5,8 @@
 #include "src/error/Error.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 #include "src/adapter/Adapter.h"
+#include "config/master_pubkey_pin_wrapper.h"
+#include "project_config.h"
 #include <esp_now.h>
 #include <cstring>
 
@@ -96,6 +98,23 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
     Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
     return;
   }
+
+  // Master pubkey pin (Phase D, #42): the JOIN_ACK's enrollment_public_key must
+  // match the deployment-provisioned master pubkey pinned at build time. Strong
+  // authentication — an RF-present attacker cannot forge a JOIN_ACK the pin will
+  // accept without the master's private key. Runs BEFORE the TOFU origin gate
+  // (below) and any state mutation / peer registration. DEV_MODE (compile-time)
+  // bypasses this in dev firmware builds; the UNIT_TEST-only runtime bypass lets
+  // tests toggle it without recompiling.
+  if (!lattice::config::DEV_MODE && !lattice::mesh::pin::isTestBypassed()) {
+    if (memcmp(msg.enrollment_public_key, lattice::mesh::pin::MASTER_PUBKEY,
+               sizeof(lattice::mesh::pin::MASTER_PUBKEY)) != 0) {
+      Logger::logln("ENROLL", "JOIN_ACK master pubkey mismatch pin — drop",
+                    LogLevel::LOG_ERROR);
+      return;
+    }
+  }
+
   // TOFU origin gate: JOIN_ACKs arrive over the unencrypted broadcast peer and
   // the fingerprint above is observable over the air (it is broadcast in our own
   // ENROLLMENT requests), so it does NOT authenticate the sender. Once a master

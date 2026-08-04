@@ -10,3 +10,17 @@
 #else
   #error "firmware/main/config/master_pubkey_pin.h not found. Generate it via tools/gen_master_pubkey_pin.py or build with -DLATTICE_ALLOW_EXAMPLE_PIN=1 (DEV_MODE only)."
 #endif
+
+#ifdef UNIT_TEST
+namespace lattice { namespace mesh { namespace pin {
+// Test-only: when true, production check sites skip the pin comparison.
+// Off by default so pin-active tests behave as production would.
+inline bool& _testBypass() { static bool b = false; return b; }
+inline void setTestBypass(bool on) { _testBypass() = on; }
+inline bool isTestBypassed() { return _testBypass(); }
+}}}
+#else
+namespace lattice { namespace mesh { namespace pin {
+inline constexpr bool isTestBypassed() { return false; }
+}}}
+#endif
