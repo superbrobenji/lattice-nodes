@@ -30,8 +30,10 @@ constexpr size_t AUTH_PATH_LEN = 8;
 inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
                             const uint8_t this_hop[6], uint8_t out_ctx[HOP_CTX_LEN]) {
   uint8_t* p = out_ctx;
-  memcpy(p, msg.origin_mac_address, 6); p += 6;
-  memcpy(p, msg.target_mac_address, 6); p += 6;
+  memcpy(p, msg.origin_mac_address, 6);
+  p += 6;
+  memcpy(p, msg.target_mac_address, 6);
+  p += 6;
   p[0] = static_cast<uint8_t>(msg.epoch_num);
   p[1] = static_cast<uint8_t>(msg.epoch_num >> 8);
   p[2] = static_cast<uint8_t>(msg.epoch_num >> 16);
@@ -40,7 +42,8 @@ inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
   p[0] = static_cast<uint8_t>(msg.seq_num);
   p[1] = static_cast<uint8_t>(msg.seq_num >> 8);
   p += 2;
-  memcpy(p, prev_hop, 6); p += 6;
+  memcpy(p, prev_hop, 6);
+  p += 6;
   memcpy(p, this_hop, 6);
 }
 
@@ -53,10 +56,10 @@ inline void chainStep(const uint8_t secret[32], const uint8_t hop_ctx[HOP_CTX_LE
   memcpy(input, hop_ctx, HOP_CTX_LEN);
   memcpy(input + HOP_CTX_LEN, prev_mac, AUTH_PATH_LEN);
 
-  uint8_t full[32];  // SHA-256 output
+  uint8_t full[32]; // SHA-256 output
   const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
   mbedtls_md_hmac(info, secret, 32, input, sizeof(input), full);
-  memcpy(out_mac, full, AUTH_PATH_LEN);   // truncate to first 8 bytes
+  memcpy(out_mac, full, AUTH_PATH_LEN); // truncate to first 8 bytes
 }
 
 } // namespace routemac
