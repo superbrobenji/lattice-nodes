@@ -170,8 +170,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
       break;
     }
   if (hasSecondary) {
-    bool secondaryRegistered =
-        registerFn && registerFn(secondaryMasterMac, secondaryPublicKey);
+    bool secondaryRegistered = registerFn && registerFn(secondaryMasterMac, secondaryPublicKey);
     if (secondaryRegistered && !hasMasterMacSecondary) {
       memcpy(knownMasterMacSecondary, secondaryMasterMac, 6);
       hasMasterMacSecondary = true;
