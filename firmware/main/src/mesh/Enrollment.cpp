@@ -4,6 +4,7 @@
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
+#include "broadcast_mac.h"
 #include "src/adapter/Adapter.h"
 #include "config/master_pubkey_pin_wrapper.h"
 #include "project_config.h"
@@ -29,20 +30,20 @@ Enrollment::Enrollment() {
 void Enrollment::init() {
   auto& em = EepromManager::getInstance();
   if (em.loadKeypair(devicePrivateKey, devicePublicKey)) {
-    Logger::logln("MESH", "Device keypair loaded from EEPROM", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("MESH", "Device keypair loaded from EEPROM", LogLevel::LOG_INFO);
   } else {
-    Logger::logln("MESH", "Generating new Curve25519 keypair...", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("MESH", "Generating new Curve25519 keypair...", LogLevel::LOG_INFO);
     lattice::mesh::crypto::generateKeypair(devicePrivateKey, devicePublicKey);
     em.saveKeypair(devicePrivateKey, devicePublicKey);
-    Logger::logln("MESH", "New keypair generated and saved", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("MESH", "New keypair generated and saved", LogLevel::LOG_INFO);
   }
   hasMasterMac = em.loadKnownMasterMac(knownMasterMac);
   if (hasMasterMac) {
-    Logger::logln("MESH", "Known master MAC loaded from EEPROM", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("MESH", "Known master MAC loaded from EEPROM", LogLevel::LOG_INFO);
   }
   hasMasterMacSecondary = em.loadKnownMasterMacSecondary(knownMasterMacSecondary);
   if (hasMasterMacSecondary) {
-    Logger::logln("MESH", "Known secondary master MAC loaded from EEPROM", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("MESH", "Known secondary master MAC loaded from EEPROM", LogLevel::LOG_INFO);
   }
 }
 
@@ -69,20 +70,19 @@ void Enrollment::sendRequest(const uint8_t* deviceMac, uint8_t protoVersion, uin
   msg.hop_count = 0;
   memcpy(msg.enrollment_public_key, devicePublicKey, 32);
 
-  static const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  esp_now_send(broadcastMac, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
-  Logger::logln("MESH", "Enrollment request sent", LogLevel::LOG_INFO);
+  esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  LATTICE_LOGLN("MESH", "Enrollment request sent", LogLevel::LOG_INFO);
 }
 
 void Enrollment::processRequest(const mesh_message& msg) {
   enqueuePendingRelay(msg.origin_mac_address, msg.enrollment_public_key);
-  Logger::logln("MESH", "Enrollment request received, deferring relay to loop()",
+  LATTICE_LOGLN("MESH", "Enrollment request received, deferring relay to loop()",
                 LogLevel::LOG_INFO);
 }
 
 void Enrollment::enqueuePendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
   if (_pendingRelayCount >= PENDING_RELAY_QUEUE_SIZE) {
-    Logger::logln("MESH", "Enrollment relay queue full — dropping request", LogLevel::LOG_WARN);
+    LATTICE_LOGLN("MESH", "Enrollment relay queue full — dropping request", LogLevel::LOG_WARN);
     return;
   }
   size_t idx = (_pendingRelayHead + _pendingRelayCount) % PENDING_RELAY_QUEUE_SIZE;
@@ -95,7 +95,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
                                 RegisterPeerFn registerFn) {
   // Called only when msg.target_mac_address == deviceMacAddress (Mesh checks this before calling)
   if (memcmp(msg.data, devicePublicKey, 4) != 0) {
-    Logger::logln("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
+    LATTICE_LOGLN("MESH", "JOIN_ACK fingerprint mismatch — ignoring", LogLevel::LOG_WARN);
     return;
   }
 
@@ -109,7 +109,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   if (!lattice::config::DEV_MODE && !lattice::mesh::pin::isTestBypassed()) {
     if (memcmp(msg.enrollment_public_key, lattice::mesh::pin::MASTER_PUBKEY,
                sizeof(lattice::mesh::pin::MASTER_PUBKEY)) != 0) {
-      Logger::logln("ENROLL", "JOIN_ACK master pubkey mismatch pin — drop", LogLevel::LOG_ERROR);
+      LATTICE_LOGLN("ENROLL", "JOIN_ACK master pubkey mismatch pin — drop", LogLevel::LOG_ERROR);
       return;
     }
   }
@@ -121,7 +121,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   // may deliver a JOIN_ACK; anything else is a forgery and must not enroll us,
   // TOFU-learn, or touch peer key material.
   if (hasMasterMac && memcmp(msg.origin_mac_address, knownMasterMac, 6) != 0) {
-    Logger::logln("MESH", "JOIN_ACK from unexpected origin — ignoring", LogLevel::LOG_WARN);
+    LATTICE_LOGLN("MESH", "JOIN_ACK from unexpected origin — ignoring", LogLevel::LOG_WARN);
     return;
   }
 
@@ -135,11 +135,11 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   // If registration fails (registry full), do NOT mark enrolled or TOFU-learn —
   // an "enrolled" node without an uplink route is worse than retrying.
   if (registerFn && !registerFn(msg.origin_mac_address, msg.enrollment_public_key)) {
-    Logger::logln("MESH", "JOIN_ACK peer registration failed — not enrolling", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("MESH", "JOIN_ACK peer registration failed — not enrolling", LogLevel::LOG_ERROR);
     return;
   }
 
-  Logger::logln("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
+  LATTICE_LOGLN("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
   EepromManager::getInstance().saveEnrolledFlag(true);
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
@@ -147,7 +147,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
     memcpy(knownMasterMac, msg.origin_mac_address, 6);
     hasMasterMac = true;
     EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
-    Logger::logln("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
   }
 
   // Dual-master (spec §5): if the server included a secondary master, register it

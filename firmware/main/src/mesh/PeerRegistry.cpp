@@ -102,7 +102,7 @@ void PeerRegistry::loadFromEEPROM() {
 
   // Fallback in dev mode or when list is empty
   if (peerCount == 0) {
-    Logger::logln("MESH", "Peer list empty; loading defaults from config", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("MESH", "Peer list empty; loading defaults from config", LogLevel::LOG_INFO);
     for (int i = 0; i < lattice::config::NUM_DEFAULT_PEERS; ++i) {
       PeerInfo peer;
       memcpy(peer.mac, lattice::config::DEFAULT_PEERS[i], 6);
@@ -145,7 +145,7 @@ void PeerRegistry::addAndPersist(const uint8_t* mac) {
   saveToEEPROM();
   // Note: ESP-NOW registration (registerPeerWithEspNow) is handled by Mesh layer
   // since it requires devicePrivateKey (a Mesh field) and MeshCrypto (mbedtls).
-  Logger::logln("MESH", "Peer added", LogLevel::LOG_DEBUG);
+  LATTICE_LOGLN("MESH", "Peer added", LogLevel::LOG_DEBUG);
 }
 
 void PeerRegistry::removeAndPersist(const uint8_t* mac) {
@@ -159,7 +159,7 @@ void PeerRegistry::removeAndPersist(const uint8_t* mac) {
   esp_err_t result = esp_now_del_peer(mac);
   lattice::err::checkEsp(result, lattice::utils::ErrorType::COMMUNICATION_FAIL,
                          "removePeerFromEEPROM: del_peer failed");
-  Logger::logln("MESH", "Removed ESP-NOW peer.", LogLevel::LOG_DEBUG);
+  LATTICE_LOGLN("MESH", "Removed ESP-NOW peer.", LogLevel::LOG_DEBUG);
 }
 
 } // namespace mesh

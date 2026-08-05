@@ -48,7 +48,7 @@ inline bool fail(::lattice::core::ErrorTypeDigit t, ::lattice::core::ModuleDigit
 #ifdef UNIT_TEST
   ++::lattice_test_errFailCount;
 #endif
-  utils::Logger::logln("ERROR", msg, utils::LogLevel::LOG_ERROR);
+  LATTICE_LOGLN("ERROR", msg, utils::LogLevel::LOG_ERROR);
   utils::ErrorCore::getInstance().signalError(t, m, sub, msg);
   return false;
 }
@@ -59,7 +59,7 @@ inline bool fail(utils::ErrorType type, const char* msg) {
 }
 [[noreturn]] inline void fatal(::lattice::core::ErrorTypeDigit t, ::lattice::core::ModuleDigit m,
                                uint8_t sub, const char* msg) {
-  utils::Logger::logln("FATAL", msg, utils::LogLevel::LOG_ERROR);
+  LATTICE_LOGLN("FATAL", msg, utils::LogLevel::LOG_ERROR);
   utils::ErrorCore::getInstance().signalError(t, m, sub, msg);
 #ifdef UNIT_TEST
   throw FatalError(msg ? msg : "fatal");
@@ -78,20 +78,11 @@ inline bool check(bool condition, utils::ErrorType type, const char* msg) {
 inline bool checkEsp(esp_err_t status, utils::ErrorType type, const char* msg) {
   if (status == ESP_OK)
     return true;
-  utils::Logger::logln("ESP", String(msg) + ": " + esp_err_to_name(status),
-                       utils::LogLevel::LOG_ERROR);
+  LATTICE_LOGLN("ESP", String(msg) + ": " + esp_err_to_name(status), utils::LogLevel::LOG_ERROR);
   return fail(type, msg);
 }
 } // namespace err
 } // namespace lattice
-
-template <typename... Args> inline bool ERROR_ASSERT(bool cond, const char* msg) {
-  return lattice::err::check(cond, lattice::utils::ErrorType::CONFIG_ERROR, msg);
-}
-
-template <typename T> inline bool ERROR_CHECK(bool cond, T t, const char* msg) {
-  return lattice::err::check(cond, t, msg);
-}
 
 template <typename T> inline bool ERROR_CHECK_ESP_OK(esp_err_t expr, T t, const char* msg) {
   return lattice::err::checkEsp(expr, t, msg);

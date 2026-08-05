@@ -61,8 +61,6 @@ private:
   PeerRegistry peers; // Peer list management (no heap alloc)
 
   void readMacAddress();
-  void printMac(const uint8_t* mac);
-  void printMeshMessage(const mesh_message& msg);
 
   static void onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status);
   void IRAM_ATTR onDataRecvCallback(const esp_now_recv_info* mac, const uint8_t* incomingData,
@@ -95,8 +93,6 @@ private:
 
   void loadMeshKeyFromEEPROM();
   void saveMeshKeyToEEPROM(const uint8_t* key);
-  void generateRandomMeshKey();
-  bool meshKeyIsSet() const;
 
   // --- Tiger Style refactor helpers ---
   void processMasterBeacon(const mesh_message& msg);

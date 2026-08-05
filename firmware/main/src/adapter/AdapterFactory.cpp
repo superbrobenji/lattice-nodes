@@ -16,24 +16,24 @@ bool AdapterFactory::isDevMode_ = false;
 
 void AdapterFactory::setDevMode(bool isDev) {
   isDevMode_ = isDev;
-  Logger::logln("Factory", String("Dev mode ") + (isDev ? "enabled" : "disabled"),
+  LATTICE_LOGLN("Factory", String("Dev mode ") + (isDev ? "enabled" : "disabled"),
                 LogLevel::LOG_INFO);
 }
 
 Adapter* AdapterFactory::createAdapter(adapter_types type, int pin) {
   switch (type) {
   case adapter_types::PIR_ADAPTER:
-    Logger::logln("Factory", "Creating PirAdapter", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("Factory", "Creating PirAdapter", LogLevel::LOG_INFO);
     return new PirAdapter(pin);
 
   case adapter_types::SERIAL_ADAPTER:
-    Logger::logln("Factory", "Creating SerialAdapter", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("Factory", "Creating SerialAdapter", LogLevel::LOG_INFO);
     return new SerialAdapter(pin);
 
   default:
     lattice::err::fail(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::ADAPTER,
                        2, "AdapterFactory: Unknown adapter type");
-    Logger::logln("Factory", "Error: Unknown adapter type", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("Factory", "Error: Unknown adapter type", LogLevel::LOG_ERROR);
     return nullptr;
   }
 }
@@ -51,7 +51,7 @@ uint8_t AdapterFactory::adapterTypeToEEPROM(adapter_types type) {
 
 adapter_types AdapterFactory::loadAdapterTypeFromEEPROM() {
   if (isDevMode_) {
-    Logger::logln("Factory", "Dev mode: returning default PIR adapter type", LogLevel::LOG_DEBUG);
+    LATTICE_LOGLN("Factory", "Dev mode: returning default PIR adapter type", LogLevel::LOG_DEBUG);
     return adapter_types::PIR_ADAPTER; // Always return default in dev mode
   }
 
@@ -61,7 +61,7 @@ adapter_types AdapterFactory::loadAdapterTypeFromEEPROM() {
 
 void AdapterFactory::saveAdapterTypeToEEPROM(adapter_types type) {
   if (isDevMode_) {
-    Logger::logln("Factory", "Dev mode: skipping EEPROM save for adapter type",
+    LATTICE_LOGLN("Factory", "Dev mode: skipping EEPROM save for adapter type",
                   LogLevel::LOG_DEBUG);
     return; // Don't save to EEPROM in dev mode
   }
@@ -77,7 +77,7 @@ Adapter* AdapterFactory::createFromEEPROM() {
 
 void AdapterFactory::initializeDefaultsIfUnset() {
   if (isDevMode_) {
-    Logger::logln("Factory", "Dev mode: skipping EEPROM initialization", LogLevel::LOG_DEBUG);
+    LATTICE_LOGLN("Factory", "Dev mode: skipping EEPROM initialization", LogLevel::LOG_DEBUG);
     return; // Don't initialize EEPROM in dev mode
   }
 
@@ -92,8 +92,6 @@ int AdapterFactory::getDefaultPinForAdapter(adapter_types type) {
   switch (type) {
   case adapter_types::PIR_ADAPTER:
     return PIR_ADAPTER_DEFAULT_PIN;
-  case adapter_types::LED_ADAPTER:
-    return LED_ADAPTER_DEFAULT_PIN;
   case adapter_types::SERIAL_ADAPTER:
     return SERIAL_ADAPTER_DEFAULT_PIN;
   default:

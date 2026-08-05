@@ -9,7 +9,6 @@ namespace adapter {
 
 // Default pins for each adapter type
 static constexpr int PIR_ADAPTER_DEFAULT_PIN = 27;    // PIR sensor pin
-static constexpr int LED_ADAPTER_DEFAULT_PIN = 2;     // Built-in LED pin
 static constexpr int SERIAL_ADAPTER_DEFAULT_PIN = -1; // Serial doesn't need a pin
 
 class AdapterFactory {

@@ -15,36 +15,10 @@ bool GpioInput::init() {
 }
 
 bool GpioInput::isValidInputPin(uint8_t pin) {
-  // Accept most GPIOs except strapping/flash pins and invalid
-  switch (pin) {
-  case 0:
-  case 2:
-  case 4:
-  case 5:
-  case 12:
-  case 13:
-  case 14:
-  case 15:
-  case 16:
-  case 17:
-  case 18:
-  case 19:
-  case 21:
-  case 22:
-  case 23:
-  case 25:
-  case 26:
-  case 27:
-  case 32:
-  case 33:
-  case 34:
-  case 35:
-  case 36:
-  case 39:
-    return true;
-  default:
-    return false;
-  }
+  // Accept most GPIOs except strapping/flash pins and invalid ones. Bit N set means pin N is
+  // valid: 0,2,4,5,12-19,21-23,25-27,32-36,39 (audit item J — was a 24-case switch).
+  constexpr uint64_t VALID_MASK = 0x9f0eeff035ULL;
+  return pin < 64 && ((VALID_MASK >> pin) & 1) != 0;
 }
 
 bool GpioInput::isInitialized() const {

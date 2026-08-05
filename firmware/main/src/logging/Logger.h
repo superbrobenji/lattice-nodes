@@ -21,6 +21,34 @@
   } while (0)
 #endif
 
+// ---------------------------------------------------------------------------------------------
+// LATTICE_LOG / LATTICE_LOGLN — compile-time log-level gating (design doc §1, Phase G).
+//
+// Numeric values mirror lattice::utils::LogLevel exactly (DEBUG=0 .. NONE=4) so the #if below
+// can compare against it directly, without needing the enum type available yet at this point in
+// the header. When LATTICE_DEFAULT_LOG_LEVEL == LOG_NONE (the production default — see
+// project_config.h §6 "Logging"), both macros fold to ((void)0): the tag/message/level arguments
+// are never evaluated, so format strings and String concatenations at call sites never reach the
+// translation unit's .rodata / heap. Otherwise they route to the existing runtime-dispatched
+// Logger::log/logln (unchanged behaviour).
+#define LATTICE_LOG_LEVEL_NONE 4
+
+// project_config.h defines LATTICE_DEFAULT_LOG_LEVEL above its own #include of this header, so
+// that value is authoritative when present. This fallback only covers translation units that
+// include Logger.h directly without going through project_config.h first; it is pinned to
+// LOG_NONE (the production default) so such a TU never silently gets logging turned on.
+#ifndef LATTICE_DEFAULT_LOG_LEVEL
+#define LATTICE_DEFAULT_LOG_LEVEL LATTICE_LOG_LEVEL_NONE
+#endif
+
+#if LATTICE_DEFAULT_LOG_LEVEL == LATTICE_LOG_LEVEL_NONE
+#define LATTICE_LOG(tag, msg, level) ((void)0)
+#define LATTICE_LOGLN(tag, msg, level) ((void)0)
+#else
+#define LATTICE_LOG(tag, msg, level) ::lattice::utils::Logger::log(tag, msg, level)
+#define LATTICE_LOGLN(tag, msg, level) ::lattice::utils::Logger::logln(tag, msg, level)
+#endif
+
 namespace lattice {
 namespace utils {
 

@@ -37,20 +37,20 @@ private:
           bool newMaster = !mesh.getIsMaster();
           mesh.setIsMaster(newMaster);
           devMasterFlag = newMaster;
-          lattice::utils::Logger::logln(
-              "MAIN", String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"),
-              lattice::utils::LogLevel::LOG_INFO);
+          LATTICE_LOGLN("MAIN",
+                        String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"),
+                        lattice::utils::LogLevel::LOG_INFO);
           greenLed.blink(newMaster ? 3 : 2, 150, 150);
         } else {
           bool wasMaster = em.loadMasterFlag();
           bool newMaster = !wasMaster;
           em.saveMasterFlag(newMaster);
-          lattice::utils::Logger::logln("MAIN",
-                                        String("Button held 5s: CONFIG TOGGLED. Now ") +
-                                            (newMaster ? "MASTER" : "NODE"),
-                                        lattice::utils::LogLevel::LOG_INFO);
-          lattice::utils::Logger::logln("MAIN", "Restarting in 2 seconds for new role...",
-                                        lattice::utils::LogLevel::LOG_INFO);
+          LATTICE_LOGLN("MAIN",
+                        String("Button held 5s: CONFIG TOGGLED. Now ") +
+                            (newMaster ? "MASTER" : "NODE"),
+                        lattice::utils::LogLevel::LOG_INFO);
+          LATTICE_LOGLN("MAIN", "Restarting in 2 seconds for new role...",
+                        lattice::utils::LogLevel::LOG_INFO);
           greenLed.blink(newMaster ? 3 : 2, 200, 200);
           delay(2000);
           em.forceFlush();
@@ -78,14 +78,13 @@ private:
         if (!confirmPending) {
           confirmPending = true;
           confirmDeadline = millis() + 3000;
-          lattice::utils::Logger::logln("MAIN",
-                                        "Reset armed: hold again within 3s to confirm EEPROM wipe",
-                                        lattice::utils::LogLevel::LOG_WARN);
+          LATTICE_LOGLN("MAIN", "Reset armed: hold again within 3s to confirm EEPROM wipe",
+                        lattice::utils::LogLevel::LOG_WARN);
           redLed.blink(3, 100, 100);
         } else if (millis() < confirmDeadline) {
           confirmPending = false;
-          lattice::utils::Logger::logln("MAIN", "EEPROM wipe confirmed. Clearing all...",
-                                        lattice::utils::LogLevel::LOG_WARN);
+          LATTICE_LOGLN("MAIN", "EEPROM wipe confirmed. Clearing all...",
+                        lattice::utils::LogLevel::LOG_WARN);
           em.clearAll();
           redLed.blink(5, 100, 100);
           greenLed.blink(5, 100, 100);
@@ -98,8 +97,7 @@ private:
       wasPressed = false;
       if (confirmPending && millis() > confirmDeadline) {
         confirmPending = false;
-        lattice::utils::Logger::logln("MAIN", "Reset confirmation timed out",
-                                      lattice::utils::LogLevel::LOG_INFO);
+        LATTICE_LOGLN("MAIN", "Reset confirmation timed out", lattice::utils::LogLevel::LOG_INFO);
       }
     }
   }
