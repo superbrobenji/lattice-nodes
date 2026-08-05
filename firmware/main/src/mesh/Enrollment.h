@@ -45,6 +45,14 @@ private:
   uint8_t devicePrivateKey[32]{};
   uint8_t devicePublicKey[32]{};
 
+  // Cached mirror of the NVS "enrolled" flag (post-Phase-G audit item G).
+  // isEnrolled() used to call EepromManager::loadEnrolledFlag() -> NVS read
+  // on every call — main.cpp's loop() calls it 2-3x per iteration. Loaded
+  // once from NVS in init(), flipped true the moment processJoinAck()
+  // persists the flag; never cleared once set (matches loadEnrolledFlag()'s
+  // one-way semantics — nothing in this codebase un-enrolls a node).
+  bool _enrolled{false};
+
   // Bounded, heap-free FIFO of enrollment requests awaiting relay to the server.
   // Sized to RECV_QUEUE_SIZE (Phase G §4: 4): the master drains this queue once per
   // loop() AFTER draining its ESP-NOW receive ring, so the enrollment requests from

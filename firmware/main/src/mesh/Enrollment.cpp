@@ -45,10 +45,11 @@ void Enrollment::init() {
   if (hasMasterMacSecondary) {
     LATTICE_LOGLN("MESH", "Known secondary master MAC loaded from EEPROM", LogLevel::LOG_INFO);
   }
+  _enrolled = em.loadEnrolledFlag();
 }
 
 bool Enrollment::isEnrolled() const {
-  return EepromManager::getInstance().loadEnrolledFlag();
+  return _enrolled;
 }
 
 void Enrollment::sendRequest(const uint8_t* deviceMac, uint8_t protoVersion, uint32_t epochNum,
@@ -141,6 +142,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
 
   LATTICE_LOGLN("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
   EepromManager::getInstance().saveEnrolledFlag(true);
+  _enrolled = true;
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
   if (!hasMasterMac) {
