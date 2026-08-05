@@ -2,6 +2,7 @@
 #include "Error.h"
 #include "../logging/Logger.h"
 #include <esp_system.h>
+#include <cstdio>
 using lattice::core::ErrorTypeDigit;
 using lattice::core::makeErrorCode;
 using lattice::core::ModuleDigit;
@@ -45,8 +46,11 @@ void ErrorCore::signalError(ErrorTypeDigit t, ModuleDigit m, uint8_t sub, const 
   signalError(lt, msg);
 }
 void ErrorCore::signalError(ErrorType type, const char* msg) {
-  if (msg)
-    LATTICE_LOGLN("Error", String("ERROR: ") + msg, LogLevel::LOG_ERROR);
+  if (msg) {
+    char buf[96];
+    snprintf(buf, sizeof(buf), "ERROR: %s", msg);
+    LATTICE_LOGLN("Error", buf, LogLevel::LOG_ERROR);
+  }
   if (_initialized && _errorLed) {
     if (_inCallbackContext) {
       // Defer blink to main loop — never block in callback context

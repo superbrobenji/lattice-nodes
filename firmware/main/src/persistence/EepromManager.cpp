@@ -1,5 +1,6 @@
 #include "EepromManager.h"
 #include "src/error/Error.h"
+#include <cstdio>
 
 namespace lattice {
 namespace utils {
@@ -62,7 +63,9 @@ bool EepromManager::ensureInitialized() {
 
 void EepromManager::logOperation(const char* operation, const char* details) {
   if (details) {
-    LATTICE_LOGLN("NVS", String(operation) + ": " + details, LogLevel::LOG_DEBUG);
+    char buf[80];
+    snprintf(buf, sizeof(buf), "%s: %s", operation, details);
+    LATTICE_LOGLN("NVS", buf, LogLevel::LOG_DEBUG);
   } else {
     LATTICE_LOGLN("NVS", operation, LogLevel::LOG_DEBUG);
   }
@@ -120,9 +123,17 @@ bool EepromManager::loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
   if (maxPeers > EEPROM_SIZES::MAX_PEERS)
     return false;
   size_t maxBytes = maxPeers * EEPROM_SIZES::PEER_RECORD_SIZE;
+  // Pre-fill the whole output buffer with the "empty slot" sentinel (0xFF)
+  // before reading: a persisted list shorter than maxBytes (fewer peers were
+  // ever saved than MAX_PEERS) leaves getBytes() writing only the first
+  // `read` bytes, and the caller (PeerRegistry::loadFromEEPROM) scans every
+  // record up to maxPeers regardless of how many bytes came back. Without
+  // this prefill, the untouched tail of the caller's uninitialized stack
+  // buffer was read as real peer records — an uninitialized-memory bug that
+  // could inject bogus peers with garbage MAC/public-key bytes.
+  memset(peerRecords, 0xFF, maxBytes);
   size_t read = _prefs.getBytes(NVS_KEYS::PEER_LIST, peerRecords, maxBytes);
   if (read == 0) {
-    memset(peerRecords, 0xFF, maxBytes);
     return false;
   }
   return true;
@@ -391,10 +402,12 @@ bool EepromManager::_persistOrEscalate(const char* key, size_t got, size_t want,
                        "NVS write failed (security-relevant key)");
     return false; // unreachable outside UNIT_TEST
   }
-  LATTICE_LOGLN("NVS",
-                String("write failed key=") + key + " got=" + String((unsigned)got) +
-                    " want=" + String((unsigned)want),
-                LogLevel::LOG_ERROR);
+  {
+    char buf[96];
+    snprintf(buf, sizeof(buf), "write failed key=%s got=%u want=%u", key, (unsigned)got,
+             (unsigned)want);
+    LATTICE_LOGLN("NVS", buf, LogLevel::LOG_ERROR);
+  }
   return false;
 }
 

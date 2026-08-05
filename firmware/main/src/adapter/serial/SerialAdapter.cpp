@@ -37,12 +37,12 @@ void SerialAdapter::sendHealthReport() {
   data[10] = static_cast<uint8_t>((uptimeSec >> 16) & 0xFF);
   data[11] = static_cast<uint8_t>((uptimeSec >> 24) & 0xFF);
 
-  LATTICE_LOGLN("Serial_Adapter",
-                String("Health report - MAC: ") + String(mac[0], HEX) + ":" + String(mac[1], HEX) +
-                    ":" + String(mac[2], HEX) + ":" + String(mac[3], HEX) + ":" +
-                    String(mac[4], HEX) + ":" + String(mac[5], HEX) +
-                    " Uptime: " + String(uptimeSec) + "s",
-                LogLevel::LOG_DEBUG);
+  {
+    char buf[80];
+    snprintf(buf, sizeof(buf), "Health report - MAC: %02X:%02X:%02X:%02X:%02X:%02X Uptime: %lus",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], (unsigned long)uptimeSec);
+    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_DEBUG);
+  }
 
   // This report is ABOUT this node, so use transmitSelfOriginated(): on a
   // master node, plain transmit() would only broadcast it to mesh peers
@@ -55,8 +55,9 @@ void SerialAdapter::sendHealthReport() {
 SerialAdapter::SerialAdapter(uint8_t pin) : Adapter(pin), lastReportedHopCount(0) {
   _adapterType = adapter_types::SERIAL_ADAPTER;
 
-  LATTICE_LOGLN("Serial_Adapter", "Serial_Adapter constructed with pin " + String(pin),
-                LogLevel::LOG_INFO);
+  char buf[48];
+  snprintf(buf, sizeof(buf), "Serial_Adapter constructed with pin %u", (unsigned)pin);
+  LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_INFO);
 }
 
 bool SerialAdapter::init() {
@@ -73,11 +74,17 @@ void SerialAdapter::loop() {
 
   if (stateChanged || millis() - lastHealthMillis >= lattice::config::HEALTH_REPORT_INTERVAL_MS) {
     lastHealthMillis = static_cast<uint32_t>(millis());
-    LATTICE_LOGLN("Serial_Adapter",
-                  String(stateChanged ? "Health report triggered by state change (hopCount: "
-                                      : "Sending periodic health report (hopCount: ") +
-                      String(currentHopCount) + ")",
-                  LogLevel::LOG_DEBUG);
+    {
+      char buf[80];
+      if (stateChanged) {
+        snprintf(buf, sizeof(buf), "Health report triggered by state change (hopCount: %lu)",
+                 (unsigned long)currentHopCount);
+      } else {
+        snprintf(buf, sizeof(buf), "Sending periodic health report (hopCount: %lu)",
+                 (unsigned long)currentHopCount);
+      }
+      LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_DEBUG);
+    }
     sendHealthReport();
     lastReportedHopCount = currentHopCount;
   }
@@ -91,12 +98,14 @@ void SerialAdapter::loop() {
 }
 
 void SerialAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
-  LATTICE_LOGLN(
-      "Serial_Adapter",
-      "Processing incoming mesh message - Type: " + String((uint8_t)message.message_type) +
-          " DataType: " + String(static_cast<int32_t>(message.data_type)) +
-          " HopCount: " + String(message.hop_count),
-      LogLevel::LOG_DEBUG);
+  {
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+             "Processing incoming mesh message - Type: %u DataType: %ld HopCount: %u",
+             (unsigned)message.message_type, (long)message.data_type,
+             (unsigned)message.hop_count);
+    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_DEBUG);
+  }
 
   // Handle control opcodes received via mesh.
   // NOTE: OP_CONFIG_SET is now handled in Adapter::onMeshData() (base class) so it reaches
@@ -118,8 +127,9 @@ void SerialAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
         esp_err_t txErr = esp_wifi_set_max_tx_power(
             static_cast<int8_t>(lattice::config::TX_POWER_VALUES[presetByte]));
         if (txErr != ESP_OK) {
-          LATTICE_LOGLN("Serial_Adapter", String("TX power set failed: ") + esp_err_to_name(txErr),
-                        LogLevel::LOG_WARN);
+          char buf[64];
+          snprintf(buf, sizeof(buf), "TX power set failed: %s", esp_err_to_name(txErr));
+          LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_WARN);
         } else {
           LATTICE_LOGLN("Serial_Adapter", "TX power preset applied from mesh", LogLevel::LOG_INFO);
         }
@@ -139,9 +149,11 @@ void SerialAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
     return;
   }
 
-  LATTICE_LOGLN("Serial_Adapter",
-                "Encoded mesh message to " + String(n) + " bytes, sending to serial",
-                LogLevel::LOG_DEBUG);
+  {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Encoded mesh message to %u bytes, sending to serial", (unsigned)n);
+    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_DEBUG);
+  }
 
   // 2-byte little-endian length prefix
   uint8_t lenLE[2] = {static_cast<uint8_t>(n & 0xFF), static_cast<uint8_t>((n >> 8) & 0xFF)};
@@ -173,8 +185,11 @@ void SerialAdapter::relayEnrollmentToServer(const uint8_t* mac, const uint8_t* p
 }
 
 void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
-  LATTICE_LOGLN("Serial_Adapter", "Handling complete frame of " + String(len) + " bytes",
-                LogLevel::LOG_INFO);
+  {
+    char buf[48];
+    snprintf(buf, sizeof(buf), "Handling complete frame of %u bytes", (unsigned)len);
+    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_INFO);
+  }
 
 #if SIMULATE_MODE
   if (len >= 1) {
@@ -224,10 +239,12 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
     return;
   }
 
-  LATTICE_LOGLN("Serial_Adapter",
-                "Decoded message - Type: " + String((uint8_t)msg.message_type) +
-                    " DataType: " + String(static_cast<int32_t>(msg.data_type)),
-                LogLevel::LOG_INFO);
+  {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Decoded message - Type: %u DataType: %ld",
+             (unsigned)msg.message_type, (long)msg.data_type);
+    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_INFO);
+  }
 
   // JOIN_ACK (type=4): server responded to an enrollment request
   if (msg.message_type == MESH_TYPE_JOIN_ACK) {
@@ -308,16 +325,19 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
           destMac, static_cast<adapter_types>(msg.data_type), fwdData);
     }
   } else {
-    LATTICE_LOGLN("Serial_Adapter", "Unknown message type: " + String(msg.message_type),
-                  LogLevel::LOG_WARN);
+    char buf[48];
+    snprintf(buf, sizeof(buf), "Unknown message type: %u", (unsigned)msg.message_type);
+    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_WARN);
   }
 
   // Handle control opcodes: CONFIG_SET, HEALTH_REQ
   if (msg.data_type == adapter_types::SERIAL_ADAPTER) {
     uint8_t op = msg.data[0];
-    LATTICE_LOGLN("Serial_Adapter",
-                  "Processing SERIAL_ADAPTER control opcode: 0x" + String(op, HEX),
-                  LogLevel::LOG_DEBUG);
+    {
+      char buf[64];
+      snprintf(buf, sizeof(buf), "Processing SERIAL_ADAPTER control opcode: 0x%02X", op);
+      LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_DEBUG);
+    }
 
     if (op == OP_HEALTH_REQ) {
       LATTICE_LOGLN("Serial_Adapter", "Received health request, sending health report",
@@ -339,10 +359,13 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
 
       if (isTarget) {
         adapter_types newType = AdapterFactory::adapterTypeFromEEPROM(msg.data[7]);
-        LATTICE_LOGLN("Serial_Adapter",
-                      "Configuration applies to this node, setting adapter type to: " +
-                          String(static_cast<int32_t>(newType)),
-                      LogLevel::LOG_INFO);
+        {
+          char buf[80];
+          snprintf(buf, sizeof(buf),
+                   "Configuration applies to this node, setting adapter type to: %ld",
+                   (long)static_cast<int32_t>(newType));
+          LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_INFO);
+        }
 
         lattice::adapter::AdapterFactory::saveAdapterTypeToEEPROM(newType);
         LATTICE_LOGLN("Serial_Adapter", "Adapter type saved to EEPROM successfully",
@@ -368,8 +391,9 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
         esp_err_t txErr = esp_wifi_set_max_tx_power(
             static_cast<int8_t>(lattice::config::TX_POWER_VALUES[presetByte]));
         if (txErr != ESP_OK) {
-          LATTICE_LOGLN("Serial_Adapter", String("TX power set failed: ") + esp_err_to_name(txErr),
-                        LogLevel::LOG_WARN);
+          char buf[64];
+          snprintf(buf, sizeof(buf), "TX power set failed: %s", esp_err_to_name(txErr));
+          LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_WARN);
         } else {
           LATTICE_LOGLN("Serial_Adapter", "TX power preset updated", LogLevel::LOG_INFO);
         }
@@ -399,11 +423,14 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
       if (isTarget) {
         uint8_t nodeId = msg.data[7];
         lattice::utils::EepromManager::getInstance().saveNodeId(nodeId);
-        LATTICE_LOGLN("Serial_Adapter", "Node ID set: " + String(nodeId), LogLevel::LOG_INFO);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Node ID set: %u", (unsigned)nodeId);
+        LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_INFO);
       }
     } else {
-      LATTICE_LOGLN("Serial_Adapter", "Unknown SERIAL_ADAPTER opcode: 0x" + String(op, HEX),
-                    LogLevel::LOG_WARN);
+      char buf[64];
+      snprintf(buf, sizeof(buf), "Unknown SERIAL_ADAPTER opcode: 0x%02X", op);
+      LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_WARN);
     }
   }
 
