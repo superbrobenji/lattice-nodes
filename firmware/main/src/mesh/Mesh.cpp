@@ -565,9 +565,7 @@ void Mesh::broadcastMasterBeacon() {
   // Broadcast-only: send to the registered FF:FF:… broadcast peer so the frame
   // reaches all nodes — including those not yet individually registered.
   // esp_now_send(nullptr, …) only delivers to already-registered unicast peers.
-  bool sent = sendBroadcast(beacon);
-  LATTICE_LOGLN("MESH", sent ? "Beacon broadcast OK" : "Beacon broadcast FAIL",
-                LogLevel::LOG_DEBUG);
+  (void)sendBroadcast(beacon); // sendBroadcast already logs on failure
 }
 
 void Mesh::loadMeshKeyFromEEPROM() {
