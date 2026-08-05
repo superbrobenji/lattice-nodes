@@ -18,8 +18,8 @@ using lattice::hw::readOwnMac;
 PirAdapter* PirAdapter::instance = nullptr;
 
 PirAdapter::PirAdapter(uint8_t pin)
-    : Adapter(pin), _pir(pin), _lastTrigger(0), _state(PirState::IDLE),
-      _interruptEnabled(false), _initialized(false), _lastHealthMillis(0) {
+    : Adapter(pin), _pir(pin), _lastTrigger(0), _state(PirState::IDLE), _interruptEnabled(false),
+      _initialized(false), _lastHealthMillis(0) {
   _adapterType = adapter_types::PIR_ADAPTER;
 }
 

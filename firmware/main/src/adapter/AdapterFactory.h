@@ -11,7 +11,7 @@ namespace adapter {
 // GPIO pins are 0-39). SERIAL_ADAPTER_DEFAULT_PIN's sentinel moves from -1 (not
 // representable in uint8_t) to 255 — still outside the valid 0-39 GPIO range.
 // LED_ADAPTER_DEFAULT_PIN removed in Phase G Task 2 alongside the LED stub.
-static constexpr uint8_t PIR_ADAPTER_DEFAULT_PIN = 27;    // PIR sensor pin
+static constexpr uint8_t PIR_ADAPTER_DEFAULT_PIN = 27;     // PIR sensor pin
 static constexpr uint8_t SERIAL_ADAPTER_DEFAULT_PIN = 255; // Serial doesn't need a pin
 
 class AdapterFactory {

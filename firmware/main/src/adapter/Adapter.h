@@ -39,7 +39,7 @@ protected:
 
 public:
   explicit Adapter(uint8_t pin); // Constructor
-  virtual ~Adapter() = default; // Ensure polymorphic destruction
+  virtual ~Adapter() = default;  // Ensure polymorphic destruction
 
   adapter_types getAdapterType() const; // Returns the adapter type
   void sendDataThroughMesh(const adapter_types type,

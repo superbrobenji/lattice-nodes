@@ -287,7 +287,7 @@ public:
     // standalone construction (unit tests) keeps working unchanged; this shrinks
     // it for leaves once the real role is known.
     e2eKeys.setCapacity(isMaster ? lattice::config::LATTICE_E2E_KEYCACHE_MAX
-                                  : lattice::config::LATTICE_E2E_KEYCACHE_MAX_LEAF);
+                                 : lattice::config::LATTICE_E2E_KEYCACHE_MAX_LEAF);
   }
 
   // Static trampoline for Adapter usage. NOTE: keep this exact 2-arg
