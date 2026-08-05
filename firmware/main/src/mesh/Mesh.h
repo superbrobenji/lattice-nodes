@@ -162,8 +162,23 @@ private:
   bool _dualMasterMode;
 
   // --- ESP-NOW receive ring buffer (lock-free SPSC) ---
-  static constexpr size_t RECV_QUEUE_SIZE = 8;
+  // (Phase G §4) Trimmed 8 -> 4: observed fan-in during Phase A + B testing never
+  // exceeded 3 concurrent frames; 4-deep gives a 1-slot margin. Raise back if real
+  // deployments show queue-full drops.
+  static constexpr size_t RECV_QUEUE_SIZE = 4;
 
+  // Phase G §7: CompactMessage (src/mesh/CompactMessage.h) was evaluated for
+  // recvQueue's element type but is NOT used here — see task-3-report.md.
+  // Every message type that flows through this queue (ADAPTER_DATA downlink
+  // relay, ROUTE_REPORT verify/relay, JOIN_ACK, ENROLLMENT relay) needs at
+  // least one wire-only field CompactMessage cannot carry without matching
+  // the wire message's own size (route_path/auth_tag/auth_path/
+  // enrollment_public_key are load-bearing everywhere; secondary_master_mac/
+  // secondary_public_key turned out to be load-bearing too — confirmed by
+  // DualMasterTest.UplinkReachesSecondaryMasterAfterFailover and
+  // ConfigSetFromSecondaryMasterIsHonoredAfterFailover failing when they were
+  // dropped). RECV_QUEUE_SIZE below (8 -> 4) is this bundle's actual queue
+  // RAM lever.
   struct RecvQueueEntry {
     uint8_t srcMac[6];
     mesh_message msg;
@@ -266,6 +281,13 @@ public:
       routes = std::make_unique<RouteTable>();
     if (!isMaster && routes)
       routes.reset();
+    // Phase G audit item B: role-split the E2E derived-key cache the same way —
+    // leaves only ever need one slot per master (primary + secondary), masters
+    // need one per enrolled node. E2EKeyStore defaults to the master size so
+    // standalone construction (unit tests) keeps working unchanged; this shrinks
+    // it for leaves once the real role is known.
+    e2eKeys.setCapacity(isMaster ? lattice::config::LATTICE_E2E_KEYCACHE_MAX
+                                 : lattice::config::LATTICE_E2E_KEYCACHE_MAX_LEAF);
   }
 
   // Static trampoline for Adapter usage. NOTE: keep this exact 2-arg

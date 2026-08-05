@@ -17,9 +17,9 @@ using lattice::hw::readOwnMac;
 
 PirAdapter* PirAdapter::instance = nullptr;
 
-PirAdapter::PirAdapter(int pin)
-    : Adapter(pin), _pir(pin), _cooldownSeconds(3), _lastTrigger(0), _timerActive(false),
-      _motionSent(false), _interruptEnabled(false), _initialized(false), _lastHealthMillis(0) {
+PirAdapter::PirAdapter(uint8_t pin)
+    : Adapter(pin), _pir(pin), _lastTrigger(0), _state(PirState::IDLE), _interruptEnabled(false),
+      _initialized(false), _lastHealthMillis(0) {
   _adapterType = adapter_types::PIR_ADAPTER;
 }
 
@@ -91,22 +91,20 @@ void PirAdapter::loop() {
 
   if (_pir.isMotionDetected()) {
     _lastTrigger = now;
-    _timerActive = true;
-    _motionSent = false;
+    _state = PirState::PENDING_SEND;
     _pir.clearMotion();
   }
 
-  if (_timerActive && !_motionSent) {
+  if (_state == PirState::PENDING_SEND) {
     LATTICE_LOGLN("PIR_Adapter", "MOTION DETECTED!", LogLevel::LOG_INFO);
-    _motionSent = true;
+    _state = PirState::COOLDOWN;
     uint8_t data[64] = {1};
     PirAdapter::sendDataTrampoline(_adapterType, data);
   }
 
-  if (_timerActive && (now - _lastTrigger > (_cooldownSeconds * 1000U))) {
+  if (_state == PirState::COOLDOWN && (now - _lastTrigger > (_cooldownSeconds * 1000U))) {
     LATTICE_LOGLN("PIR_Adapter", "Cooldown ended. Re-arming sensor.", LogLevel::LOG_DEBUG);
-    _timerActive = false;
-    _motionSent = false;
+    _state = PirState::IDLE;
 
     if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING)) {
       lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE,
@@ -132,9 +130,10 @@ void PirAdapter::simulateMotion() {
   // Drive the SAME path the hardware interrupt would (detectMotionTrampoline ->
   // detectMotion) instead of poking the sensor directly. detectMotion() honours
   // the _interruptEnabled gate and detaches the interrupt -- which is precisely
-  // how the device enforces its post-trigger cooldown: while _timerActive, the
-  // interrupt stays detached (re-armed only by loop() once _cooldownSeconds has
-  // elapsed), so a real PIR firing again mid-cooldown is physically ignored.
+  // how the device enforces its post-trigger cooldown: while _state is
+  // PENDING_SEND/COOLDOWN, the interrupt stays detached (re-armed only by
+  // loop() once _cooldownSeconds has elapsed), so a real PIR firing again
+  // mid-cooldown is physically ignored.
   // Calling _pir.signalMotion() directly bypassed that gate and let a simulated
   // re-trigger inject motion the hardware never could, masking the cooldown.
   LATTICE_LOGLN("PIR_Adapter", "SIM: Injecting fake PIR motion event", LogLevel::LOG_WARN);

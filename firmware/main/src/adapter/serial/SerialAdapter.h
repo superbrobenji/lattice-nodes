@@ -16,7 +16,7 @@ namespace adapter {
 
 class SerialAdapter : public Adapter {
 public:
-  explicit SerialAdapter(int pin);
+  explicit SerialAdapter(uint8_t pin);
 
   bool init() override;
   void loop() override;

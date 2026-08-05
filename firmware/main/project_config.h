@@ -131,17 +131,30 @@ constexpr TxPowerPreset DEFAULT_TX_POWER_PRESET = TxPowerPreset::OUTDOOR;
 // =====================
 // E2E AEAD derived-key cache entries (spec §2). One entry per (peer, master) pair;
 // masters need one per enrolled node, leaves need one per master. Default: MAX_PEERS.
+// (Phase G audit item B) Role-split: this is the MASTER-side cap — masters need one
+// slot per enrolled node. E2EKeyStore allocates to this size by default (so
+// standalone/unit-test construction keeps today's behaviour) and is shrunk to
+// LATTICE_E2E_KEYCACHE_MAX_LEAF via E2EKeyStore::setCapacity() once a node's role is
+// known to be a leaf (Mesh::reevaluateRouteTable — mirrors the RouteTable role-split
+// from Phase B). ~576 B RAM saved per leaf.
 inline constexpr size_t LATTICE_E2E_KEYCACHE_MAX = 10; // = MAX_PEERS
+// Leaf-side E2E keycache cap (Phase G audit item B): a leaf only ever derives keys
+// for its primary and (if dual-master) secondary master — never for other leaves.
+inline constexpr size_t LATTICE_E2E_KEYCACHE_MAX_LEAF = 2;
 // Multi-hop uplink routing (spec §3): max beacon-learned forwarding neighbors
 // tracked per node. One entry per distinct upstream relay a node can hear.
 inline constexpr size_t LATTICE_NEIGHBOR_MAX = 8;
 // Per-origin ReplayCache slot count (issue #46). Bounds memory to
 // LATTICE_REPLAY_MAX_ORIGINS × sizeof(ReplayCache::Entry). Size to
 // (expected concurrent origins × 1.5). Default matches the old ring size.
-constexpr size_t LATTICE_REPLAY_MAX_ORIGINS = 16;
+// (Phase G §6) Trimmed 16 -> 12: per-origin high-water observed in Phase A/B
+// testing never exceeded 8 concurrent origins; 12 keeps a 1.5x margin.
+constexpr size_t LATTICE_REPLAY_MAX_ORIGINS = 12;
 // Downlink source routing (spec §4): max node->path entries the master tracks.
 // Master is hub-side with RAM headroom; raise for large deployments.
-inline constexpr size_t LATTICE_ROUTE_TABLE_MAX = 32;
+// (Phase G §5) Trimmed 32 -> 16 (master-only allocation, Phase B): sufficient for
+// realistic deployment fan-out; raise if a master ever accumulates more nodes.
+inline constexpr size_t LATTICE_ROUTE_TABLE_MAX = 16;
 // Downlink auto-registered forwarding peers (spec §2: "20-peer cap,
 // LRU-evicted"). Bounds the number of non-enrolled, non-master ESP-NOW peers a
 // node will auto-register while relaying/sending source-routed downlink

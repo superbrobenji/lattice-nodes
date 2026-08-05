@@ -8,11 +8,15 @@ namespace lattice {
 namespace mesh {
 
 struct ReplayCache {
+  // Phase G audit item D: fields reordered (largest-alignment first) to save 4B
+  // of padding per entry vs the original {mac[6], epoch, seq, lastSeenMs, used}
+  // layout — mac[6]+epoch straddled a 4-byte boundary, forcing the compiler to
+  // pad after mac. Field semantics are unchanged.
   struct Entry {
-    uint8_t mac[6];
     uint32_t epoch;
-    uint16_t seq;
     uint32_t lastSeenMs;
+    uint16_t seq;
+    uint8_t mac[6];
     bool used;
   };
 
