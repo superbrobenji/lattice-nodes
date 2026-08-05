@@ -51,7 +51,7 @@ void SerialAdapter::sendHealthReport() {
   LATTICE_LOGLN("Serial_Adapter", "Health report sent via mesh", LogLevel::LOG_DEBUG);
 }
 
-SerialAdapter::SerialAdapter(int pin) : Adapter(pin), lastReportedHopCount(0) {
+SerialAdapter::SerialAdapter(uint8_t pin) : Adapter(pin), lastReportedHopCount(0) {
   _adapterType = adapter_types::SERIAL_ADAPTER;
 
   LATTICE_LOGLN("Serial_Adapter", "Serial_Adapter constructed with pin " + String(pin),

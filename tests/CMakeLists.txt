@@ -81,6 +81,7 @@ set(FIRMWARE_SOURCES
   ../firmware/main/src/mesh/PeerRegistry.cpp
   ../firmware/main/src/mesh/Mesh.cpp
   ../firmware/main/src/mesh/Enrollment.cpp
+  ../firmware/main/src/mesh/CompactMessage.cpp
 )
 
 enable_testing()
@@ -106,6 +107,7 @@ add_unit_test(test_e2e_crypto         unit/test_e2e_crypto.cpp)
 add_unit_test(test_e2e_keystore       unit/test_e2e_keystore.cpp)
 add_unit_test(test_neighbor_table     unit/test_neighbor_table.cpp)
 add_unit_test(test_route_table        unit/test_route_table.cpp)
+add_unit_test(test_compact_message    unit/test_compact_message.cpp)
 
 # ---- E2E simulation target — SIMULATE_MODE recompiles all firmware sources ----
 add_executable(lattice_e2e

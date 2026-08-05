@@ -20,7 +20,7 @@ void AdapterFactory::setDevMode(bool isDev) {
                 LogLevel::LOG_INFO);
 }
 
-Adapter* AdapterFactory::createAdapter(adapter_types type, int pin) {
+Adapter* AdapterFactory::createAdapter(adapter_types type, uint8_t pin) {
   switch (type) {
   case adapter_types::PIR_ADAPTER:
     LATTICE_LOGLN("Factory", "Creating PirAdapter", LogLevel::LOG_INFO);
@@ -71,7 +71,7 @@ void AdapterFactory::saveAdapterTypeToEEPROM(adapter_types type) {
 
 Adapter* AdapterFactory::createFromEEPROM() {
   adapter_types type = loadAdapterTypeFromEEPROM();
-  int pin = getDefaultPinForAdapter(type);
+  uint8_t pin = getDefaultPinForAdapter(type);
   return createAdapter(type, pin);
 }
 
@@ -88,7 +88,7 @@ void AdapterFactory::initializeDefaultsIfUnset() {
   }
 }
 
-int AdapterFactory::getDefaultPinForAdapter(adapter_types type) {
+uint8_t AdapterFactory::getDefaultPinForAdapter(adapter_types type) {
   switch (type) {
   case adapter_types::PIR_ADAPTER:
     return PIR_ADAPTER_DEFAULT_PIN;

@@ -14,7 +14,7 @@ namespace adapter {
 
 using namespace lattice::utils;
 
-Adapter::Adapter(int pin)
+Adapter::Adapter(uint8_t pin)
     : _pin(pin), _adapterType(adapter_types::UNKNOWN_ADAPTER), mesh_transmit_fn(nullptr) {
   LATTICE_LOGLN("Adapter", "Base adapter initialized with UNKNOWN_ADAPTER", LogLevel::LOG_DEBUG);
 }

@@ -30,13 +30,15 @@ enum adapter_types : int32_t {
 class Adapter {
 
 protected:
-  int _pin;                   // Hardware pin associated with the adapter
+  // Hardware pin associated with the adapter. ESP32 GPIO pins are 0-39 (uint8_t
+  // is ample headroom); Phase G audit item L shrinks this from int.
+  uint8_t _pin;
   adapter_types _adapterType; // Type identifier for the adapter
   typedef void (*TransmitPtr)(adapter_types, const uint8_t*);
   TransmitPtr mesh_transmit_fn;
 
 public:
-  explicit Adapter(int pin);    // Constructor
+  explicit Adapter(uint8_t pin); // Constructor
   virtual ~Adapter() = default; // Ensure polymorphic destruction
 
   adapter_types getAdapterType() const; // Returns the adapter type

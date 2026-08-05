@@ -10,7 +10,7 @@ namespace adapter {
 
 class PirAdapter : public Adapter {
 public:
-  explicit PirAdapter(int pin);
+  explicit PirAdapter(uint8_t pin);
   bool init() override;
   void loop() override;
   void onMeshDataImpl(const lattice::mesh::mesh_message& message) override;
@@ -28,11 +28,20 @@ public:
 #endif
 
 private:
+  // Phase G audit item K: motion-cooldown state collapsed from two bools
+  // (_timerActive/_motionSent — only 3 of their 4 combinations were ever
+  // reachable) into one 3-state enum.
+  //   IDLE         == old (timerActive=false, motionSent=false)
+  //   PENDING_SEND == old (timerActive=true,  motionSent=false)
+  //   COOLDOWN     == old (timerActive=true,  motionSent=true)
+  enum class PirState : uint8_t { IDLE, PENDING_SEND, COOLDOWN };
+
   hardware::Pir _pir;
-  uint16_t _cooldownSeconds;
+  // Never configured differently at runtime — was a per-instance member,
+  // now a compile-time constant (Phase G audit item K).
+  static constexpr uint16_t _cooldownSeconds = 3;
   uint32_t _lastTrigger;
-  bool _timerActive;
-  bool _motionSent;
+  PirState _state{PirState::IDLE};
   bool _interruptEnabled;
   bool _initialized;
   uint32_t _lastHealthMillis;

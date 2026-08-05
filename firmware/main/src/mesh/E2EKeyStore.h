@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include "E2ECrypto.h"
 #include "../../project_config.h"
 
@@ -15,9 +16,16 @@ namespace mesh {
 // IMPORTANT: Pointers returned via kUpOut/kDownOut are invalidated by any
 // subsequent getKeys() call that causes an eviction. Callers must use them
 // immediately and must NOT cache them across getKeys() calls.
+//
+// Phase G audit item B (role split): the backing storage is heap-allocated
+// (mirrors RouteTable's role-conditional allocation from Phase B) and defaults
+// to LATTICE_E2E_KEYCACHE_MAX (the master size) so standalone construction —
+// including existing unit tests that new up an E2EKeyStore directly — behaves
+// exactly as before. Mesh::reevaluateRouteTable() calls setCapacity() once the
+// real node role is known, shrinking leaves down to LATTICE_E2E_KEYCACHE_MAX_LEAF.
 class E2EKeyStore {
 public:
-  E2EKeyStore() = default;
+  E2EKeyStore() { setCapacity(config::LATTICE_E2E_KEYCACHE_MAX); }
   E2EKeyStore(const E2EKeyStore&) = delete;
   E2EKeyStore& operator=(const E2EKeyStore&) = delete;
   // Move is fine (and needed so composing types — e.g. Mesh, which now holds
@@ -28,9 +36,25 @@ public:
   // change, so a move is no riskier than an eviction.
   E2EKeyStore(E2EKeyStore&&) = default;
   E2EKeyStore& operator=(E2EKeyStore&&) = default;
+
+  // Resize the cache to `maxEntries` slots. Idempotent no-op if the capacity
+  // already matches (avoids reallocating — and losing every cached key — on
+  // every reevaluateRouteTable() call when the role hasn't actually changed).
+  // Reallocating drops any previously cached keys (cheap to re-derive); callers
+  // set this once at boot / on role change, before steady-state traffic.
+  void setCapacity(size_t maxEntries) {
+    if (maxEntries == capacity_)
+      return;
+    entries = maxEntries > 0 ? std::make_unique<Entry[]>(maxEntries) : nullptr;
+    capacity_ = maxEntries;
+    nextSlot = 0;
+  }
+
   bool getKeys(const uint8_t* mac, const uint8_t* ownPriv32, const uint8_t* peerPub32,
                const uint8_t** kUpOut, const uint8_t** kDownOut) {
-    for (size_t i = 0; i < config::LATTICE_E2E_KEYCACHE_MAX; ++i) {
+    if (capacity_ == 0)
+      return false;
+    for (size_t i = 0; i < capacity_; ++i) {
       if (entries[i].valid && memcmp(entries[i].mac, mac, 6) == 0) {
         *kUpOut = entries[i].kUp;
         *kDownOut = entries[i].kDown;
@@ -49,7 +73,7 @@ public:
     if (allZero)
       return false;
     Entry& e = entries[nextSlot];
-    nextSlot = (nextSlot + 1) % config::LATTICE_E2E_KEYCACHE_MAX;
+    nextSlot = (nextSlot + 1) % capacity_;
     crypto::deriveE2EKeys(ownPriv32, peerPub32, e.kUp, e.kDown);
     memcpy(e.mac, mac, 6);
     e.valid = true;
@@ -59,7 +83,8 @@ public:
   }
 
   void clear() {
-    memset(entries, 0, sizeof(entries));
+    if (capacity_ > 0)
+      memset(entries.get(), 0, capacity_ * sizeof(Entry));
     nextSlot = 0;
   }
 
@@ -70,7 +95,8 @@ private:
     uint8_t kUp[32];
     uint8_t kDown[32];
   };
-  Entry entries[config::LATTICE_E2E_KEYCACHE_MAX]{};
+  std::unique_ptr<Entry[]> entries;
+  size_t capacity_{0};
   size_t nextSlot{0};
 };
 

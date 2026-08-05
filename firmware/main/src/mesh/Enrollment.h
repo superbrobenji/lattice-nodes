@@ -46,12 +46,12 @@ private:
   uint8_t devicePublicKey[32]{};
 
   // Bounded, heap-free FIFO of enrollment requests awaiting relay to the server.
-  // Sized to RECV_QUEUE_SIZE (8): the master drains this queue once per loop()
-  // AFTER draining its ESP-NOW receive ring, so the enrollment requests from one
-  // drain pass accumulate here before being relayed in a batch. A single-slot latch
-  // (the previous design) silently dropped all but the last when two nodes
+  // Sized to RECV_QUEUE_SIZE (Phase G §4: 4): the master drains this queue once per
+  // loop() AFTER draining its ESP-NOW receive ring, so the enrollment requests from
+  // one drain pass accumulate here before being relayed in a batch. A single-slot
+  // latch (the previous design) silently dropped all but the last when two nodes
   // enrolled concurrently — see Task 9b Bug #6.
-  static constexpr size_t PENDING_RELAY_QUEUE_SIZE = 8;
+  static constexpr size_t PENDING_RELAY_QUEUE_SIZE = 4;
   struct PendingRelay {
     uint8_t mac[6];
     uint8_t pubKey[32];
