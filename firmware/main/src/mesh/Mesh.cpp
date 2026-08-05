@@ -2,6 +2,7 @@
 #include "src/network/MacAddress.h"
 #include "src/network/MacEq.h"
 #include "src/network/hw_mac.h"
+#include "src/network/mem.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
 #include "src/persistence/EepromManager.h"
@@ -1076,13 +1077,8 @@ bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, b
       // otherwise re-key the link to attacker-chosen material. An all-zero
       // stored key is a pre-enrollment placeholder (e.g. DEFAULT_PEERS), not
       // an established key, so upgrading it is allowed.
-      bool keyEstablished = false;
-      for (int i = 0; i < 32; ++i) {
-        if (p->publicKey[i] != 0) {
-          keyEstablished = true;
-          break;
-        }
-      }
+      // Thinned via lattice::mem::is_zero (Phase H2 audit item Z).
+      bool keyEstablished = !lattice::mem::is_zero(p->publicKey, 32);
       if (keyEstablished) {
         LATTICE_LOGLN("MESH", "Peer already registered — keeping established key",
                       LogLevel::LOG_DEBUG);

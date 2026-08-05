@@ -6,6 +6,7 @@
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 #include "src/adapter/Adapter.h"
 #include "src/network/MacEq.h"
+#include "src/network/mem.h"
 #include "config/master_pubkey_pin_wrapper.h"
 #include "project_config.h"
 // Mesh.h (post-Phase-G audit item U): only for the static Mesh::sendBroadcast
@@ -170,12 +171,8 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   // AEAD-protected same as before. Guarded on a non-zero secondary MAC.
   const uint8_t* secondaryMasterMac = msg.data + 4;
   const uint8_t* secondaryPublicKey = msg.data + 10;
-  bool hasSecondary = false;
-  for (int i = 0; i < 6; ++i)
-    if (secondaryMasterMac[i]) {
-      hasSecondary = true;
-      break;
-    }
+  // Thinned via lattice::mem::is_zero (Phase H2 audit item Z).
+  bool hasSecondary = !lattice::mem::is_zero(secondaryMasterMac, 6);
   if (hasSecondary) {
     bool secondaryRegistered = registerFn && registerFn(secondaryMasterMac, secondaryPublicKey);
     if (secondaryRegistered && !hasMasterMacSecondary) {
