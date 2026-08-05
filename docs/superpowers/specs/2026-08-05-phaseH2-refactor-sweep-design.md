@@ -14,10 +14,10 @@ Post-Phase-G audit surfaced 10 medium-scope DRY/OOP/pattern refactors. Bundled a
 
 ### R — `String`-concat elimination on hot paths
 
-**Where:** ~78 sites across `mesh/`, `adapter/`, `hardware/`.
-**Fix:** replace `String("x") + String(v)` args passed to `LATTICE_LOG*` with `snprintf(buf, sizeof(buf), "x %d", v)` into stack `char[N]`. Even at `LOG_NONE` (macro folds), the String temporaries no longer exist as build inputs — belt-and-braces for any future non-NONE build.
-**Migration:** grep `String(` usage inside `LATTICE_LOG*` args + high-frequency non-log String constructions. Rewrite mechanically.
-**Est:** removes heap churn on non-NONE builds; ~0.5-1 KB flash from dropped String inlining.
+**Where:** **23 sites** (verified 2026-08-05) `LATTICE_LOG*(...String(...)...)` across `mesh/`, `adapter/`, `hardware/`. The pre-audit "78 sites" estimate covered ALL `String(` constructions repo-wide; the log-specific hot-path subset is 23.
+**Fix:** replace `String("x") + String(v)` args passed to `LATTICE_LOG*` with `snprintf(buf, sizeof(buf), "x %d", v)` into stack `char[N]`. At production `LOG_NONE` the macro folds and String temporaries drop out of the build entirely (verified via post-Phase-G size run — no extra flash to reclaim there). Value is: belt-and-braces for any future non-NONE build, plus cleaner call sites.
+**Also survey:** high-frequency non-log String constructions if any surface during the migration — grep `String(` outside `LATTICE_LOG*` and check hot-path callers.
+**Est:** removes heap churn on non-NONE builds; ~0.5-1 KB flash from dropped String inlining under non-NONE.
 
 ### S — `DisplayManager::tick` throttle
 
@@ -33,9 +33,9 @@ Post-Phase-G audit surfaced 10 medium-scope DRY/OOP/pattern refactors. Bundled a
 
 ### U — `sendBroadcast` helper
 
-**Where:** `Mesh.cpp` 4 sites + `Enrollment.cpp:73` (5 total; audit had 5 sites — Phase G task 2 item E consolidated the MAC constant but not the send call).
+**Where:** **6 sites** (verified 2026-08-05) of `esp_now_send(BROADCAST_MAC, ...)` across `Mesh.cpp` + `Enrollment.cpp`. Phase G Task 2 item E consolidated the MAC constant into `broadcast_mac.h` but not the send call.
 **Fix:** `bool Mesh::sendBroadcast(const mesh_message& msg)` wraps `esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg))` + error handling. Callers become one-liners.
-**Est:** ~100-200 B flash.
+**Est:** ~150-250 B flash (6 sites × ~30-40 B each).
 
 ### V — Adapter control-op dispatch table
 
@@ -57,7 +57,7 @@ Post-Phase-G audit surfaced 10 medium-scope DRY/OOP/pattern refactors. Bundled a
 
 ### Y — Shared MAC-keyed-table helpers
 
-**Where:** 5 classes reimplement the "linear-scan-by-MAC + slot-allocate + `memcpy(entry.mac, mac, 6); valid=true;`" skeleton: `NeighborTable`, `RouteTable`, `E2EKeyStore`, `ReplayCache`, `PeerRegistry`. ~180 lines duplicated.
+**Where:** 5 classes reimplement the "linear-scan-by-MAC + slot-allocate + `memcpy(entry.mac, mac, 6); valid=true;`" skeleton: `NeighborTable`, `RouteTable`, `E2EKeyStore`, `ReplayCache`, `PeerRegistry`. ~180 lines duplicated. **Complementary to Phase G item Q** which added `lattice::mac::eq(a, b)` — that fixed the compare idiom; Y fixes the enclosing table skeleton.
 **Fix:** free-function helpers (NOT templated, to avoid bloat):
 ```cpp
 namespace lattice::mac_table {
@@ -78,11 +78,13 @@ Each class thins its `findSlot`/`allocateSlot` to a one-liner call.
 
 ### AA — Singleton → namespace migration
 
-**Where:** ~25 `getInstance()` sites: `EepromManager`, `Mesh`, `PirAdapter`, `ErrorCore`.
+**Where:** **39 `getInstance()` sites** (verified 2026-08-05) across `EepromManager`, `Mesh`, `PirAdapter`, `ErrorCore`.
 **Fix:** replace Meyers singletons with `namespace lattice::eeprom { ... }` free functions backed by file-static state. Each call site drops `__cxa_guard_*` prologue (~40 B + byte flag) per unique callsite.
 **Est:** ~0.5-1 KB flash + shorter callsites.
 
-**Scope caveat for AA:** `Mesh::instance` is used by static trampolines (`dataRecvTrampoline`, `registerPeerWithKeyTrampoline` etc.) that live inside class scope. Migrating away from `Mesh::getInstance()` requires either keeping the class or migrating trampolines to free functions with file-static access to a `Mesh*`. Non-trivial. Recommend deferring `Mesh` migration — do `EepromManager`, `PirAdapter`, `ErrorCore` only. Mesh singleton stays.
+**Scope caveat for AA:** `Mesh::instance` is used by static trampolines (`dataRecvTrampoline`, `registerPeerWithKeyTrampoline` etc.) that live inside class scope. Migrating away from `Mesh::getInstance()` requires either keeping the class or migrating trampolines to free functions with file-static access to a `Mesh*`. Non-trivial. Recommend deferring `Mesh` migration — do `EepromManager`, `PirAdapter`, `ErrorCore` only. `Mesh` singleton stays.
+
+**Additional note (2026-08-05):** grep counts confirm 39 total across all four singletons; the `Mesh` share is dominant. Deferring it keeps the item bounded to `EepromManager` (~25 sites), `PirAdapter` (~4), `ErrorCore` (~3) — realistically 30+ sites still tackled.
 
 ## Non-goals
 
