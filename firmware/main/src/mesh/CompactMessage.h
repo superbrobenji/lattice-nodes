@@ -34,18 +34,18 @@ namespace mesh {
 // MasterSendsSealedConfigSetThroughRelayToLeaf, which exercises the real
 // ISR->queue->drain pipeline for a downlink relay + AEAD open).
 //
-// What IS safe to drop: secondary_master_mac[6] + secondary_public_key[32]
-// (JOIN_ACK dual-master fields, Phase 4). No current test — unit or e2e —
-// exercises these fields via the real receive pipeline (dual-master e2e
-// coverage TOFU-learns the secondary from its BEACON, not from JOIN_ACK's
-// secondary fields; see tests/e2e/scenarios/test_dual_master_e2e.cpp's
-// top-of-file comment: full DATA failover via JOIN_ACK-conveyed secondary
-// keying is already a documented, pre-existing gap, not a working, tested
-// path). toWire() zeroes them on reconstruction — a Mesh::recvQueue frame
-// carrying a real dual-master JOIN_ACK's secondary fields over the air will
-// not propagate them past the compact boundary; this is a known, narrow,
-// test-verified-safe limitation of this optimization, not a new regression
-// of a working feature.
+// secondary_master_mac[6] + secondary_public_key[32] (JOIN_ACK dual-master
+// fields, Phase 4) have no dedicated slot in this struct — but as of
+// protocol v0.6.0 (wire shrink §8) they no longer have a dedicated slot on
+// the wire either. They were folded into mesh_message::data[64] at
+// data[4..42] (see SerialFraming::decode / Enrollment::processJoinAck).
+// Because toCompact()/toWire() copy data[64] verbatim (CompactMessage.cpp),
+// this secondary data DOES survive the compact round trip today: a
+// Mesh::recvQueue frame carrying a real dual-master JOIN_ACK's secondary
+// fields keeps them, embedded in dst.data, all the way through
+// drainRecvQueue's reconstruction. There is nothing to "drop" here anymore
+// — readers just need to know to pull the secondary MAC/pubkey out of
+// data[4..42] on JOIN_ACK frames, same as the wire form requires.
 struct CompactMessage {
   int32_t data_type;
   uint32_t epoch_num;
@@ -65,27 +65,31 @@ struct CompactMessage {
   uint8_t route_path[48];
   uint8_t auth_tag[16];
   uint8_t auth_path[8];
-  // Skipped (see rationale above): secondary_master_mac[6], secondary_public_key[32]
-  // (protocol v0.6.0 dropped these top-level wire fields entirely — see
-  // Enrollment::processJoinAck, which now reads the JOIN_ACK secondary from
-  // data[4..42] instead).
+  // No dedicated secondary_master_mac[6] / secondary_public_key[32] fields
+  // (see header comment above): protocol v0.6.0 dropped these as top-level
+  // wire fields entirely — see Enrollment::processJoinAck, which reads the
+  // JOIN_ACK secondary from data[4..42] instead. That data lives inside
+  // `data[64]` below and round-trips with it.
 };
-// CompactMessage carries every field mesh_message still has except
-// secondary_master_mac/secondary_public_key, which no longer exist on the
-// wire at all as of protocol v0.6.0 (they moved into JOIN_ACK's data[]
-// payload — see Enrollment::processJoinAck). Not currently used for Mesh::recvQueue
-// (see Mesh.h's RecvQueueEntry comment) — kept at <= 220 so a future consumer
-// noticing this doesn't have to re-derive the achievable budget from scratch.
+// CompactMessage has no dedicated field for secondary_master_mac/
+// secondary_public_key, which no longer exist as top-level wire fields as
+// of protocol v0.6.0 (they moved into JOIN_ACK's data[] payload — see
+// Enrollment::processJoinAck). They are still present, opaquely, inside
+// `data[64]` below, which toCompact()/toWire() copy verbatim. Not currently
+// used for Mesh::recvQueue (see Mesh.h's RecvQueueEntry comment) — kept at
+// <= 220 so a future consumer noticing this doesn't have to re-derive the
+// achievable budget from scratch.
 static_assert(sizeof(CompactMessage) <= 220, "CompactMessage residency budget");
 
 // Convert wire -> compact for enqueue. Copies every field CompactMessage
-// declares; secondary_master_mac/secondary_public_key are intentionally not
-// read (there is nowhere to put them).
+// declares, including data[64] verbatim — which carries JOIN_ACK's
+// secondary_master_mac/secondary_public_key at data[4..42] along with it.
 void toCompact(const mesh_message& src, CompactMessage& dst);
 
 // Convert compact -> wire for reconstruction (e.g. drainRecvQueue dispatch,
-// or re-sending a previously-queued frame). Fields CompactMessage does not
-// carry (secondary_master_mac, secondary_public_key) are zeroed in dst.
+// or re-sending a previously-queued frame). data[64] (including any
+// JOIN_ACK secondary_master_mac/secondary_public_key at data[4..42]) is
+// copied through verbatim from src.
 void toWire(const CompactMessage& src, mesh_message& dst);
 
 } // namespace mesh

@@ -129,12 +129,18 @@ bool SerialFraming::decode(const uint8_t* data, size_t len, lattice::mesh::mesh_
   }
 
   // Protocol v0.6.0 (wire shrink §8): secondary master identity lives in
-  // outMsg.data[4..42], not top-level fields. See encode() above.
-  if (pbMsg.has_secondaryMasterMac) {
-    memcpy(outMsg.data + 4, pbMsg.secondaryMasterMac.bytes, 6);
-  }
-  if (pbMsg.has_secondaryPublicKey) {
-    memcpy(outMsg.data + 10, pbMsg.secondaryPublicKey.bytes, 32);
+  // outMsg.data[4..42], not top-level fields. See encode() above. data[] is
+  // now a general-purpose payload shared by every message type, so also
+  // gate on message_type == JOIN_ACK (defense in depth): if the hub ever
+  // mis-sets these has_* flags on a non-JOIN_ACK frame, this must not
+  // silently corrupt that frame's data payload.
+  if (outMsg.message_type == MESH_TYPE_JOIN_ACK) {
+    if (pbMsg.has_secondaryMasterMac) {
+      memcpy(outMsg.data + 4, pbMsg.secondaryMasterMac.bytes, 6);
+    }
+    if (pbMsg.has_secondaryPublicKey) {
+      memcpy(outMsg.data + 10, pbMsg.secondaryPublicKey.bytes, 32);
+    }
   }
 
   // For server-to-device messages (JOIN_ACK, SERIAL_CMD_BROADCAST) the MAC
