@@ -43,8 +43,9 @@ public:
   void approveEnrollment(const uint8_t* nodeMac, const uint8_t* nodePubKey32);
 
   // Same as above, but also tells the node about a server-designated secondary
-  // master (Phase 4 dual-master failover): sets ack.secondary_master_mac/
-  // secondary_public_key before injecting the JOIN_ACK. SerialAdapter::
+  // master (Phase 4 dual-master failover): sets ack.data[4..42] (protocol
+  // v0.6.0 wire shrink §8 — secondary MAC + pubkey, previously top-level
+  // fields) before injecting the JOIN_ACK. SerialAdapter::
   // handleCompleteFrame forwards these into the 4-arg Mesh::enrollPeer overload,
   // which relays them on to the enrolling node's own JOIN_ACK, where
   // Enrollment::processJoinAck registers the secondary as a peer (so

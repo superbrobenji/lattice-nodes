@@ -150,21 +150,29 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
     LATTICE_LOGLN("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
   }
 
-  // Dual-master (spec §5): if the server included a secondary master, register it
-  // as a peer (persists mac+pubkey, so masterE2EKeys can derive against it after
-  // failover) and record it as the secondary for beacon adoption. Guarded on a
-  // non-zero secondary MAC.
+  // Dual-master (spec §5, wire shrink §8): if the server included a secondary
+  // master, register it as a peer (persists mac+pubkey, so masterE2EKeys can
+  // derive against it after failover) and record it as the secondary for
+  // beacon adoption. Protocol v0.6.0 packs the secondary into the JOIN_ACK
+  // data[] payload instead of top-level MeshMessage fields:
+  //   data[0..4]   = node pubkey fingerprint (already verified above)
+  //   data[4..10]  = secondaryMasterMac (zero if single-master)
+  //   data[10..42] = secondaryPublicKey (zero if single-master)
+  //   data[42..64] = zero
+  // AEAD authTag still covers data[64] exactly, so these bytes are
+  // AEAD-protected same as before. Guarded on a non-zero secondary MAC.
+  const uint8_t* secondaryMasterMac = msg.data + 4;
+  const uint8_t* secondaryPublicKey = msg.data + 10;
   bool hasSecondary = false;
   for (int i = 0; i < 6; ++i)
-    if (msg.secondary_master_mac[i]) {
+    if (secondaryMasterMac[i]) {
       hasSecondary = true;
       break;
     }
   if (hasSecondary) {
-    bool secondaryRegistered =
-        registerFn && registerFn(msg.secondary_master_mac, msg.secondary_public_key);
+    bool secondaryRegistered = registerFn && registerFn(secondaryMasterMac, secondaryPublicKey);
     if (secondaryRegistered && !hasMasterMacSecondary) {
-      memcpy(knownMasterMacSecondary, msg.secondary_master_mac, 6);
+      memcpy(knownMasterMacSecondary, secondaryMasterMac, 6);
       hasMasterMacSecondary = true;
       EepromManager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
     }

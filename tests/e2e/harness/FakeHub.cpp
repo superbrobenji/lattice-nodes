@@ -113,10 +113,12 @@ void FakeHub::approveEnrollment(const uint8_t* nodeMac, const uint8_t* nodePubKe
   memcpy(ack.data, nodePubKey32, 4);
   // Server-designated secondary master (Phase 4 dual-master failover). Left
   // zeroed by the 2-arg overload above, which SerialAdapter::handleCompleteFrame
-  // treats as "no secondary present" (see its all-zero secondary_master_mac
-  // check) and so falls back to the plain 2-arg Mesh::enrollPeer.
-  memcpy(ack.secondary_master_mac, secondaryMac, 6);
-  memcpy(ack.secondary_public_key, secondaryPubKey32, 32);
+  // treats as "no secondary present" (see its all-zero secondaryMasterMac
+  // check). Protocol v0.6.0 (wire shrink §8) packs this into the JOIN_ACK
+  // data[] payload rather than top-level fields: data[4..10] = secondary MAC,
+  // data[10..42] = secondary pubkey.
+  memcpy(ack.data + 4, secondaryMac, 6);
+  memcpy(ack.data + 10, secondaryPubKey32, 32);
   sendFrame(ack);
 }
 
