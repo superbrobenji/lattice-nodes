@@ -3,121 +3,158 @@
 #include <cstdio>
 
 namespace lattice {
-namespace utils {
+namespace eeprom {
 
-EepromManager::EepromManager() : isInitialized(false), isDevMode(false) {}
+using namespace lattice::utils;
 
-EepromManager::~EepromManager() {
-  if (isInitialized) {
-    _prefs.end();
+namespace {
+
+detail::State _state;
+
+// Runs at process-exit (static-storage-duration teardown), mirroring the old
+// EepromManager::~EepromManager()'s "close NVS if we ever opened it" behavior.
+struct Cleanup {
+  ~Cleanup() {
+    if (_state.isInitialized) {
+      _state.prefs.end();
+    }
+  }
+} _cleanup;
+
+bool ensureInitialized() {
+  if (!_state.isInitialized) {
+    LATTICE_LOGLN("NVS", "NVS not initialized", lattice::utils::LogLevel::LOG_ERROR);
+    return false;
+  }
+  return true;
+}
+
+void logOperation(const char* operation, const char* details = nullptr) {
+  if (details) {
+    char buf[80];
+    snprintf(buf, sizeof(buf), "%s: %s", operation, details);
+    LATTICE_LOGLN("NVS", buf, lattice::utils::LogLevel::LOG_DEBUG);
+  } else {
+    LATTICE_LOGLN("NVS", operation, lattice::utils::LogLevel::LOG_DEBUG);
   }
 }
 
-EepromManager& EepromManager::getInstance() {
-  static EepromManager instance;
-  return instance;
+uint16_t crc16(const uint8_t* data, size_t len) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= static_cast<uint16_t>(data[i]) << 8;
+    for (int j = 0; j < 8; ++j)
+      crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : (crc << 1);
+  }
+  return crc;
 }
 
-bool EepromManager::init() {
-  if (isInitialized)
+// Tiered NVS write-return handling (issue #43). `got`/`want` are the bytes
+// actually written vs. requested by the preceding put* call. securityRelevant=true
+// escalates a short write via lattice::err::fail (halts the node); false logs
+// at ERROR and lets the caller continue.
+bool persistOrEscalate(const char* key, size_t got, size_t want, bool securityRelevant) {
+  if (got == want) {
     return true;
-  if (!_prefs.begin(NVS_KEYS::NAMESPACE, false)) {
-    LATTICE_LOGLN("NVS", "Failed to open NVS namespace", LogLevel::LOG_ERROR);
+  }
+  if (securityRelevant) {
+    lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 5,
+                       "NVS write failed (security-relevant key)");
+    return false; // unreachable outside UNIT_TEST
+  }
+  {
+    char buf[96];
+    snprintf(buf, sizeof(buf), "write failed key=%s got=%u want=%u", key, (unsigned)got,
+             (unsigned)want);
+    LATTICE_LOGLN("NVS", buf, lattice::utils::LogLevel::LOG_ERROR);
+  }
+  return false;
+}
+
+} // namespace
+
+bool init() {
+  if (_state.isInitialized)
+    return true;
+  if (!_state.prefs.begin(NVS_KEYS::NAMESPACE, false)) {
+    LATTICE_LOGLN("NVS", "Failed to open NVS namespace", lattice::utils::LogLevel::LOG_ERROR);
     lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 1,
                        "EepromManager: NVS begin failed");
     return false;
   }
-  isInitialized = true;
+  _state.isInitialized = true;
 
-  uint8_t reason = _prefs.getUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
+  uint8_t reason = _state.prefs.getUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
   if (reason == 0x00) {
-    size_t n = _prefs.putUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
-    _persistOrEscalate(NVS_KEYS::REBOOT_REASON, n, sizeof(uint8_t), /*securityRelevant=*/false);
+    size_t n = _state.prefs.putUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
+    persistOrEscalate(NVS_KEYS::REBOOT_REASON, n, sizeof(uint8_t), /*securityRelevant=*/false);
   }
-  uint8_t count = _prefs.getUChar(NVS_KEYS::REBOOT_COUNT, 0);
+  uint8_t count = _state.prefs.getUChar(NVS_KEYS::REBOOT_COUNT, 0);
   if (count > 10) {
-    size_t n = _prefs.putUChar(NVS_KEYS::REBOOT_COUNT, 0);
-    _persistOrEscalate(NVS_KEYS::REBOOT_COUNT, n, sizeof(uint8_t), /*securityRelevant=*/false);
+    size_t n = _state.prefs.putUChar(NVS_KEYS::REBOOT_COUNT, 0);
+    persistOrEscalate(NVS_KEYS::REBOOT_COUNT, n, sizeof(uint8_t), /*securityRelevant=*/false);
   }
 
   logOperation("Initialized", "NVS ready");
   return true;
 }
 
-void EepromManager::setDevMode(bool devMode) {
-  isDevMode = devMode;
+void setDevMode(bool devMode) {
+  _state.isDevMode = devMode;
   logOperation("Dev mode set", devMode ? "Development mode enabled" : "Production mode enabled");
 }
 
-bool EepromManager::getDevMode() const {
-  return isDevMode;
+bool getDevMode() {
+  return _state.isDevMode;
 }
 
-bool EepromManager::ensureInitialized() {
-  if (!isInitialized) {
-    LATTICE_LOGLN("NVS", "NVS not initialized", LogLevel::LOG_ERROR);
-    return false;
-  }
-  return true;
-}
-
-void EepromManager::logOperation(const char* operation, const char* details) {
-  if (details) {
-    char buf[80];
-    snprintf(buf, sizeof(buf), "%s: %s", operation, details);
-    LATTICE_LOGLN("NVS", buf, LogLevel::LOG_DEBUG);
-  } else {
-    LATTICE_LOGLN("NVS", operation, LogLevel::LOG_DEBUG);
-  }
-}
-
-bool EepromManager::loadMasterFlag() {
+bool loadMasterFlag() {
   if (!ensureInitialized())
     return false;
-  return _prefs.getBool(NVS_KEYS::MASTER_FLAG, false);
+  return _state.prefs.getBool(NVS_KEYS::MASTER_FLAG, false);
 }
 
-void EepromManager::saveMasterFlag(bool isMaster) {
-  if (!ensureInitialized() || isDevMode)
+void saveMasterFlag(bool isMaster) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  size_t n = _prefs.putBool(NVS_KEYS::MASTER_FLAG, isMaster);
-  _persistOrEscalate(NVS_KEYS::MASTER_FLAG, n, 1, /*securityRelevant=*/false);
+  size_t n = _state.prefs.putBool(NVS_KEYS::MASTER_FLAG, isMaster);
+  persistOrEscalate(NVS_KEYS::MASTER_FLAG, n, 1, /*securityRelevant=*/false);
   logOperation("Master flag saved", isMaster ? "Master" : "Node");
 }
 
-bool EepromManager::loadDevFlag() {
+bool loadDevFlag() {
   if (!ensureInitialized())
     return false;
-  return _prefs.getBool(NVS_KEYS::DEV_FLAG, false);
+  return _state.prefs.getBool(NVS_KEYS::DEV_FLAG, false);
 }
 
-void EepromManager::saveDevFlag(bool isDev) {
-  if (!ensureInitialized() || isDevMode)
+void saveDevFlag(bool isDev) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  size_t n = _prefs.putBool(NVS_KEYS::DEV_FLAG, isDev);
-  _persistOrEscalate(NVS_KEYS::DEV_FLAG, n, 1, /*securityRelevant=*/false);
+  size_t n = _state.prefs.putBool(NVS_KEYS::DEV_FLAG, isDev);
+  persistOrEscalate(NVS_KEYS::DEV_FLAG, n, 1, /*securityRelevant=*/false);
 }
 
-bool EepromManager::loadMeshKey(uint8_t* key, size_t keySize) {
+bool loadMeshKey(uint8_t* key, size_t keySize) {
   if (!ensureInitialized())
     return false;
   if (keySize != EEPROM_SIZES::MESH_KEY_SIZE)
     return false;
-  size_t read = _prefs.getBytes(NVS_KEYS::MESH_KEY, key, keySize);
+  size_t read = _state.prefs.getBytes(NVS_KEYS::MESH_KEY, key, keySize);
   return read == keySize;
 }
 
-void EepromManager::saveMeshKey(const uint8_t* key, size_t keySize) {
-  if (!ensureInitialized() || isDevMode)
+void saveMeshKey(const uint8_t* key, size_t keySize) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
   if (keySize != EEPROM_SIZES::MESH_KEY_SIZE)
     return;
-  size_t n = _prefs.putBytes(NVS_KEYS::MESH_KEY, key, keySize);
-  _persistOrEscalate(NVS_KEYS::MESH_KEY, n, keySize, /*securityRelevant=*/true);
+  size_t n = _state.prefs.putBytes(NVS_KEYS::MESH_KEY, key, keySize);
+  persistOrEscalate(NVS_KEYS::MESH_KEY, n, keySize, /*securityRelevant=*/true);
   logOperation("Mesh key saved");
 }
 
-bool EepromManager::loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
+bool loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
   if (!ensureInitialized())
     return false;
   if (maxPeers > EEPROM_SIZES::MAX_PEERS)
@@ -132,100 +169,90 @@ bool EepromManager::loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
   // buffer was read as real peer records — an uninitialized-memory bug that
   // could inject bogus peers with garbage MAC/public-key bytes.
   memset(peerRecords, 0xFF, maxBytes);
-  size_t read = _prefs.getBytes(NVS_KEYS::PEER_LIST, peerRecords, maxBytes);
+  size_t read = _state.prefs.getBytes(NVS_KEYS::PEER_LIST, peerRecords, maxBytes);
   if (read == 0) {
     return false;
   }
   return true;
 }
 
-void EepromManager::savePeerList(const uint8_t* peerRecords, size_t numPeers) {
-  if (!ensureInitialized() || isDevMode)
+void savePeerList(const uint8_t* peerRecords, size_t numPeers) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
   if (numPeers > EEPROM_SIZES::MAX_PEERS)
     return;
   if (numPeers == 0) {
-    _prefs.remove(NVS_KEYS::PEER_LIST);
+    _state.prefs.remove(NVS_KEYS::PEER_LIST);
   } else {
     size_t want = numPeers * EEPROM_SIZES::PEER_RECORD_SIZE;
-    size_t n = _prefs.putBytes(NVS_KEYS::PEER_LIST, peerRecords, want);
+    size_t n = _state.prefs.putBytes(NVS_KEYS::PEER_LIST, peerRecords, want);
     // securityRelevant=true: each record carries a peer's E2E public key —
     // trust material, same tier as MESH_KEY/KNOWN_MASTER_MAC below.
-    _persistOrEscalate(NVS_KEYS::PEER_LIST, n, want, /*securityRelevant=*/true);
+    persistOrEscalate(NVS_KEYS::PEER_LIST, n, want, /*securityRelevant=*/true);
   }
   logOperation("Peer list saved", String(numPeers).c_str());
 }
 
-bool EepromManager::hasPeers() {
+bool hasPeers() {
   if (!ensureInitialized())
     return false;
-  return _prefs.isKey(NVS_KEYS::PEER_LIST);
+  return _state.prefs.isKey(NVS_KEYS::PEER_LIST);
 }
 
-void EepromManager::clearPeerList() {
+void clearPeerList() {
   if (!ensureInitialized())
     return;
-  _prefs.remove(NVS_KEYS::PEER_LIST);
+  _state.prefs.remove(NVS_KEYS::PEER_LIST);
   logOperation("Peer list cleared");
 }
 
-uint8_t EepromManager::loadAdapterType() {
+uint8_t loadAdapterType() {
   if (!ensureInitialized())
     return 0;
-  return _prefs.getUChar(NVS_KEYS::ADAPTER_TYPE, 0);
+  return _state.prefs.getUChar(NVS_KEYS::ADAPTER_TYPE, 0);
 }
 
-void EepromManager::saveAdapterType(uint8_t adapterType) {
-  if (!ensureInitialized() || isDevMode)
+void saveAdapterType(uint8_t adapterType) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  size_t n = _prefs.putUChar(NVS_KEYS::ADAPTER_TYPE, adapterType);
-  _persistOrEscalate(NVS_KEYS::ADAPTER_TYPE, n, sizeof(uint8_t), /*securityRelevant=*/false);
+  size_t n = _state.prefs.putUChar(NVS_KEYS::ADAPTER_TYPE, adapterType);
+  persistOrEscalate(NVS_KEYS::ADAPTER_TYPE, n, sizeof(uint8_t), /*securityRelevant=*/false);
 }
 
-uint8_t EepromManager::loadRebootCount() {
+uint8_t loadRebootCount() {
   if (!ensureInitialized())
     return 0;
-  return _prefs.getUChar(NVS_KEYS::REBOOT_COUNT, 0);
+  return _state.prefs.getUChar(NVS_KEYS::REBOOT_COUNT, 0);
 }
 
-void EepromManager::saveRebootCount(uint8_t count) {
-  if (!ensureInitialized() || isDevMode)
+void saveRebootCount(uint8_t count) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  size_t n = _prefs.putUChar(NVS_KEYS::REBOOT_COUNT, count);
-  _persistOrEscalate(NVS_KEYS::REBOOT_COUNT, n, sizeof(uint8_t), /*securityRelevant=*/false);
+  size_t n = _state.prefs.putUChar(NVS_KEYS::REBOOT_COUNT, count);
+  persistOrEscalate(NVS_KEYS::REBOOT_COUNT, n, sizeof(uint8_t), /*securityRelevant=*/false);
 }
 
-void EepromManager::saveRebootReason(uint8_t reason) {
-  if (!ensureInitialized() || isDevMode)
+void saveRebootReason(uint8_t reason) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  size_t n = _prefs.putUChar(NVS_KEYS::REBOOT_REASON, reason);
-  _persistOrEscalate(NVS_KEYS::REBOOT_REASON, n, sizeof(uint8_t), /*securityRelevant=*/false);
+  size_t n = _state.prefs.putUChar(NVS_KEYS::REBOOT_REASON, reason);
+  persistOrEscalate(NVS_KEYS::REBOOT_REASON, n, sizeof(uint8_t), /*securityRelevant=*/false);
 }
 
-uint8_t EepromManager::loadRebootReason() {
+uint8_t loadRebootReason() {
   if (!ensureInitialized())
     return 0xFF;
-  return _prefs.getUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
+  return _state.prefs.getUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
 }
 
-static uint16_t crc16(const uint8_t* data, size_t len) {
-  uint16_t crc = 0xFFFF;
-  for (size_t i = 0; i < len; ++i) {
-    crc ^= static_cast<uint16_t>(data[i]) << 8;
-    for (int j = 0; j < 8; ++j)
-      crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : (crc << 1);
-  }
-  return crc;
-}
-
-bool EepromManager::loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
+bool loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
   if (!ensureInitialized())
     return false;
-  size_t privRead = _prefs.getBytes(NVS_KEYS::PRIVATE_KEY, privateKey32, 32);
-  size_t pubRead = _prefs.getBytes(NVS_KEYS::PUBLIC_KEY, publicKey32, 32);
+  size_t privRead = _state.prefs.getBytes(NVS_KEYS::PRIVATE_KEY, privateKey32, 32);
+  size_t pubRead = _state.prefs.getBytes(NVS_KEYS::PUBLIC_KEY, publicKey32, 32);
   if (privRead != 32 || pubRead != 32)
     return false;
-  uint32_t stored = _prefs.getUInt(NVS_KEYS::KEYPAIR_CRC, 0xFFFFFFFF);
+  uint32_t stored = _state.prefs.getUInt(NVS_KEYS::KEYPAIR_CRC, 0xFFFFFFFF);
   if (stored == 0xFFFFFFFF)
     return false;
   uint8_t both[64];
@@ -233,66 +260,66 @@ bool EepromManager::loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
   memcpy(both + 32, publicKey32, 32);
   uint16_t computed = crc16(both, 64);
   if (static_cast<uint16_t>(stored) != computed) {
-    LATTICE_LOGLN("NVS", "Keypair CRC mismatch", LogLevel::LOG_WARN);
+    LATTICE_LOGLN("NVS", "Keypair CRC mismatch", lattice::utils::LogLevel::LOG_WARN);
     return false;
   }
   return true;
 }
 
-void EepromManager::saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32) {
-  if (!ensureInitialized() || isDevMode)
+void saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
   // securityRelevant=true on all three: this is the device's long-term
   // identity keypair — the same tier as MESH_KEY/KNOWN_MASTER_MAC below.
-  size_t nPriv = _prefs.putBytes(NVS_KEYS::PRIVATE_KEY, privateKey32, 32);
-  _persistOrEscalate(NVS_KEYS::PRIVATE_KEY, nPriv, 32, /*securityRelevant=*/true);
-  size_t nPub = _prefs.putBytes(NVS_KEYS::PUBLIC_KEY, publicKey32, 32);
-  _persistOrEscalate(NVS_KEYS::PUBLIC_KEY, nPub, 32, /*securityRelevant=*/true);
+  size_t nPriv = _state.prefs.putBytes(NVS_KEYS::PRIVATE_KEY, privateKey32, 32);
+  persistOrEscalate(NVS_KEYS::PRIVATE_KEY, nPriv, 32, /*securityRelevant=*/true);
+  size_t nPub = _state.prefs.putBytes(NVS_KEYS::PUBLIC_KEY, publicKey32, 32);
+  persistOrEscalate(NVS_KEYS::PUBLIC_KEY, nPub, 32, /*securityRelevant=*/true);
   uint8_t both[64];
   memcpy(both, privateKey32, 32);
   memcpy(both + 32, publicKey32, 32);
   uint16_t crc = crc16(both, 64);
-  size_t nCrc = _prefs.putUInt(NVS_KEYS::KEYPAIR_CRC, static_cast<uint32_t>(crc));
-  _persistOrEscalate(NVS_KEYS::KEYPAIR_CRC, nCrc, sizeof(uint32_t), /*securityRelevant=*/true);
+  size_t nCrc = _state.prefs.putUInt(NVS_KEYS::KEYPAIR_CRC, static_cast<uint32_t>(crc));
+  persistOrEscalate(NVS_KEYS::KEYPAIR_CRC, nCrc, sizeof(uint32_t), /*securityRelevant=*/true);
   logOperation("Keypair saved");
 }
 
-bool EepromManager::loadEnrolledFlag() {
+bool loadEnrolledFlag() {
   if (!ensureInitialized())
     return false;
-  return _prefs.getBool(NVS_KEYS::ENROLLED_FLAG, false);
+  return _state.prefs.getBool(NVS_KEYS::ENROLLED_FLAG, false);
 }
 
-void EepromManager::saveEnrolledFlag(bool enrolled) {
-  if (!ensureInitialized() || isDevMode)
+void saveEnrolledFlag(bool enrolled) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  size_t n = _prefs.putBool(NVS_KEYS::ENROLLED_FLAG, enrolled);
-  _persistOrEscalate(NVS_KEYS::ENROLLED_FLAG, n, 1, /*securityRelevant=*/false);
+  size_t n = _state.prefs.putBool(NVS_KEYS::ENROLLED_FLAG, enrolled);
+  persistOrEscalate(NVS_KEYS::ENROLLED_FLAG, n, 1, /*securityRelevant=*/false);
 }
 
-uint32_t EepromManager::loadBootEpoch() {
+uint32_t loadBootEpoch() {
   if (!ensureInitialized())
     return 0;
-  if (isDevMode)
-    return _devEpoch;
-  return _prefs.getUInt(NVS_KEYS::BOOT_EPOCH, 0);
+  if (_state.isDevMode)
+    return _state.devEpoch;
+  return _state.prefs.getUInt(NVS_KEYS::BOOT_EPOCH, 0);
 }
 
-void EepromManager::saveBootEpoch(uint32_t epoch) {
+void saveBootEpoch(uint32_t epoch) {
   if (!ensureInitialized())
     return;
-  if (isDevMode) {
-    _devEpoch = epoch;
+  if (_state.isDevMode) {
+    _state.devEpoch = epoch;
     return;
   }
-  size_t n = _prefs.putUInt(NVS_KEYS::BOOT_EPOCH, epoch);
-  _persistOrEscalate(NVS_KEYS::BOOT_EPOCH, n, sizeof(uint32_t), /*securityRelevant=*/true);
+  size_t n = _state.prefs.putUInt(NVS_KEYS::BOOT_EPOCH, epoch);
+  persistOrEscalate(NVS_KEYS::BOOT_EPOCH, n, sizeof(uint32_t), /*securityRelevant=*/true);
 }
 
-bool EepromManager::loadKnownMasterMac(uint8_t* mac) {
+bool loadKnownMasterMac(uint8_t* mac) {
   if (!ensureInitialized())
     return false;
-  size_t read = _prefs.getBytes(NVS_KEYS::KNOWN_MASTER_MAC, mac, 6);
+  size_t read = _state.prefs.getBytes(NVS_KEYS::KNOWN_MASTER_MAC, mac, 6);
   if (read != 6)
     return false;
   bool allFF = true;
@@ -305,25 +332,25 @@ bool EepromManager::loadKnownMasterMac(uint8_t* mac) {
   return !allFF;
 }
 
-void EepromManager::saveKnownMasterMac(const uint8_t* mac) {
-  if (!ensureInitialized() || isDevMode)
+void saveKnownMasterMac(const uint8_t* mac) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  size_t n = _prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC, mac, 6);
-  _persistOrEscalate(NVS_KEYS::KNOWN_MASTER_MAC, n, 6, /*securityRelevant=*/true);
+  size_t n = _state.prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC, mac, 6);
+  persistOrEscalate(NVS_KEYS::KNOWN_MASTER_MAC, n, 6, /*securityRelevant=*/true);
   logOperation("Known master MAC saved");
 }
 
-void EepromManager::clearKnownMasterMac() {
-  if (!ensureInitialized() || isDevMode)
+void clearKnownMasterMac() {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  _prefs.remove(NVS_KEYS::KNOWN_MASTER_MAC);
+  _state.prefs.remove(NVS_KEYS::KNOWN_MASTER_MAC);
   logOperation("Known master MAC cleared");
 }
 
-bool EepromManager::loadKnownMasterMacSecondary(uint8_t* mac) {
+bool loadKnownMasterMacSecondary(uint8_t* mac) {
   if (!ensureInitialized())
     return false;
-  size_t read = _prefs.getBytes(NVS_KEYS::KNOWN_MASTER_MAC_SEC, mac, 6);
+  size_t read = _state.prefs.getBytes(NVS_KEYS::KNOWN_MASTER_MAC_SEC, mac, 6);
   if (read != 6)
     return false;
   bool allFF = true;
@@ -336,80 +363,71 @@ bool EepromManager::loadKnownMasterMacSecondary(uint8_t* mac) {
   return !allFF;
 }
 
-void EepromManager::saveKnownMasterMacSecondary(const uint8_t* mac) {
-  if (!ensureInitialized() || isDevMode)
+void saveKnownMasterMacSecondary(const uint8_t* mac) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  size_t n = _prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC_SEC, mac, 6);
-  _persistOrEscalate(NVS_KEYS::KNOWN_MASTER_MAC_SEC, n, 6, /*securityRelevant=*/true);
+  size_t n = _state.prefs.putBytes(NVS_KEYS::KNOWN_MASTER_MAC_SEC, mac, 6);
+  persistOrEscalate(NVS_KEYS::KNOWN_MASTER_MAC_SEC, n, 6, /*securityRelevant=*/true);
   logOperation("Known secondary master MAC saved");
 }
 
-void EepromManager::clearKnownMasterMacSecondary() {
-  if (!ensureInitialized() || isDevMode)
+void clearKnownMasterMacSecondary() {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  _prefs.remove(NVS_KEYS::KNOWN_MASTER_MAC_SEC);
+  _state.prefs.remove(NVS_KEYS::KNOWN_MASTER_MAC_SEC);
 }
 
-lattice::config::TxPowerPreset EepromManager::loadTxPowerPreset() {
+lattice::config::TxPowerPreset loadTxPowerPreset() {
   if (!ensureInitialized())
     return lattice::config::DEFAULT_TX_POWER_PRESET;
-  uint8_t val = _prefs.getUChar(NVS_KEYS::TX_POWER_PRESET, 0xFF);
+  uint8_t val = _state.prefs.getUChar(NVS_KEYS::TX_POWER_PRESET, 0xFF);
   if (val > 2)
     return lattice::config::DEFAULT_TX_POWER_PRESET;
   return static_cast<lattice::config::TxPowerPreset>(val);
 }
 
-void EepromManager::saveTxPowerPreset(lattice::config::TxPowerPreset preset) {
-  if (!ensureInitialized() || isDevMode)
+void saveTxPowerPreset(lattice::config::TxPowerPreset preset) {
+  if (!ensureInitialized() || _state.isDevMode)
     return;
-  size_t n = _prefs.putUChar(NVS_KEYS::TX_POWER_PRESET, static_cast<uint8_t>(preset));
-  _persistOrEscalate(NVS_KEYS::TX_POWER_PRESET, n, sizeof(uint8_t), /*securityRelevant=*/false);
+  size_t n = _state.prefs.putUChar(NVS_KEYS::TX_POWER_PRESET, static_cast<uint8_t>(preset));
+  persistOrEscalate(NVS_KEYS::TX_POWER_PRESET, n, sizeof(uint8_t), /*securityRelevant=*/false);
   logOperation("TX power preset saved");
 }
 
-uint8_t EepromManager::loadNodeId() {
+uint8_t loadNodeId() {
   if (!ensureInitialized())
     return 0;
-  return _prefs.getUChar(NVS_KEYS::NODE_ID, 0);
+  return _state.prefs.getUChar(NVS_KEYS::NODE_ID, 0);
 }
 
-void EepromManager::saveNodeId(uint8_t nodeId) {
+void saveNodeId(uint8_t nodeId) {
   if (!ensureInitialized())
     return;
-  size_t n = _prefs.putUChar(NVS_KEYS::NODE_ID, nodeId);
-  _persistOrEscalate(NVS_KEYS::NODE_ID, n, sizeof(uint8_t), /*securityRelevant=*/false);
+  size_t n = _state.prefs.putUChar(NVS_KEYS::NODE_ID, nodeId);
+  persistOrEscalate(NVS_KEYS::NODE_ID, n, sizeof(uint8_t), /*securityRelevant=*/false);
   logOperation("saveNodeId");
 }
 
-void EepromManager::clearAll() {
+void clearAll() {
   if (!ensureInitialized())
     return;
-  _prefs.clear();
+  _state.prefs.clear();
   logOperation("All NVS cleared");
 }
 
-void EepromManager::dumpEEPROM() {
-  LATTICE_LOGLN("NVS", "NVS dump not implemented (use idf.py nvs-dump)", LogLevel::LOG_INFO);
+void dumpEEPROM() {
+  LATTICE_LOGLN("NVS", "NVS dump not implemented (use idf.py nvs-dump)", lattice::utils::LogLevel::LOG_INFO);
 }
 
-bool EepromManager::_persistOrEscalate(const char* key, size_t got, size_t want,
-                                       bool securityRelevant) {
-  if (got == want) {
-    return true;
-  }
-  if (securityRelevant) {
-    lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 5,
-                       "NVS write failed (security-relevant key)");
-    return false; // unreachable outside UNIT_TEST
-  }
-  {
-    char buf[96];
-    snprintf(buf, sizeof(buf), "write failed key=%s got=%u want=%u", key, (unsigned)got,
-             (unsigned)want);
-    LATTICE_LOGLN("NVS", buf, LogLevel::LOG_ERROR);
-  }
-  return false;
+#ifdef UNIT_TEST
+bool isInitializedForTest() {
+  return _state.isInitialized;
 }
 
-} // namespace utils
+detail::State& debugStateForTest() {
+  return _state;
+}
+#endif
+
+} // namespace eeprom
 } // namespace lattice

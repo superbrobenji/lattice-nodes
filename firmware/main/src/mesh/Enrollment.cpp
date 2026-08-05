@@ -34,24 +34,23 @@ Enrollment::Enrollment() {
 // Host test builds compile them for real against a host-built mbedtls (see tests/CMakeLists.txt).
 
 void Enrollment::init() {
-  auto& em = EepromManager::getInstance();
-  if (em.loadKeypair(devicePrivateKey, devicePublicKey)) {
+  if (lattice::eeprom::loadKeypair(devicePrivateKey, devicePublicKey)) {
     LATTICE_LOGLN("MESH", "Device keypair loaded from EEPROM", LogLevel::LOG_INFO);
   } else {
     LATTICE_LOGLN("MESH", "Generating new Curve25519 keypair...", LogLevel::LOG_INFO);
     lattice::mesh::crypto::generateKeypair(devicePrivateKey, devicePublicKey);
-    em.saveKeypair(devicePrivateKey, devicePublicKey);
+    lattice::eeprom::saveKeypair(devicePrivateKey, devicePublicKey);
     LATTICE_LOGLN("MESH", "New keypair generated and saved", LogLevel::LOG_INFO);
   }
-  hasMasterMac = em.loadKnownMasterMac(knownMasterMac);
+  hasMasterMac = lattice::eeprom::loadKnownMasterMac(knownMasterMac);
   if (hasMasterMac) {
     LATTICE_LOGLN("MESH", "Known master MAC loaded from EEPROM", LogLevel::LOG_INFO);
   }
-  hasMasterMacSecondary = em.loadKnownMasterMacSecondary(knownMasterMacSecondary);
+  hasMasterMacSecondary = lattice::eeprom::loadKnownMasterMacSecondary(knownMasterMacSecondary);
   if (hasMasterMacSecondary) {
     LATTICE_LOGLN("MESH", "Known secondary master MAC loaded from EEPROM", LogLevel::LOG_INFO);
   }
-  _enrolled = em.loadEnrolledFlag();
+  _enrolled = lattice::eeprom::loadEnrolledFlag();
 }
 
 bool Enrollment::isEnrolled() const {
@@ -147,14 +146,14 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   }
 
   LATTICE_LOGLN("MESH", "Enrollment approved! Saving enrolled flag.", LogLevel::LOG_INFO);
-  EepromManager::getInstance().saveEnrolledFlag(true);
+  lattice::eeprom::saveEnrolledFlag(true);
   _enrolled = true;
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
   if (!hasMasterMac) {
     memcpy(knownMasterMac, msg.origin_mac_address, 6);
     hasMasterMac = true;
-    EepromManager::getInstance().saveKnownMasterMac(knownMasterMac);
+    lattice::eeprom::saveKnownMasterMac(knownMasterMac);
     LATTICE_LOGLN("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
   }
 
@@ -178,7 +177,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
     if (secondaryRegistered && !hasMasterMacSecondary) {
       memcpy(knownMasterMacSecondary, secondaryMasterMac, 6);
       hasMasterMacSecondary = true;
-      EepromManager::getInstance().saveKnownMasterMacSecondary(knownMasterMacSecondary);
+      lattice::eeprom::saveKnownMasterMacSecondary(knownMasterMacSecondary);
     }
   }
 }

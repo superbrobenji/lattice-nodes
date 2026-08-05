@@ -193,7 +193,7 @@ uint16_t Mesh::nextSeqGuarded() {
     // and by this method), so bump from it directly rather than re-reading
     // EEPROM.
     uint32_t epoch = replay.bootEpoch + 1;
-    EepromManager::getInstance().saveBootEpoch(epoch);
+    lattice::eeprom::saveBootEpoch(epoch);
     replay.bootEpoch = epoch;
     seq = replay.nextSeq();
   }
@@ -231,8 +231,8 @@ bool Mesh::init() {
   reevaluateRouteTable();
 
   // 2. Increment and save boot epoch (replay protection)
-  uint32_t epoch = EepromManager::getInstance().loadBootEpoch() + 1;
-  EepromManager::getInstance().saveBootEpoch(epoch);
+  uint32_t epoch = lattice::eeprom::loadBootEpoch() + 1;
+  lattice::eeprom::saveBootEpoch(epoch);
   replay.init(epoch);
   {
     char buf[32];
@@ -254,7 +254,7 @@ bool Mesh::init() {
 
   // 3a. Apply TX power preset from EEPROM (deployment-specific)
   {
-    lattice::config::TxPowerPreset preset = EepromManager::getInstance().loadTxPowerPreset();
+    lattice::config::TxPowerPreset preset = lattice::eeprom::loadTxPowerPreset();
     uint8_t txPowerVal = lattice::config::TX_POWER_VALUES[static_cast<uint8_t>(preset)];
     esp_err_t txErr = esp_wifi_set_max_tx_power(static_cast<int8_t>(txPowerVal));
     if (txErr != ESP_OK) {
@@ -579,7 +579,7 @@ void Mesh::broadcastMasterBeacon() {
 
 void Mesh::loadMeshKeyFromEEPROM() {
   // Attempt to load mesh key from EEPROM
-  if (!EepromManager::getInstance().loadMeshKey(meshKey, MESH_KEY_SIZE)) {
+  if (!lattice::eeprom::loadMeshKey(meshKey, MESH_KEY_SIZE)) {
     LATTICE_LOGLN("MESH", "EEPROM read failed, using default mesh key", LogLevel::LOG_WARN);
   }
 
@@ -607,7 +607,7 @@ void Mesh::loadMeshKeyFromEEPROM() {
 }
 
 void Mesh::saveMeshKeyToEEPROM(const uint8_t* key) {
-  EepromManager::getInstance().saveMeshKey(key, MESH_KEY_SIZE);
+  lattice::eeprom::saveMeshKey(key, MESH_KEY_SIZE);
 }
 
 void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally) {
@@ -703,7 +703,7 @@ bool Mesh::sendBroadcast(const mesh_message& msg) {
 }
 
 void Mesh::debugDumpRadio() {
-  if (!EepromManager::getInstance().getDevMode())
+  if (!lattice::eeprom::getDevMode())
     return;
   uint8_t ch;
   esp_wifi_get_channel(&ch, nullptr);
@@ -770,7 +770,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
     memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
     enrollment.hasMasterMac = true;
-    EepromManager::getInstance().saveKnownMasterMac(enrollment.knownMasterMac);
+    lattice::eeprom::saveKnownMasterMac(enrollment.knownMasterMac);
     LATTICE_LOGLN("MESH", "Master MAC learned from first beacon (TOFU fallback)",
                   LogLevel::LOG_INFO);
   } else if (!fromPrimary && !fromSecondary) {
@@ -779,7 +779,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       // Second master TOFU — learn and save as secondary
       memcpy(enrollment.knownMasterMacSecondary, msg.origin_mac_address, 6);
       enrollment.hasMasterMacSecondary = true;
-      EepromManager::getInstance().saveKnownMasterMacSecondary(enrollment.knownMasterMacSecondary);
+      lattice::eeprom::saveKnownMasterMacSecondary(enrollment.knownMasterMacSecondary);
       LATTICE_LOGLN("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
       // fall through to process this beacon as valid
     } else if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
@@ -791,7 +791,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       // All known masters stale — accept as new primary (hotswap)
       LATTICE_LOGLN("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
       memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
-      EepromManager::getInstance().saveKnownMasterMac(enrollment.knownMasterMac);
+      lattice::eeprom::saveKnownMasterMac(enrollment.knownMasterMac);
     }
   }
 
@@ -1294,7 +1294,7 @@ void Mesh::processRouteReport(const mesh_message& msg) {
 
 void Mesh::loop() {
   drainRecvQueue();
-  EepromManager::getInstance().flushIfDirty();
+  lattice::eeprom::flushIfDirty();
 
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
   // Serial.write() must not be called from that callback — safe to do here in loop().
