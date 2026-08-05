@@ -11,8 +11,8 @@ namespace {
 
 detail::State _state;
 
-// Runs at process-exit (static-storage-duration teardown), mirroring the old
-// EepromManager::~EepromManager()'s "close NVS if we ever opened it" behavior.
+// Runs at process-exit (static-storage-duration teardown): closes NVS if it
+// was ever opened.
 struct Cleanup {
   ~Cleanup() {
     if (_state.isInitialized) {
@@ -31,9 +31,7 @@ bool ensureInitialized() {
 
 void logOperation(const char* operation, const char* details = nullptr) {
   if (details) {
-    char buf[80];
-    snprintf(buf, sizeof(buf), "%s: %s", operation, details);
-    LATTICE_LOGLN("NVS", buf, lattice::utils::LogLevel::LOG_DEBUG);
+    LATTICE_LOGF("NVS", lattice::utils::LogLevel::LOG_DEBUG, "%s: %s", operation, details);
   } else {
     LATTICE_LOGLN("NVS", operation, lattice::utils::LogLevel::LOG_DEBUG);
   }
@@ -62,12 +60,8 @@ bool persistOrEscalate(const char* key, size_t got, size_t want, bool securityRe
                        "NVS write failed (security-relevant key)");
     return false; // unreachable outside UNIT_TEST
   }
-  {
-    char buf[96];
-    snprintf(buf, sizeof(buf), "write failed key=%s got=%u want=%u", key, (unsigned)got,
-             (unsigned)want);
-    LATTICE_LOGLN("NVS", buf, lattice::utils::LogLevel::LOG_ERROR);
-  }
+  LATTICE_LOGF("NVS", lattice::utils::LogLevel::LOG_ERROR, "write failed key=%s got=%u want=%u",
+               key, (unsigned)got, (unsigned)want);
   return false;
 }
 

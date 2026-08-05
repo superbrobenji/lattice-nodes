@@ -75,11 +75,9 @@ void Mesh::readMacAddress() {
     // is a memcpy instead of a repeat esp_wifi_get_mac() syscall.
     lattice::hw::cacheDeviceMac(deviceMacAddress);
     LATTICE_LOG("MESH", "Device MAC: ", LogLevel::LOG_DEBUG);
-    char macBuf[18];
-    snprintf(macBuf, sizeof(macBuf), "%02X:%02X:%02X:%02X:%02X:%02X", deviceMacAddress[0],
-             deviceMacAddress[1], deviceMacAddress[2], deviceMacAddress[3], deviceMacAddress[4],
-             deviceMacAddress[5]);
-    LATTICE_LOGLN("MESH", macBuf, LogLevel::LOG_DEBUG);
+    LATTICE_LOGF("MESH", LogLevel::LOG_DEBUG, "%02X:%02X:%02X:%02X:%02X:%02X", deviceMacAddress[0],
+                 deviceMacAddress[1], deviceMacAddress[2], deviceMacAddress[3], deviceMacAddress[4],
+                 deviceMacAddress[5]);
   }
 }
 
@@ -234,11 +232,7 @@ bool Mesh::init() {
   uint32_t epoch = lattice::eeprom::loadBootEpoch() + 1;
   lattice::eeprom::saveBootEpoch(epoch);
   replay.init(epoch);
-  {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Boot epoch: %lu", (unsigned long)replay.bootEpoch);
-    LATTICE_LOGLN("MESH", buf, LogLevel::LOG_INFO);
-  }
+  LATTICE_LOGF("MESH", LogLevel::LOG_INFO, "Boot epoch: %lu", (unsigned long)replay.bootEpoch);
 
   // Phase D (#42): DEV_MODE bypasses the beacon origin-MAC pin (dev firmware
   // regenerates a fresh keypair/MAC each boot, so pinning would reject the
@@ -258,9 +252,7 @@ bool Mesh::init() {
     uint8_t txPowerVal = lattice::config::TX_POWER_VALUES[static_cast<uint8_t>(preset)];
     esp_err_t txErr = esp_wifi_set_max_tx_power(static_cast<int8_t>(txPowerVal));
     if (txErr != ESP_OK) {
-      char buf[64];
-      snprintf(buf, sizeof(buf), "TX power set failed: %s", esp_err_to_name(txErr));
-      LATTICE_LOGLN("MESH", buf, LogLevel::LOG_WARN);
+      LATTICE_LOGF("MESH", LogLevel::LOG_WARN, "TX power set failed: %s", esp_err_to_name(txErr));
     } else {
       LATTICE_LOGLN("MESH", "TX power preset applied", LogLevel::LOG_INFO);
     }
@@ -332,10 +324,11 @@ bool Mesh::setupEspNow() {
 // ------------------------------------------------
 
 void Mesh::onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status) {
-  const char* statusStr = (status == ESP_NOW_SEND_SUCCESS) ? "Delivery Success" : "Delivery Fail";
-  char buf[48];
-  snprintf(buf, sizeof(buf), "Last Packet Send Status: %s", statusStr);
-  LATTICE_LOGLN("MESH", buf, LogLevel::LOG_DEBUG);
+  // Inlined into the LATTICE_LOGF call (rather than a local `statusStr`) so that
+  // under LOG_NONE, where the whole call folds to ((void)0), there's no
+  // now-unused local left behind to warn about.
+  LATTICE_LOGF("MESH", LogLevel::LOG_DEBUG, "Last Packet Send Status: %s",
+               (status == ESP_NOW_SEND_SUCCESS) ? "Delivery Success" : "Delivery Fail");
 }
 
 void IRAM_ATTR Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uint8_t* incomingData,
@@ -694,9 +687,7 @@ bool Mesh::sendBroadcast(const mesh_message& msg) {
   esp_err_t err =
       esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
   if (err != ESP_OK) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Broadcast send failed: %s", esp_err_to_name(err));
-    LATTICE_LOGLN("MESH", buf, LogLevel::LOG_WARN);
+    LATTICE_LOGF("MESH", LogLevel::LOG_WARN, "Broadcast send failed: %s", esp_err_to_name(err));
     return false;
   }
   return true;
@@ -707,12 +698,20 @@ void Mesh::debugDumpRadio() {
     return;
   uint8_t ch;
   esp_wifi_get_channel(&ch, nullptr);
+  // Doesn't fit LATTICE_LOGF's single-fmt-string shape (variable-length hex dump
+  // built in a loop), so it's gated by hand with the same #if LATTICE_LOGF uses —
+  // under LATTICE_DEFAULT_LOG_LEVEL == LOG_NONE this whole block (buffer,
+  // snprintf calls, format-string literals) compiles out entirely instead of
+  // relying solely on the runtime getDevMode() check above (fix for the same
+  // regression class as LATTICE_LOGF — item R / PR #86).
+#if LATTICE_DEFAULT_LOG_LEVEL != LATTICE_LOG_LEVEL_NONE
   char buf[96];
   int off = snprintf(buf, sizeof(buf), "DBG Channel=%u Key=", (unsigned)ch);
   for (int i = 0; i < MESH_KEY_SIZE && off > 0 && off < (int)sizeof(buf); ++i) {
     off += snprintf(buf + off, sizeof(buf) - off, "%02X ", meshKey[i]);
   }
   LATTICE_LOGLN("MESH", buf, LogLevel::LOG_INFO);
+#endif
 }
 
 void Mesh::checkMasterTimeout() {
@@ -828,9 +827,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   uint8_t derived = (min_d == 0xFF) ? 0xFF : static_cast<uint8_t>(min_d + 1);
   if (derived != currentMaster.distance) {
     currentMaster.distance = derived;
-    char buf[40];
-    snprintf(buf, sizeof(buf), "Route distance derived: %u", (unsigned)derived);
-    LATTICE_LOGLN("MESH", buf, LogLevel::LOG_INFO);
+    LATTICE_LOGF("MESH", LogLevel::LOG_INFO, "Route distance derived: %u", (unsigned)derived);
   }
 
   if (!isMaster) {

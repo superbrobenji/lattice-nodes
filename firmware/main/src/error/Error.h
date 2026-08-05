@@ -79,9 +79,8 @@ inline bool check(bool condition, utils::ErrorType type, const char* msg) {
 inline bool checkEsp(esp_err_t status, utils::ErrorType type, const char* msg) {
   if (status == ESP_OK)
     return true;
-  char buf[96];
-  snprintf(buf, sizeof(buf), "%s: %s", msg ? msg : "", esp_err_to_name(status));
-  LATTICE_LOGLN("ESP", buf, utils::LogLevel::LOG_ERROR);
+  LATTICE_LOGF("ESP", utils::LogLevel::LOG_ERROR, "%s: %s", msg ? msg : "",
+               esp_err_to_name(status));
   return fail(type, msg);
 }
 } // namespace err
