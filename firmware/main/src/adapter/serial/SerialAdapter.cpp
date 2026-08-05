@@ -26,9 +26,8 @@ void SerialAdapter::sendHealthReport() {
 SerialAdapter::SerialAdapter(uint8_t pin) : Adapter(pin), lastReportedHopCount(0) {
   _adapterType = adapter_types::SERIAL_ADAPTER;
 
-  char buf[48];
-  snprintf(buf, sizeof(buf), "Serial_Adapter constructed with pin %u", (unsigned)pin);
-  LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_INFO);
+  LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_INFO, "Serial_Adapter constructed with pin %u",
+               (unsigned)pin);
 }
 
 bool SerialAdapter::init() {
@@ -53,16 +52,14 @@ void SerialAdapter::loop() {
     // still a full interval out, matching the original combined check.
     if (!intervalDue)
       resetHealthTick(now);
-    {
-      char buf[80];
-      if (stateChanged) {
-        snprintf(buf, sizeof(buf), "Health report triggered by state change (hopCount: %lu)",
-                 (unsigned long)currentHopCount);
-      } else {
-        snprintf(buf, sizeof(buf), "Sending periodic health report (hopCount: %lu)",
-                 (unsigned long)currentHopCount);
-      }
-      LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_DEBUG);
+    if (stateChanged) {
+      LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_DEBUG,
+                   "Health report triggered by state change (hopCount: %lu)",
+                   (unsigned long)currentHopCount);
+    } else {
+      LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_DEBUG,
+                   "Sending periodic health report (hopCount: %lu)",
+                   (unsigned long)currentHopCount);
     }
     sendHealthReport();
     lastReportedHopCount = currentHopCount;
@@ -77,14 +74,10 @@ void SerialAdapter::loop() {
 }
 
 void SerialAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
-  {
-    char buf[96];
-    snprintf(buf, sizeof(buf),
-             "Processing incoming mesh message - Type: %u DataType: %ld HopCount: %u",
-             (unsigned)message.message_type, (long)message.data_type,
-             (unsigned)message.hop_count);
-    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_DEBUG);
-  }
+  LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_DEBUG,
+               "Processing incoming mesh message - Type: %u DataType: %ld HopCount: %u",
+               (unsigned)message.message_type, (long)message.data_type,
+               (unsigned)message.hop_count);
 
   // Control opcodes (CONFIG_SET/NODE_ID_SET/HEALTH_REQ/TX_POWER_SET) received
   // via mesh are all handled once, in Adapter::onMeshData() (base class),
@@ -103,11 +96,8 @@ void SerialAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
     return;
   }
 
-  {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Encoded mesh message to %u bytes, sending to serial", (unsigned)n);
-    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_DEBUG);
-  }
+  LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_DEBUG,
+               "Encoded mesh message to %u bytes, sending to serial", (unsigned)n);
 
   // 2-byte little-endian length prefix
   uint8_t lenLE[2] = {static_cast<uint8_t>(n & 0xFF), static_cast<uint8_t>((n >> 8) & 0xFF)};
@@ -139,11 +129,8 @@ void SerialAdapter::relayEnrollmentToServer(const uint8_t* mac, const uint8_t* p
 }
 
 void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
-  {
-    char buf[48];
-    snprintf(buf, sizeof(buf), "Handling complete frame of %u bytes", (unsigned)len);
-    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_INFO);
-  }
+  LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_INFO, "Handling complete frame of %u bytes",
+               (unsigned)len);
 
 #if SIMULATE_MODE
   if (len >= 1) {
@@ -193,12 +180,8 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
     return;
   }
 
-  {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Decoded message - Type: %u DataType: %ld",
-             (unsigned)msg.message_type, (long)msg.data_type);
-    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_INFO);
-  }
+  LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_INFO, "Decoded message - Type: %u DataType: %ld",
+               (unsigned)msg.message_type, (long)msg.data_type);
 
   // JOIN_ACK (type=4): server responded to an enrollment request
   if (msg.message_type == MESH_TYPE_JOIN_ACK) {
@@ -279,9 +262,8 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
           destMac, static_cast<adapter_types>(msg.data_type), fwdData);
     }
   } else {
-    char buf[48];
-    snprintf(buf, sizeof(buf), "Unknown message type: %u", (unsigned)msg.message_type);
-    LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_WARN);
+    LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_WARN, "Unknown message type: %u",
+                 (unsigned)msg.message_type);
   }
 
   // Control opcodes (CONFIG_SET/NODE_ID_SET/HEALTH_REQ/TX_POWER_SET), sent by
@@ -292,18 +274,16 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
   // must still propagate to the rest of the mesh, unlike one arriving via the
   // mesh itself (already broadcast once).
   if (msg.data_type == adapter_types::SERIAL_ADAPTER) {
-    uint8_t op = msg.data[0];
-    {
-      char buf[64];
-      snprintf(buf, sizeof(buf), "Processing SERIAL_ADAPTER control opcode: 0x%02X", op);
-      LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_DEBUG);
-    }
+    // msg.data[0] read inline (rather than a local `op`) so that under LOG_NONE,
+    // where both LATTICE_LOGF calls below fold to ((void)0), there's no
+    // now-unused local left behind to warn about.
+    LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_DEBUG,
+                 "Processing SERIAL_ADAPTER control opcode: 0x%02X", msg.data[0]);
 
     bool handled = dispatchControlOp(msg, /*rebroadcastOnMaster=*/true);
     if (!handled) {
-      char buf[64];
-      snprintf(buf, sizeof(buf), "Unknown SERIAL_ADAPTER opcode: 0x%02X", op);
-      LATTICE_LOGLN("Serial_Adapter", buf, LogLevel::LOG_WARN);
+      LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_WARN, "Unknown SERIAL_ADAPTER opcode: 0x%02X",
+                   msg.data[0]);
     }
   }
 

@@ -162,9 +162,7 @@ void Adapter::opNodeIdSet(const lattice::mesh::mesh_message& message, bool /*reb
     return;
   uint8_t nodeId = message.data[7];
   lattice::eeprom::saveNodeId(nodeId);
-  char buf[32];
-  snprintf(buf, sizeof(buf), "Node ID set: %u", (unsigned)nodeId);
-  LATTICE_LOGLN("ADAPTER", buf, LogLevel::LOG_INFO);
+  LATTICE_LOGF("ADAPTER", LogLevel::LOG_INFO, "Node ID set: %u", (unsigned)nodeId);
 }
 
 void Adapter::opHealthReq(const lattice::mesh::mesh_message& /*message*/,
@@ -192,9 +190,7 @@ void Adapter::opTxPowerSet(const lattice::mesh::mesh_message& message, bool rebr
   esp_err_t txErr = esp_wifi_set_max_tx_power(
       static_cast<int8_t>(lattice::config::TX_POWER_VALUES[presetByte]));
   if (txErr != ESP_OK) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "TX power set failed: %s", esp_err_to_name(txErr));
-    LATTICE_LOGLN("ADAPTER", buf, LogLevel::LOG_WARN);
+    LATTICE_LOGF("ADAPTER", LogLevel::LOG_WARN, "TX power set failed: %s", esp_err_to_name(txErr));
   } else {
     LATTICE_LOGLN("ADAPTER", "TX power preset applied", LogLevel::LOG_INFO);
   }

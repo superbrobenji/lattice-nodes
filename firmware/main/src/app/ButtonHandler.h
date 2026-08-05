@@ -38,23 +38,15 @@ private:
           bool newMaster = !mesh.getIsMaster();
           mesh.setIsMaster(newMaster);
           devMasterFlag = newMaster;
-          {
-            char buf[48];
-            snprintf(buf, sizeof(buf), "DEV MODE: Role toggled. Now %s",
-                     newMaster ? "MASTER" : "NODE");
-            LATTICE_LOGLN("MAIN", buf, lattice::utils::LogLevel::LOG_INFO);
-          }
+          LATTICE_LOGF("MAIN", lattice::utils::LogLevel::LOG_INFO, "DEV MODE: Role toggled. Now %s",
+                       newMaster ? "MASTER" : "NODE");
           greenLed.blink(newMaster ? 3 : 2, 150, 150);
         } else {
           bool wasMaster = lattice::eeprom::loadMasterFlag();
           bool newMaster = !wasMaster;
           lattice::eeprom::saveMasterFlag(newMaster);
-          {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "Button held 5s: CONFIG TOGGLED. Now %s",
-                     newMaster ? "MASTER" : "NODE");
-            LATTICE_LOGLN("MAIN", buf, lattice::utils::LogLevel::LOG_INFO);
-          }
+          LATTICE_LOGF("MAIN", lattice::utils::LogLevel::LOG_INFO,
+                       "Button held 5s: CONFIG TOGGLED. Now %s", newMaster ? "MASTER" : "NODE");
           LATTICE_LOGLN("MAIN", "Restarting in 2 seconds for new role...",
                         lattice::utils::LogLevel::LOG_INFO);
           greenLed.blink(newMaster ? 3 : 2, 200, 200);

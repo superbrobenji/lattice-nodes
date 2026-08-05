@@ -98,9 +98,7 @@ void signalError(ErrorTypeDigit t, ModuleDigit m, uint8_t sub, const char* msg) 
 
 void signalError(ErrorType type, const char* msg) {
   if (msg) {
-    char buf[96];
-    snprintf(buf, sizeof(buf), "ERROR: %s", msg);
-    LATTICE_LOGLN("Error", buf, lattice::utils::LogLevel::LOG_ERROR);
+    LATTICE_LOGF("Error", lattice::utils::LogLevel::LOG_ERROR, "ERROR: %s", msg);
   }
   if (_state.initialized && _state.errorLed) {
     if (_state.inCallbackContext) {
