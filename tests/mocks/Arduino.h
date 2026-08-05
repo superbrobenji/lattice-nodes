@@ -11,8 +11,30 @@
 #endif
 
 // GPIO stubs
-inline int  digitalRead(int)           { return 0; }
-inline void digitalWrite(int, int)     {}
+// Mock digital pin state, settable via setMockDigitalRead() (used by Button
+// debounce tests). Defaults to LOW (0) for every pin, matching the prior
+// fixed-stub behavior for callers that never set anything.
+constexpr int MOCK_DIGITAL_PIN_COUNT = 64;
+extern int _mockDigitalPinState[MOCK_DIGITAL_PIN_COUNT];
+inline int digitalRead(int pin) {
+  return (pin >= 0 && pin < MOCK_DIGITAL_PIN_COUNT) ? _mockDigitalPinState[pin] : 0;
+}
+inline void setMockDigitalRead(int pin, int value) {
+  if (pin >= 0 && pin < MOCK_DIGITAL_PIN_COUNT)
+    _mockDigitalPinState[pin] = value;
+}
+// Reset all mock pin state back to LOW — call from test SetUp() so state
+// doesn't leak between tests sharing the same process.
+inline void resetMockDigitalPins() {
+  for (int i = 0; i < MOCK_DIGITAL_PIN_COUNT; ++i)
+    _mockDigitalPinState[i] = 0;
+}
+// Call counter for digitalWrite — used by DisplayManager tests to prove the
+// tick() throttle (item S) skips display writes when nothing changed,
+// without needing to decode the bit-banged 7-segment protocol itself.
+extern int _mockDigitalWriteCallCount;
+inline void digitalWrite(int, int)     { ++_mockDigitalWriteCallCount; }
+inline void resetMockDigitalWriteCallCount() { _mockDigitalWriteCallCount = 0; }
 inline void pinMode(int, int)          {}
 inline void analogWrite(int, int)      {}
 inline void attachInterrupt(int, void(*)(), int) {}
