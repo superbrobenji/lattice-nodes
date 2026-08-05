@@ -31,7 +31,9 @@ The system supports the **latest protocol only**. Devices are reflashed; there i
 | D — Enrollment harden | #42 | nodes | Pin master pubkey at flash; node verifies JOIN_ACK key against it |
 | E — Hygiene | #47 | nodes + protocol | 6 code-hygiene items + lattice-protocol `gofmt` |
 | F — Hub misc | #63, #64 | hub | Empty-name enrollment default; meshsim write-under-mutex deadlock |
-| G — Optimization | #52, #53 | nodes | Flash trim (incl. drop-BT + mbedtls-trim, now unlocked by Phase 0's IDF build) + RAM residency/bounds (memory_usage.md P1/P3) |
+| G — Optimization | #52, #53 | nodes + protocol + hub | Flash trim (log-macros, `-Os`/LTO, mbedtls AES/GCM trim) + RAM residency (CompactMessage, bounds tune) + wire shrink 250→200B via protocol v0.6.0 flag-day + 17 no-cost items (A-Q) from 2026-08-04 post-Phase-G audit |
+| H2 — Refactor sweep | (no upstream issue; audit-driven) | nodes | Medium-scope DRY/OOP/pattern refactors (items R-AA) surfaced by 2026-08-04 audit: String-concat log elimination, DisplayManager tick throttle, Button non-blocking debounce, health-frame dedup, adapter op-dispatch table, MAC-keyed-table helper, singleton→namespace migration |
+| I — Native ESP-IDF leverage | (no upstream issue; audit-driven) | nodes | Complete Arduino→ESP-IDF migration (items BB-JJ): Arduino WiFi.h → `esp_wifi_*` direct (~15-25KB flash), Preferences → `nvs_flash`, Logger → `esp_log.h`, tickless idle + `xTaskCreateStatic` (~30-40% avg current), `millis()` → `esp_timer_get_time` (49-day wrap fix), mbedtls → libsodium option, `MEMORY_BUFFER_ALLOC`, stack shrink |
 | (S) — folded into H | new | hub | Set `ProtoVersion=3` on all outbound frames + CI `mesh.pb.go`↔proto sync check |
 
 ## Dependency graph & sequencing
@@ -128,6 +130,47 @@ Storage + memory optimization. Context: `docs/memory_usage.md` already holds a p
 - **#53 (RAM):** shrink `mesh_message` in-RAM residency (242 B × 8-deep ring + per-frame stack copies — coordinate with the wire `static_assert`); right-size `RECV_QUEUE_SIZE`/`CACHE_SIZE`/`LATTICE_ROUTE_TABLE_MAX` after measuring real occupancy. Est. ~1 KB + bounds.
 
 **Gating:** must land after Phase 0 (the size-report job makes every before/after delta real, not estimated) and after A/B (which already bank the EEPROM ceiling + RouteTable win). #53 coordinates with #46 (`CACHE_SIZE`) and #51 (`LATTICE_ROUTE_TABLE_MAX`).
+
+**Expanded 2026-08-04:** protocol v0.6.0 flag-day wire shrink (250→200B) — move secondary-master fields into JOIN_ACK `data[64]` (-38B) + `MAX_HOPS` 10→8 (-12B). Cross-repo release-flow: protocol tag → nodes+hub in parallel; ProtoVersion 4→5.
+
+**Expanded 2026-08-04 (audit-driven, items A-Q):** 17 no-cost / trivial-risk items surfaced by a 4-agent code-review audit. Full ledger: `docs/superpowers/specs/2026-08-04-post-phaseG-audit-findings.md`. Highlights: role-split `LATTICE_E2E_KEYCACHE_MAX` (leaves ≤2), `_persistOrEscalate` at all NVS write sites, `std::function` → function-pointer typedefs, `GpioInput`/`GpioOutput` vtable removal, canonical `mac_eq` free function replacing ~60 sites, extend `MbedtlsGuard` to remaining hand-managed contexts, delete dead helpers, `ReplayCache::Entry` padding fix. Est. additional ~1.5 KB RAM + ~5-8 KB flash.
+
+### Phase H2 — Refactor sweep (nodes, audit-driven)
+
+Medium-scope DRY/OOP/pattern refactors surfaced by the 2026-08-04 audit (items R-AA in `docs/superpowers/specs/2026-08-04-post-phaseG-audit-findings.md`). Not tied to any pre-existing issue — captured as follow-up phase to fold in the code-review findings that were bigger than Phase G's "no-cost" bar. Runs after Phase G ships.
+
+- **String-concat log elimination (item R):** ~78 sites across mesh + adapter + hardware still build `String` temporaries before Phase G's macro gating can short-circuit. Rewrite to `snprintf` into stack `char[]`. Removes hot-path heap churn per mesh frame.
+- **DisplayManager tick throttle (item S):** only re-clock TM1637 on value change. Reclaims ~100-200 ms/sec CPU.
+- **Button non-blocking debounce (item T):** currently spins `delay(10)`; ButtonHandler polls two buttons every loop → ~20 ms/loop stall. Switch to timestamp-driven rolling debounce.
+- **`sendBroadcast` helper (item U):** fold 5 `esp_now_send(broadcastMac, ...)` sites into one.
+- **Adapter op-dispatch table (item V):** OP_CONFIG_SET/OP_NODE_ID_SET/OP_HEALTH_REQ/OP_TX_POWER_SET currently duplicated between base `Adapter` and `SerialAdapter`. ~150 lines dedup.
+- **Health-frame builder in base (item W):** dedup PIR + Serial health-report code paths.
+- **Combined `neighbors.observe + minFreshDistance` pass (item X):** halves neighbor-scan cost per beacon RX.
+- **MAC-keyed-table helper (item Y):** 5 classes reimplement the same skeleton (NeighborTable/RouteTable/E2EKeyStore/ReplayCache/PeerRegistry). Extract shared free helpers.
+- **`is_zero` helper (item Z):** replaces 3 hand-rolled zero-check loops.
+- **Singleton → namespace migration (item AA):** ~25 `getInstance()` sites → free functions holding file-static state; removes `__cxa_guard_*` prologues per callsite.
+
+Est. ~1-2 KB flash + significant hot-path heap-churn elimination.
+
+**Gating:** post-Phase-G. No cross-repo. No wire changes.
+
+### Phase I — Native ESP-IDF leverage (nodes, audit-driven)
+
+Complete the Arduino → ESP-IDF migration started by Phase 0. Items BB-JJ in the audit ledger. Runs after Phase H2 (order not strict; both are firmware-only).
+
+- **Arduino `WiFi.h` → direct `esp_wifi_*` (item BB):** pulls only `esp_netif_init` + `esp_event_loop_create_default` + `esp_wifi_init` + `esp_wifi_set_mode(WIFI_MODE_STA)` + `esp_wifi_start()`. Drops `WiFiGeneric/STA/AP/Scan/Client/Server`, TCP/IP-adapter shims, LWIP contexts. **Est. ~15-25 KB flash + several KB DRAM.** Single biggest lever.
+- **Arduino `Preferences` → direct `nvs_flash`/`nvs_open`/`nvs_get_*` (item CC):** removes wrapper (~1-2 KB flash) + unlocks `nvs_get_stats`, iterators, atomic-epoch guarantees.
+- **Arduino `Serial` + Logger heap → `uart_driver_install` + `esp_log.h` (item DD):** several KB flash; native `ESP_LOGI/W/E` level gating + color; removes libc printf + Arduino String overloads from logging path. Coordinate with Phase G's log macros + Phase H2's String elimination.
+- **Tickless idle + dedicated mesh task (item EE):** `CONFIG_PM_ENABLE=y` + `CONFIG_FREERTOS_USE_TICKLESS_IDLE=y` + `esp_pm_config_esp32_t{80, 240, true}` + `xTaskCreatePinnedToCoreStatic` for mesh drain (block on `xTaskNotifyGive` from RX callback) + static task alloc. **Est. ~30-40% avg current for battery nodes.** Depends on H2 item T (non-blocking Button) + item S (DisplayManager throttle) — those unblock the sleep windows PM would give.
+- **`millis()` → `esp_timer_get_time()` (item FF):** 100+ sites. Arduino wraps at 49 days; native `esp_timer_get_time()` is int64 microseconds (292 000 years). Audit `uint32_t lastSeenMillis` fields → `uint64_t`.
+- **mbedtls → libsodium option (item GG):** `crypto_scalarmult_curve25519` + `crypto_kdf_derive_from_key`. `espressif__libsodium` already in component manager. Cache `EntropyCtx` + `CtrDrbgCtx` seeded once at boot. Est. ~15-20 KB flash + smaller heap.
+- **`CONFIG_MBEDTLS_MEMORY_BUFFER_ALLOC_C=y` + 4KB static arena (item HH):** if staying with mbedtls. Bounds crypto heap; makes fragmentation deterministic.
+- **`CONFIG_ARDUINO_LOOP_STACK_SIZE=8192` → 4096 (item II):** measure high-water via `uxTaskGetStackHighWaterMark` first. **4 KB permanent DRAM.**
+- **PeerRegistry stream-per-record (item JJ):** `loadFromEEPROM`/`saveToEEPROM` currently stack-alloc 380B buffers for 10 records; stream one at a time. 380 B transient stack.
+
+Est. cumulative ~35-45 KB flash + ~10 KB DRAM + 30-40% average current + 49-day wrap bug class eliminated.
+
+**Gating:** post-Phase-H2 (or parallel; both firmware-only, no cross-repo). Some items (mbedtls swap GG) are mutually exclusive with others (HH memory-buffer alloc) — pick one per plan.
 
 ## Deliverable structure
 

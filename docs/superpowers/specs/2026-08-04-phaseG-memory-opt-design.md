@@ -203,7 +203,43 @@ Savings: −12B/frame.
 1. Protocol PR merges + `v0.6.0` tag.
 2. Nodes + hub PRs open in parallel; must merge together (flag-day).
 
-### 9. CI size measurement
+### 9. Audit-driven no-cost wins (items A-Q from post-Phase-G audit)
+
+Reference: `docs/superpowers/specs/2026-08-04-post-phaseG-audit-findings.md`. Adding 17 trivial/low-risk items to Phase G scope. Grouped by touchpoint:
+
+**Delete dead code (item A) — ~1-2 KB flash:**
+- `Mesh.cpp` — remove `printMac`, `printMeshMessage`, `generateRandomMeshKey`, `meshKeyIsSet` (all unreferenced).
+- `Adapter.cpp` — remove LED stub handler block, `RELAY_ADAPTER` enum value (never referenced), `LED_ADAPTER_DEFAULT_PIN`.
+- `Error.h:88-97` — remove `ERROR_ASSERT` + `ERROR_CHECK` templates (no callers).
+- `MacAddress.h` — remove `MacAddress(const String&)` sscanf ctor (no callers; pulls libc format tables).
+
+**Right-size RAM state:**
+- Item B: `LATTICE_E2E_KEYCACHE_MAX` role-split — leaves get 2 (primary+secondary master); masters get 10. Mirror `reevaluateRouteTable` role-conditional pattern. **~576 B RAM per leaf.**
+- Item C: `Enrollment::PENDING_RELAY_QUEUE_SIZE` 8→4 to track `RECV_QUEUE_SIZE`. **~152 B RAM.**
+- Item D: `ReplayCache::Entry` field reorder for padding: `{uint32 epoch, uint32 lastSeenMs, uint16 seq, uint8 mac[6], bool used}`. **48 B RAM.**
+- Item K: `pir/PirAdapter.h::_cooldownSeconds` → `constexpr`; collapse `_timerActive`/`_motionSent`. ~6-10 B/PIR.
+- Item L: pin types `int` → `uint8_t` across `Adapter.h` + factory. ~3-4 B/adapter.
+
+**DRY helpers + consolidation:**
+- Item E: consolidate FF:FF broadcast MAC — 7 `static const uint8_t[6]` sites into one `constexpr` header. ~50 B flash.
+- Item N: 3 copies of `readOwnMac(uint8_t[6])` (PirAdapter, SerialAdapter, SerialFraming) → one helper in `hw_mac.h`. ~150 B flash.
+- Item Q: canonical `bool lattice::mac::eq(const uint8_t*, const uint8_t*)` — replaces ~60 sites of two competing idioms (`memcmp(a,b,6)==0` and `MacAddress(a) == MacAddress(b)`; the latter is worse — extra `memcpy`). ~1.5-2 KB flash.
+- Item J: `GpioInput::isValidPin` / `GpioOutput::isValidPin` `switch` → `constexpr uint64_t VALID_MASK; return pin<64 && (MASK>>pin)&1;`. ~150-300 B flash.
+- Item M: `SevenSegDisplay::show()` and `showWithDP()` → one `showInternal(value, leadingZeros, bool withDP)`. 200-350 B flash.
+
+**Compile-time / type wins:**
+- Item H: `std::function` → plain function-pointer typedefs. Sites: `Mesh.h::externalRecvCallback`, `Enrollment.h::RegisterPeerFn` + `EnrollmentRelayFn`. All current bindings are function pointers or captureless lambdas. **~100 B RAM + ~1 KB flash.**
+- Item I: `GpioInput`/`GpioOutput` drop `virtual` on `init()` — never dispatched polymorphically (grep confirms no `GpioInput*` dispatch). Keeps Adapter virtual — that IS dispatched via `Adapter*`. ~200-400 B flash + pointer/instance.
+
+**Correctness / robustness:**
+- Item F: cache `esp_wifi_get_mac(WIFI_IF_STA, ...)` result at boot — currently called on every RX-frame (4-6 sites in Adapter, SerialAdapter, SerialFraming). MAC doesn't change. CPU win + minor flash.
+- Item G: cache `Enrollment::isEnrolled()` — currently reads NVS via `_prefs.getBool` every call, called 2-3× per `loop()` from `main.cpp`. Set cached bool in `init()`/`processJoinAck()`/`saveEnrolledFlag()`. Eliminates per-loop NVS I/O.
+- Item O: extend `_persistOrEscalate` (Phase A) to all 18 NVS put-sites (currently used at only 5). Non-security sites get `securityRelevant=false` so short-write failures don't silently discard. ~150 B flash + robustness.
+- Item P: extend `MbedtlsGuard.h` (Phase E) with `EcpGroupCtx`, `MpiCtx`, `EcpPointCtx`, `ChaChaPolyCtx` — Phase E left these hand-managed in `MeshCrypto.h::generateKeypair` and `E2ECrypto.h::sealPayload/openPayload`. Same UNIT_TEST-unwind leak class the guard fixed elsewhere.
+
+**Cumulative est. impact (items A-Q):** ~1.5 KB RAM + ~5-8 KB flash on top of the wire-shrink + CompactMessage + bounds-tune savings already in §1-§8.
+
+### 10. CI size measurement
 
 Use existing `firmware-build.yml` `idf.py size` job. Post the size delta in the PR body:
 
