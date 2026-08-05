@@ -30,11 +30,13 @@ bool EepromManager::init() {
 
   uint8_t reason = _prefs.getUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
   if (reason == 0x00) {
-    _prefs.putUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
+    size_t n = _prefs.putUChar(NVS_KEYS::REBOOT_REASON, 0xFF);
+    _persistOrEscalate(NVS_KEYS::REBOOT_REASON, n, sizeof(uint8_t), /*securityRelevant=*/false);
   }
   uint8_t count = _prefs.getUChar(NVS_KEYS::REBOOT_COUNT, 0);
   if (count > 10) {
-    _prefs.putUChar(NVS_KEYS::REBOOT_COUNT, 0);
+    size_t n = _prefs.putUChar(NVS_KEYS::REBOOT_COUNT, 0);
+    _persistOrEscalate(NVS_KEYS::REBOOT_COUNT, n, sizeof(uint8_t), /*securityRelevant=*/false);
   }
 
   logOperation("Initialized", "NVS ready");
@@ -75,7 +77,8 @@ bool EepromManager::loadMasterFlag() {
 void EepromManager::saveMasterFlag(bool isMaster) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putBool(NVS_KEYS::MASTER_FLAG, isMaster);
+  size_t n = _prefs.putBool(NVS_KEYS::MASTER_FLAG, isMaster);
+  _persistOrEscalate(NVS_KEYS::MASTER_FLAG, n, 1, /*securityRelevant=*/false);
   logOperation("Master flag saved", isMaster ? "Master" : "Node");
 }
 
@@ -88,7 +91,8 @@ bool EepromManager::loadDevFlag() {
 void EepromManager::saveDevFlag(bool isDev) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putBool(NVS_KEYS::DEV_FLAG, isDev);
+  size_t n = _prefs.putBool(NVS_KEYS::DEV_FLAG, isDev);
+  _persistOrEscalate(NVS_KEYS::DEV_FLAG, n, 1, /*securityRelevant=*/false);
 }
 
 bool EepromManager::loadMeshKey(uint8_t* key, size_t keySize) {
@@ -132,7 +136,11 @@ void EepromManager::savePeerList(const uint8_t* peerRecords, size_t numPeers) {
   if (numPeers == 0) {
     _prefs.remove(NVS_KEYS::PEER_LIST);
   } else {
-    _prefs.putBytes(NVS_KEYS::PEER_LIST, peerRecords, numPeers * EEPROM_SIZES::PEER_RECORD_SIZE);
+    size_t want = numPeers * EEPROM_SIZES::PEER_RECORD_SIZE;
+    size_t n = _prefs.putBytes(NVS_KEYS::PEER_LIST, peerRecords, want);
+    // securityRelevant=true: each record carries a peer's E2E public key —
+    // trust material, same tier as MESH_KEY/KNOWN_MASTER_MAC below.
+    _persistOrEscalate(NVS_KEYS::PEER_LIST, n, want, /*securityRelevant=*/true);
   }
   logOperation("Peer list saved", String(numPeers).c_str());
 }
@@ -159,7 +167,8 @@ uint8_t EepromManager::loadAdapterType() {
 void EepromManager::saveAdapterType(uint8_t adapterType) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putUChar(NVS_KEYS::ADAPTER_TYPE, adapterType);
+  size_t n = _prefs.putUChar(NVS_KEYS::ADAPTER_TYPE, adapterType);
+  _persistOrEscalate(NVS_KEYS::ADAPTER_TYPE, n, sizeof(uint8_t), /*securityRelevant=*/false);
 }
 
 uint8_t EepromManager::loadRebootCount() {
@@ -171,13 +180,15 @@ uint8_t EepromManager::loadRebootCount() {
 void EepromManager::saveRebootCount(uint8_t count) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putUChar(NVS_KEYS::REBOOT_COUNT, count);
+  size_t n = _prefs.putUChar(NVS_KEYS::REBOOT_COUNT, count);
+  _persistOrEscalate(NVS_KEYS::REBOOT_COUNT, n, sizeof(uint8_t), /*securityRelevant=*/false);
 }
 
 void EepromManager::saveRebootReason(uint8_t reason) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putUChar(NVS_KEYS::REBOOT_REASON, reason);
+  size_t n = _prefs.putUChar(NVS_KEYS::REBOOT_REASON, reason);
+  _persistOrEscalate(NVS_KEYS::REBOOT_REASON, n, sizeof(uint8_t), /*securityRelevant=*/false);
 }
 
 uint8_t EepromManager::loadRebootReason() {
@@ -220,13 +231,18 @@ bool EepromManager::loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
 void EepromManager::saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putBytes(NVS_KEYS::PRIVATE_KEY, privateKey32, 32);
-  _prefs.putBytes(NVS_KEYS::PUBLIC_KEY, publicKey32, 32);
+  // securityRelevant=true on all three: this is the device's long-term
+  // identity keypair — the same tier as MESH_KEY/KNOWN_MASTER_MAC below.
+  size_t nPriv = _prefs.putBytes(NVS_KEYS::PRIVATE_KEY, privateKey32, 32);
+  _persistOrEscalate(NVS_KEYS::PRIVATE_KEY, nPriv, 32, /*securityRelevant=*/true);
+  size_t nPub = _prefs.putBytes(NVS_KEYS::PUBLIC_KEY, publicKey32, 32);
+  _persistOrEscalate(NVS_KEYS::PUBLIC_KEY, nPub, 32, /*securityRelevant=*/true);
   uint8_t both[64];
   memcpy(both, privateKey32, 32);
   memcpy(both + 32, publicKey32, 32);
   uint16_t crc = crc16(both, 64);
-  _prefs.putUInt(NVS_KEYS::KEYPAIR_CRC, static_cast<uint32_t>(crc));
+  size_t nCrc = _prefs.putUInt(NVS_KEYS::KEYPAIR_CRC, static_cast<uint32_t>(crc));
+  _persistOrEscalate(NVS_KEYS::KEYPAIR_CRC, nCrc, sizeof(uint32_t), /*securityRelevant=*/true);
   logOperation("Keypair saved");
 }
 
@@ -239,7 +255,8 @@ bool EepromManager::loadEnrolledFlag() {
 void EepromManager::saveEnrolledFlag(bool enrolled) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putBool(NVS_KEYS::ENROLLED_FLAG, enrolled);
+  size_t n = _prefs.putBool(NVS_KEYS::ENROLLED_FLAG, enrolled);
+  _persistOrEscalate(NVS_KEYS::ENROLLED_FLAG, n, 1, /*securityRelevant=*/false);
 }
 
 uint32_t EepromManager::loadBootEpoch() {
@@ -334,7 +351,8 @@ lattice::config::TxPowerPreset EepromManager::loadTxPowerPreset() {
 void EepromManager::saveTxPowerPreset(lattice::config::TxPowerPreset preset) {
   if (!ensureInitialized() || isDevMode)
     return;
-  _prefs.putUChar(NVS_KEYS::TX_POWER_PRESET, static_cast<uint8_t>(preset));
+  size_t n = _prefs.putUChar(NVS_KEYS::TX_POWER_PRESET, static_cast<uint8_t>(preset));
+  _persistOrEscalate(NVS_KEYS::TX_POWER_PRESET, n, sizeof(uint8_t), /*securityRelevant=*/false);
   logOperation("TX power preset saved");
 }
 
@@ -347,7 +365,8 @@ uint8_t EepromManager::loadNodeId() {
 void EepromManager::saveNodeId(uint8_t nodeId) {
   if (!ensureInitialized())
     return;
-  _prefs.putUChar(NVS_KEYS::NODE_ID, nodeId);
+  size_t n = _prefs.putUChar(NVS_KEYS::NODE_ID, nodeId);
+  _persistOrEscalate(NVS_KEYS::NODE_ID, n, sizeof(uint8_t), /*securityRelevant=*/false);
   logOperation("saveNodeId");
 }
 
