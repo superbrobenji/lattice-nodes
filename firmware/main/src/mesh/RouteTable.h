@@ -58,7 +58,7 @@ private:
     uint8_t pathLen;
     bool valid;
     uint32_t lastSeenMillis;
-    uint8_t path[config::MAX_HOPS * 6]; // 60 bytes, matches route_path[]
+    uint8_t path[config::MAX_HOPS * 6]; // 48 bytes (MAX_HOPS=8), matches route_path[]
   };
   Entry entries[config::LATTICE_ROUTE_TABLE_MAX]{};
 

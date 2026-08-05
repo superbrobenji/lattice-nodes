@@ -39,8 +39,10 @@ void toWire(const CompactMessage& src, mesh_message& dst) {
   memcpy(dst.route_path, src.route_path, sizeof(src.route_path));
   memcpy(dst.auth_tag, src.auth_tag, sizeof(src.auth_tag));
   memcpy(dst.auth_path, src.auth_path, sizeof(src.auth_path));
-  // secondary_master_mac / secondary_public_key: left zeroed by the memset
-  // above — CompactMessage does not carry them (see header comment).
+  // secondary_master_mac / secondary_public_key: not zeroed here — as of
+  // protocol v0.6.0 they live inside data[4..42], which the memcpy above
+  // (dst.data <- src.data) already copied through verbatim. See header
+  // comment.
 }
 
 } // namespace mesh

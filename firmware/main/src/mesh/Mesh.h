@@ -36,7 +36,9 @@ using ::mesh_message;
 using ::MeshMessageType;
 using lattice::adapter::adapter_types;
 
-static constexpr uint8_t PROTO_VERSION = 4;
+// Protocol v0.6.0 flag-day (Phase G §8 wire shrink): 4→5, bumped atomically
+// with hub Task 6 in a parallel PR — must merge together.
+static constexpr uint8_t PROTO_VERSION = 5;
 
 class Mesh {
 #ifdef UNIT_TEST
