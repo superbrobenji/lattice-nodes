@@ -22,7 +22,7 @@ void ErrorCore::init(hardware::Led* led, hardware::SevenSegDisplay* display) {
   if (r != ESP_RST_POWERON && r != ESP_RST_SW && r != ESP_RST_EXT) {
     signalError(ErrorTypeDigit::HARDWARE, ModuleDigit::CORE, 1, "Unexpected reset");
   }
-  Logger::logln("ErrorCore", "Initialized", LogLevel::LOG_INFO);
+  LATTICE_LOGLN("ErrorCore", "Initialized", LogLevel::LOG_INFO);
 }
 void ErrorCore::signalError(ErrorTypeDigit t, ModuleDigit m, uint8_t sub, const char* msg) {
   uint16_t code = makeErrorCode(t, m, sub);
@@ -46,7 +46,7 @@ void ErrorCore::signalError(ErrorTypeDigit t, ModuleDigit m, uint8_t sub, const 
 }
 void ErrorCore::signalError(ErrorType type, const char* msg) {
   if (msg)
-    Logger::logln("Error", String("ERROR: ") + msg, LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("Error", String("ERROR: ") + msg, LogLevel::LOG_ERROR);
   if (_initialized && _errorLed) {
     if (_inCallbackContext) {
       // Defer blink to main loop — never block in callback context
@@ -103,7 +103,7 @@ bool ErrorCore::shouldRestart(ErrorType t) const {
   return t == ErrorType::MEMORY_ERROR || t == ErrorType::HARDWARE_FAILURE;
 }
 [[noreturn]] void ErrorCore::restartDevice() {
-  Logger::logln("ErrorCore", "Restarting device...", LogLevel::LOG_WARN);
+  LATTICE_LOGLN("ErrorCore", "Restarting device...", LogLevel::LOG_WARN);
 #ifdef UNIT_TEST
   throw lattice::err::FatalError("ErrorCore::restartDevice");
 #else

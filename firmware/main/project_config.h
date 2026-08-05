@@ -1,6 +1,19 @@
 #ifndef PROJECT_CONFIG_H
 #define PROJECT_CONFIG_H
 
+// Compile-time mirror of DEFAULT_LOG_LEVEL (§6 "Logging" below, LogLevel::LOG_NONE) used by
+// LATTICE_LOG/LATTICE_LOGLN (Logger.h) to fold to a no-op at compile time when logging is fully
+// disabled. Must be defined before Logger.h is first included in a translation unit for the
+// gating to take effect there — Logger.h's own header guard means its #if is only evaluated once,
+// at first inclusion — hence this sits above every #include in this file. Logger.h carries its
+// own LOG_NONE fallback (same value) for translation units that include it directly without going
+// through this file first; the #ifndef below avoids a harmless-but-noisy macro-redefinition
+// warning when that fallback already fired earlier in the same translation unit. The static_assert
+// next to DEFAULT_LOG_LEVEL below catches drift between the two.
+#ifndef LATTICE_DEFAULT_LOG_LEVEL
+#define LATTICE_DEFAULT_LOG_LEVEL 4 // mirrors lattice::utils::LogLevel::LOG_NONE
+#endif
+
 #include <Arduino.h>
 #include "src/logging/Logger.h"
 #include "src/adapter/Adapter.h"
@@ -83,6 +96,10 @@ constexpr int NUM_DEFAULT_PEERS = sizeof(DEFAULT_PEERS) / sizeof(DEFAULT_PEERS[0
 // CRITICAL: For server communication, MUST be LOG_NONE to prevent text output
 // Only enable logging (LOG_DEBUG, LOG_INFO, etc.) for development/debugging
 constexpr lattice::utils::LogLevel DEFAULT_LOG_LEVEL = lattice::utils::LogLevel::LOG_NONE;
+static_assert(static_cast<int>(DEFAULT_LOG_LEVEL) == LATTICE_DEFAULT_LOG_LEVEL,
+              "LATTICE_DEFAULT_LOG_LEVEL (top of this file) must mirror DEFAULT_LOG_LEVEL here — "
+              "LATTICE_LOG/LATTICE_LOGLN (Logger.h) key off the macro at compile time; keep both "
+              "in sync when changing either.");
 
 // =====================
 // 7. TX Power Presets

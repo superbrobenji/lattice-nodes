@@ -21,7 +21,7 @@ bool EepromManager::init() {
   if (isInitialized)
     return true;
   if (!_prefs.begin(NVS_KEYS::NAMESPACE, false)) {
-    Logger::logln("NVS", "Failed to open NVS namespace", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("NVS", "Failed to open NVS namespace", LogLevel::LOG_ERROR);
     lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 1,
                        "EepromManager: NVS begin failed");
     return false;
@@ -52,7 +52,7 @@ bool EepromManager::getDevMode() const {
 
 bool EepromManager::ensureInitialized() {
   if (!isInitialized) {
-    Logger::logln("NVS", "NVS not initialized", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("NVS", "NVS not initialized", LogLevel::LOG_ERROR);
     return false;
   }
   return true;
@@ -60,9 +60,9 @@ bool EepromManager::ensureInitialized() {
 
 void EepromManager::logOperation(const char* operation, const char* details) {
   if (details) {
-    Logger::logln("NVS", String(operation) + ": " + details, LogLevel::LOG_DEBUG);
+    LATTICE_LOGLN("NVS", String(operation) + ": " + details, LogLevel::LOG_DEBUG);
   } else {
-    Logger::logln("NVS", operation, LogLevel::LOG_DEBUG);
+    LATTICE_LOGLN("NVS", operation, LogLevel::LOG_DEBUG);
   }
 }
 
@@ -211,7 +211,7 @@ bool EepromManager::loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32) {
   memcpy(both + 32, publicKey32, 32);
   uint16_t computed = crc16(both, 64);
   if (static_cast<uint16_t>(stored) != computed) {
-    Logger::logln("NVS", "Keypair CRC mismatch", LogLevel::LOG_WARN);
+    LATTICE_LOGLN("NVS", "Keypair CRC mismatch", LogLevel::LOG_WARN);
     return false;
   }
   return true;
@@ -359,7 +359,7 @@ void EepromManager::clearAll() {
 }
 
 void EepromManager::dumpEEPROM() {
-  Logger::logln("NVS", "NVS dump not implemented (use idf.py nvs-dump)", LogLevel::LOG_INFO);
+  LATTICE_LOGLN("NVS", "NVS dump not implemented (use idf.py nvs-dump)", LogLevel::LOG_INFO);
 }
 
 bool EepromManager::_persistOrEscalate(const char* key, size_t got, size_t want,
@@ -372,7 +372,7 @@ bool EepromManager::_persistOrEscalate(const char* key, size_t got, size_t want,
                        "NVS write failed (security-relevant key)");
     return false; // unreachable outside UNIT_TEST
   }
-  Logger::logln("NVS",
+  LATTICE_LOGLN("NVS",
                 String("write failed key=") + key + " got=" + String((unsigned)got) +
                     " want=" + String((unsigned)want),
                 LogLevel::LOG_ERROR);

@@ -5,6 +5,7 @@
 #include "src/adapter/Adapter.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
+#include "src/network/hw_mac.h"
 #include <esp_wifi.h>
 #include <cstring>
 
@@ -12,13 +13,11 @@ namespace lattice {
 namespace adapter {
 namespace serial {
 
-static void readOwnMac(uint8_t out[6]) {
-  esp_wifi_get_mac(WIFI_IF_STA, out);
-}
+using lattice::hw::readOwnMac;
 
 size_t SerialFraming::encode(const lattice::mesh::mesh_message& msg, uint8_t* out, size_t maxLen) {
   using namespace lattice::utils;
-  Logger::logln("Serial_Adapter",
+  LATTICE_LOGLN("Serial_Adapter",
                 "Encoding mesh message - Type: " + String((uint8_t)msg.message_type) +
                     " DataType: " + String(static_cast<int32_t>(msg.data_type)) +
                     " HopCount: " + String(msg.hop_count),
@@ -82,11 +81,11 @@ size_t SerialFraming::encode(const lattice::mesh::mesh_message& msg, uint8_t* ou
 
   pb_ostream_t stream = pb_ostream_from_buffer(out, maxLen);
   if (!pb_encode(&stream, mesh_MeshMessage_fields, &pbMsg)) {
-    Logger::logln("Serial_Adapter", "nanopb encode failed", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("Serial_Adapter", "nanopb encode failed", LogLevel::LOG_ERROR);
     return 0;
   }
 
-  Logger::logln("Serial_Adapter",
+  LATTICE_LOGLN("Serial_Adapter",
                 "Successfully encoded mesh message to " + String(stream.bytes_written) + " bytes",
                 LogLevel::LOG_DEBUG);
   return stream.bytes_written;
@@ -94,7 +93,7 @@ size_t SerialFraming::encode(const lattice::mesh::mesh_message& msg, uint8_t* ou
 
 bool SerialFraming::decode(const uint8_t* data, size_t len, lattice::mesh::mesh_message& outMsg) {
   using namespace lattice::utils;
-  Logger::logln("Serial_Adapter", "Decoding protobuf message of " + String(len) + " bytes",
+  LATTICE_LOGLN("Serial_Adapter", "Decoding protobuf message of " + String(len) + " bytes",
                 LogLevel::LOG_DEBUG);
 
   memset(&outMsg, 0, sizeof(outMsg));
@@ -102,7 +101,7 @@ bool SerialFraming::decode(const uint8_t* data, size_t len, lattice::mesh::mesh_
   mesh_MeshMessage pbMsg = mesh_MeshMessage_init_zero;
   pb_istream_t stream = pb_istream_from_buffer(data, len);
   if (!pb_decode(&stream, mesh_MeshMessage_fields, &pbMsg)) {
-    Logger::logln("Serial_Adapter", "nanopb decode failed", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("Serial_Adapter", "nanopb decode failed", LogLevel::LOG_ERROR);
     return false;
   }
 
@@ -144,7 +143,7 @@ bool SerialFraming::decode(const uint8_t* data, size_t len, lattice::mesh::mesh_
     memcpy(outMsg.last_hop_mac_address, pbMsg.lastHopMacAddress, 6);
   }
 
-  Logger::logln("Serial_Adapter", "Successfully decoded protobuf message", LogLevel::LOG_DEBUG);
+  LATTICE_LOGLN("Serial_Adapter", "Successfully decoded protobuf message", LogLevel::LOG_DEBUG);
   return true;
 }
 
@@ -160,7 +159,7 @@ bool SerialFraming::injectByte(uint8_t byteIn) {
   case FrameState::AwaitingLen2:
     frameLength |= static_cast<uint16_t>(byteIn) << 8;
     if (frameLength == 0 || frameLength > MAX_PAYLOAD) {
-      Logger::logln("SERIAL", "Frame parse error", LogLevel::LOG_WARN);
+      LATTICE_LOGLN("SERIAL", "Frame parse error", LogLevel::LOG_WARN);
       lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::ADAPTER,
                          2, "Serial_Adapter: Invalid frame length");
       // Invalid length — reset
@@ -175,7 +174,7 @@ bool SerialFraming::injectByte(uint8_t byteIn) {
 
   case FrameState::AwaitingPayload:
     if (frameIndex >= MAX_PAYLOAD) {
-      Logger::logln("SERIAL", "Frame parse error", LogLevel::LOG_WARN);
+      LATTICE_LOGLN("SERIAL", "Frame parse error", LogLevel::LOG_WARN);
       lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::ADAPTER,
                          3, "Serial_Adapter: Frame buffer overflow");
       frameState = FrameState::AwaitingLen1;

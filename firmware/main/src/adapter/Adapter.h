@@ -24,7 +24,6 @@ enum adapter_types : int32_t {
   SERIAL_ADAPTER = 1,
   PIR_ADAPTER = 2,
   LED_ADAPTER = 3,
-  RELAY_ADAPTER = 4,
 };
 
 // Abstract base class for all adapters

@@ -34,6 +34,9 @@ private:
   void stop();
   bool writeByte(uint8_t b);
   uint8_t encodeDigit(int d);
+  // Shared body for show()/showWithDP() (audit item M — the two used to be near-identical
+  // 30-line copies differing only in the DP segment bit).
+  void showInternal(int value, bool leadingZeros, bool withDP);
 };
 
 } // namespace hardware

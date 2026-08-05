@@ -35,7 +35,7 @@ SevenSegDisplay::SevenSegDisplay(uint8_t dio, uint8_t clk)
 
 bool SevenSegDisplay::init() {
   if (!GpioOutput::isValidOutputPin(_dioPin) || !GpioOutput::isValidOutputPin(_clkPin)) {
-    Logger::logln("7SEG", "Invalid GPIO pins", lattice::utils::LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("7SEG", "Invalid GPIO pins", lattice::utils::LogLevel::LOG_ERROR);
     lattice::err::fail(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::HW, 1,
                        "7Seg invalid pins");
     return false;
@@ -44,7 +44,7 @@ bool SevenSegDisplay::init() {
   pinMode(_clkPin, OUTPUT);
   digitalWrite(_clkPin, HIGH);
   digitalWrite(_dioPin, HIGH);
-  Logger::logln("7SEG", "SevenSegDisplay initialized", lattice::utils::LogLevel::LOG_INFO);
+  LATTICE_LOGLN("7SEG", "SevenSegDisplay initialized", lattice::utils::LogLevel::LOG_INFO);
   // Self-test: flash all segments 0x7F (88:88)
   uint8_t testSeg[4] = {0x7F, 0x7F, 0x7F, 0x7F};
   setSegments(testSeg);
@@ -115,7 +115,7 @@ bool SevenSegDisplay::writeByte(uint8_t b) {
   pinMode(_dioPin, OUTPUT);
   digitalWrite(_clkPin, LOW);
   if (!ack) {
-    Logger::logln("7SEG", "ACK timeout", lattice::utils::LogLevel::LOG_WARN);
+    LATTICE_LOGLN("7SEG", "ACK timeout", lattice::utils::LogLevel::LOG_WARN);
     lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::HW, 2,
                        "7Seg ACK timeout");
   }
@@ -146,7 +146,7 @@ void SevenSegDisplay::setSegments(const uint8_t (&segs)[4]) {
   stop();
 }
 
-void SevenSegDisplay::show(int value, bool leadingZeros) {
+void SevenSegDisplay::showInternal(int value, bool leadingZeros, bool withDP) {
   bool negative = value < 0;
   int v = negative ? -value : value;
   if (v > 9999)
@@ -175,40 +175,17 @@ void SevenSegDisplay::show(int value, bool leadingZeros) {
     else
       segs[i] = encodeDigit(digits[i]);
   }
+  if (withDP)
+    segs[3] |= 0x80; // DP bit on last digit
   setSegments(segs);
 }
 
+void SevenSegDisplay::show(int value, bool leadingZeros) {
+  showInternal(value, leadingZeros, false);
+}
+
 void SevenSegDisplay::showWithDP(int value, bool leadingZeros) {
-  bool negative = value < 0;
-  int v = negative ? -value : value;
-  if (v > 9999)
-    v = 9999;
-
-  int digits[4];
-  for (int i = 3; i >= 0; --i) {
-    digits[i] = v % 10;
-    v /= 10;
-  }
-
-  if (negative) {
-    // show minus on leftmost non-zero digit position
-    for (int i = 0; i < 4; ++i) {
-      if (digits[i] != 0 || i == 3) { // last digit
-        digits[i] = -1;               // minus
-        break;
-      }
-    }
-  }
-
-  uint8_t segs[4];
-  for (int i = 0; i < 4; ++i) {
-    if (!leadingZeros && i < 3 && digits[i] == 0 && !negative)
-      segs[i] = 0x00;
-    else
-      segs[i] = encodeDigit(digits[i]);
-  }
-  segs[3] |= 0x80; // DP bit on last digit
-  setSegments(segs);
+  showInternal(value, leadingZeros, true);
 }
 
 } // namespace hardware

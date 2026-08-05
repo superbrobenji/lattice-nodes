@@ -12,7 +12,6 @@ struct MacAddress {
   // Constructors
   MacAddress() { memset(bytes, 0, 6); }
   explicit MacAddress(const uint8_t* mac) { memcpy(bytes, mac, 6); }
-  explicit MacAddress(const String& macString);
 
   // Comparison operators
   bool operator==(const MacAddress& other) const { return memcmp(bytes, other.bytes, 6) == 0; }
@@ -40,18 +39,6 @@ struct MacAddress {
   void setBroadcast() { memset(bytes, 0xFF, 6); }
   void setZero() { memset(bytes, 0, 6); }
 };
-
-inline MacAddress::MacAddress(const String& macString) {
-  // Expect format "AA:BB:CC:DD:EE:FF"
-  int vals[6];
-  if (sscanf(macString.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x", &vals[0], &vals[1], &vals[2],
-             &vals[3], &vals[4], &vals[5]) == 6) {
-    for (int i = 0; i < 6; ++i)
-      bytes[i] = static_cast<uint8_t>(vals[i]);
-  } else {
-    setZero();
-  }
-}
 
 } // namespace utils
 } // namespace lattice

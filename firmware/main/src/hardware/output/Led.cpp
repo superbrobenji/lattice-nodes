@@ -29,12 +29,12 @@ bool Led::init() {
       lattice::err::fail(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::HW, 1,
                          "Led: Invalid pin number");
     }
-    Logger::logln("Led", "ERROR: Invalid pin number for LED: " + String(_pin), LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("Led", "ERROR: Invalid pin number for LED: " + String(_pin), LogLevel::LOG_ERROR);
     return false;
   }
   digitalWrite(_pin, LOW);
   _isOn = false;
-  Logger::logln("Led", "Initialized LED on pin " + String(_pin), LogLevel::LOG_INFO);
+  LATTICE_LOGLN("Led", "Initialized LED on pin " + String(_pin), LogLevel::LOG_INFO);
   return true;
 }
 
@@ -44,7 +44,7 @@ bool Led::on() {
       lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::HW, 2,
                          "Led: on() called before initialization");
     }
-    Logger::logln("Led", "ERROR: on() called before initialization", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("Led", "ERROR: on() called before initialization", LogLevel::LOG_ERROR);
     return false;
   }
   return setState(true);
@@ -56,7 +56,7 @@ bool Led::off() {
       lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::HW, 3,
                          "Led: off() called before initialization");
     }
-    Logger::logln("Led", "ERROR: off() called before initialization", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("Led", "ERROR: off() called before initialization", LogLevel::LOG_ERROR);
     return false;
   }
   return setState(false);
@@ -68,7 +68,7 @@ bool Led::toggle() {
       lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::HW, 4,
                          "Led: toggle() called before initialization");
     }
-    Logger::logln("Led", "ERROR: toggle() called before initialization", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("Led", "ERROR: toggle() called before initialization", LogLevel::LOG_ERROR);
     return false;
   }
   return setState(!_isOn);
@@ -89,7 +89,7 @@ bool Led::setState(bool state) {
     return true;
   digitalWrite(_pin, state ? HIGH : LOW);
   _isOn = state;
-  Logger::logln("Led", String("LED on pin ") + String(_pin) + (state ? " ON" : " OFF"),
+  LATTICE_LOGLN("Led", String("LED on pin ") + String(_pin) + (state ? " ON" : " OFF"),
                 LogLevel::LOG_DEBUG);
   return true;
 }
@@ -104,7 +104,7 @@ bool Led::blink(uint8_t times, unsigned int onTimeMs, unsigned int offTimeMs) {
       lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::HW, 5,
                          "Led: blink() called before initialization");
     }
-    Logger::logln("Led", "ERROR: blink() called before initialization", LogLevel::LOG_ERROR);
+    LATTICE_LOGLN("Led", "ERROR: blink() called before initialization", LogLevel::LOG_ERROR);
     return false;
   }
   for (uint8_t i = 0; i < times; ++i) {
@@ -114,7 +114,7 @@ bool Led::blink(uint8_t times, unsigned int onTimeMs, unsigned int offTimeMs) {
     if (i < times - 1)
       delay(offTimeMs);
   }
-  Logger::logln("Led", String("Blink pattern: ") + String(times) + "x on pin " + String(_pin),
+  LATTICE_LOGLN("Led", String("Blink pattern: ") + String(times) + "x on pin " + String(_pin),
                 LogLevel::LOG_DEBUG);
   return true;
 }

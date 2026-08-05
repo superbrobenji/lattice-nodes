@@ -6,12 +6,14 @@
 #include "src/error/Error.h"
 #include "src/mesh/Mesh.h"
 #include "src/adapter/AdapterFactory.h"
+#include "src/network/hw_mac.h"
 #include <esp_wifi.h>
 
 namespace lattice {
 namespace adapter {
 
 using namespace lattice::utils;
+using lattice::hw::readOwnMac;
 
 PirAdapter* PirAdapter::instance = nullptr;
 
@@ -23,7 +25,7 @@ PirAdapter::PirAdapter(int pin)
 
 bool PirAdapter::init() {
   if (_initialized) {
-    Logger::logln("PIR_Adapter", "Warning: Already initialized.", LogLevel::LOG_WARN);
+    LATTICE_LOGLN("PIR_Adapter", "Warning: Already initialized.", LogLevel::LOG_WARN);
     return true;
   }
 
@@ -43,7 +45,7 @@ bool PirAdapter::init() {
   _interruptEnabled = true;
   _initialized = true;
 
-  Logger::logln("PIR_Adapter", "Initialized successfully", LogLevel::LOG_INFO);
+  LATTICE_LOGLN("PIR_Adapter", "Initialized successfully", LogLevel::LOG_INFO);
   return true;
 }
 
@@ -63,10 +65,6 @@ void PirAdapter::detectMotion() {
   _pir.signalMotion();
   _interruptEnabled = false;
   _pir.detachInterrupt();
-}
-
-static void readOwnMac(uint8_t out[6]) {
-  esp_wifi_get_mac(WIFI_IF_STA, out);
 }
 
 void PirAdapter::sendNodeHealth() {
@@ -99,14 +97,14 @@ void PirAdapter::loop() {
   }
 
   if (_timerActive && !_motionSent) {
-    Logger::logln("PIR_Adapter", "MOTION DETECTED!", LogLevel::LOG_INFO);
+    LATTICE_LOGLN("PIR_Adapter", "MOTION DETECTED!", LogLevel::LOG_INFO);
     _motionSent = true;
     uint8_t data[64] = {1};
     PirAdapter::sendDataTrampoline(_adapterType, data);
   }
 
   if (_timerActive && (now - _lastTrigger > (_cooldownSeconds * 1000U))) {
-    Logger::logln("PIR_Adapter", "Cooldown ended. Re-arming sensor.", LogLevel::LOG_DEBUG);
+    LATTICE_LOGLN("PIR_Adapter", "Cooldown ended. Re-arming sensor.", LogLevel::LOG_DEBUG);
     _timerActive = false;
     _motionSent = false;
 
@@ -139,7 +137,7 @@ void PirAdapter::simulateMotion() {
   // elapsed), so a real PIR firing again mid-cooldown is physically ignored.
   // Calling _pir.signalMotion() directly bypassed that gate and let a simulated
   // re-trigger inject motion the hardware never could, masking the cooldown.
-  Logger::logln("PIR_Adapter", "SIM: Injecting fake PIR motion event", LogLevel::LOG_WARN);
+  LATTICE_LOGLN("PIR_Adapter", "SIM: Injecting fake PIR motion event", LogLevel::LOG_WARN);
   detectMotion();
 }
 #endif
