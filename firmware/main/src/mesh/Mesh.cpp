@@ -106,8 +106,7 @@ PeerInfo* Mesh::findNextHopToMaster() {
   // evict an enrolled peer (master or sensor) — those live in `peers` and
   // are managed exclusively by the enrollment path.
   static const uint8_t kZeroMac[6] = {0, 0, 0, 0, 0, 0};
-  bool isNewRelay =
-      !lattice::mac::eq(forwardingPeer, hopMac);
+  bool isNewRelay = !lattice::mac::eq(forwardingPeer, hopMac);
   bool forwardingPeerSet = !lattice::mac::eq(forwardingPeer, kZeroMac);
   if (forwardingPeerSet && isNewRelay && !peers.find(forwardingPeer) &&
       !lattice::mac::eq(forwardingPeer, currentMaster.mac)) {
@@ -128,9 +127,7 @@ void Mesh::registerDownlinkPeer(const uint8_t* mac) {
   // Enrolled peers and the current master are managed exclusively by their
   // own paths (PeerRegistry / enrollment) — just register (idempotent) and
   // never track or evict them via this LRU.
-  bool isCurrentMaster =
-      currentMaster.distance != 0xFF &&
-      lattice::mac::eq(mac, currentMaster.mac);
+  bool isCurrentMaster = currentMaster.distance != 0xFF && lattice::mac::eq(mac, currentMaster.mac);
   if (peers.find(mac) || isCurrentMaster) {
     // Defense-in-depth (issue #47 item 5): if this MAC was already parked in
     // the downlink forwarding-peer LRU from earlier churn (before it became
@@ -505,8 +502,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
 
   // Routing: always use next hop if possible
   PeerInfo* nextHop = findNextHopToMaster();
-  if (nextHop &&
-      !lattice::mac::eq(nextHop->mac, deviceMacAddress)) {
+  if (nextHop && !lattice::mac::eq(nextHop->mac, deviceMacAddress)) {
     sendMessage(nextHop->mac, msg);
   } else {
     // No route to master is a routine, self-healing transient: a node that has
@@ -743,8 +739,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   }
 
   // --- TOFU master MAC enforcement ---
-  bool fromPrimary =
-      enrollment.hasMasterMac && lattice::mac::eq(msg.origin_mac_address, enrollment.knownMasterMac);
+  bool fromPrimary = enrollment.hasMasterMac &&
+                     lattice::mac::eq(msg.origin_mac_address, enrollment.knownMasterMac);
   bool fromSecondary = _dualMasterMode && enrollment.hasMasterMacSecondary &&
                        lattice::mac::eq(msg.origin_mac_address, enrollment.knownMasterMacSecondary);
 
@@ -777,8 +773,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     }
   }
 
-  if (!lattice::mac::eq(lastSeenMasterMac, msg.origin_mac_address) &&
-      lastSeenMasterMac[0] != 0) {
+  if (!lattice::mac::eq(lastSeenMasterMac, msg.origin_mac_address) && lastSeenMasterMac[0] != 0) {
     if (_dualMasterMode) {
       LATTICE_LOGLN("MESH", "Two masters active (dual master mode)", LogLevel::LOG_DEBUG);
     } else {
