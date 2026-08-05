@@ -245,16 +245,20 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
         // Server may relay a secondary-master identity alongside the
         // enrollment approval (Phase 4 dual-master failover) — pass it
         // through to the JOIN_ACK only if it's actually present (non-zero).
+        // Protocol v0.6.0 (wire shrink §8): packed into data[4..42] rather
+        // than top-level MeshMessage fields.
+        const uint8_t* secondaryMasterMac = msg.data + 4;
+        const uint8_t* secondaryPublicKey = msg.data + 10;
         bool hasSecondary = false;
         for (int i = 0; i < 6; ++i) {
-          if (msg.secondary_master_mac[i]) {
+          if (secondaryMasterMac[i]) {
             hasSecondary = true;
             break;
           }
         }
         if (hasSecondary) {
           meshInstance->enrollPeer(msg.target_mac_address, msg.enrollment_public_key,
-                                   msg.secondary_master_mac, msg.secondary_public_key);
+                                   secondaryMasterMac, secondaryPublicKey);
         } else {
           meshInstance->enrollPeer(msg.target_mac_address, msg.enrollment_public_key);
         }

@@ -55,16 +55,21 @@ size_t SerialFraming::encode(const lattice::mesh::mesh_message& msg, uint8_t* ou
     }
   }
 
-  // secondary_master_mac/secondary_public_key (Phase 4 dual-master failover):
-  // the server stamps these onto a JOIN_ACK to designate a failover master
-  // alongside enrollment approval (see SerialAdapter::handleCompleteFrame /
-  // Mesh::enrollPeer's 4-arg overload). Only present, and only meaningful, on
+  // secondary master identity (Phase 4 dual-master failover): the server
+  // stamps this onto a JOIN_ACK to designate a failover master alongside
+  // enrollment approval (see SerialAdapter::handleCompleteFrame /
+  // Mesh::enrollPeer's 4-arg overload). Protocol v0.6.0 (wire shrink §8)
+  // packs this into the JOIN_ACK data[] payload rather than top-level
+  // MeshMessage fields: data[4..10] = secondaryMasterMac,
+  // data[10..42] = secondaryPublicKey. Only present, and only meaningful, on
   // JOIN_ACK; encode only when non-zero so ordinary single-master JOIN_ACKs
   // stay byte-identical to before this field existed.
   if (msg.message_type == MESH_TYPE_JOIN_ACK) {
+    const uint8_t* secondaryMasterMac = msg.data + 4;
+    const uint8_t* secondaryPublicKey = msg.data + 10;
     bool hasSecondary = false;
     for (int i = 0; i < 6; ++i) {
-      if (msg.secondary_master_mac[i]) {
+      if (secondaryMasterMac[i]) {
         hasSecondary = true;
         break;
       }
@@ -72,10 +77,10 @@ size_t SerialFraming::encode(const lattice::mesh::mesh_message& msg, uint8_t* ou
     if (hasSecondary) {
       pbMsg.has_secondaryMasterMac = true;
       pbMsg.secondaryMasterMac.size = 6;
-      memcpy(pbMsg.secondaryMasterMac.bytes, msg.secondary_master_mac, 6);
+      memcpy(pbMsg.secondaryMasterMac.bytes, secondaryMasterMac, 6);
       pbMsg.has_secondaryPublicKey = true;
       pbMsg.secondaryPublicKey.size = 32;
-      memcpy(pbMsg.secondaryPublicKey.bytes, msg.secondary_public_key, 32);
+      memcpy(pbMsg.secondaryPublicKey.bytes, secondaryPublicKey, 32);
     }
   }
 
@@ -123,11 +128,13 @@ bool SerialFraming::decode(const uint8_t* data, size_t len, lattice::mesh::mesh_
     memcpy(outMsg.enrollment_public_key, pbMsg.public_key.bytes, 32);
   }
 
+  // Protocol v0.6.0 (wire shrink §8): secondary master identity lives in
+  // outMsg.data[4..42], not top-level fields. See encode() above.
   if (pbMsg.has_secondaryMasterMac) {
-    memcpy(outMsg.secondary_master_mac, pbMsg.secondaryMasterMac.bytes, 6);
+    memcpy(outMsg.data + 4, pbMsg.secondaryMasterMac.bytes, 6);
   }
   if (pbMsg.has_secondaryPublicKey) {
-    memcpy(outMsg.secondary_public_key, pbMsg.secondaryPublicKey.bytes, 32);
+    memcpy(outMsg.data + 10, pbMsg.secondaryPublicKey.bytes, 32);
   }
 
   // For server-to-device messages (JOIN_ACK, SERIAL_CMD_BROADCAST) the MAC

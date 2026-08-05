@@ -834,8 +834,10 @@ TEST_F(JoinAckRelayTest, ProcessJoinAckRegistersSecondaryMasterAndKeys) {
   memcpy(ack.target_mac_address, leaf.testDeviceMac(), 6);
   memcpy(ack.data, leafPub, 4); // fingerprint of the leaf's pubkey
   memcpy(ack.enrollment_public_key, primPub, 32); // primary pubkey
-  memcpy(ack.secondary_master_mac, secMac, 6);
-  memcpy(ack.secondary_public_key, secPub, 32);
+  // Protocol v0.6.0 (wire shrink §8): secondary master identity packed into
+  // data[4..42] rather than top-level fields.
+  memcpy(ack.data + 4, secMac, 6);
+  memcpy(ack.data + 10, secPub, 32);
 
   leaf.processJoinAck(ack);
 
@@ -1237,8 +1239,10 @@ TEST_F(JoinAckRelayTest, EnrollPeerStampsSecondaryIdentityIntoJoinAck) {
   // JOIN_ACK is broadcast; find it in the mock's sent frames.
   ASSERT_TRUE(sawBroadcastOfType(MESH_TYPE_JOIN_ACK));
   mesh_message ack = lastEspNowBroadcastOfType(MESH_TYPE_JOIN_ACK);
-  EXPECT_EQ(0, memcmp(ack.secondary_master_mac, sec, 6));
-  EXPECT_EQ(0, memcmp(ack.secondary_public_key, secPub, 32));
+  // Protocol v0.6.0 (wire shrink §8): secondary master identity packed into
+  // data[4..42] rather than top-level fields.
+  EXPECT_EQ(0, memcmp(ack.data + 4, sec, 6));
+  EXPECT_EQ(0, memcmp(ack.data + 10, secPub, 32));
 }
 
 TEST_F(JoinAckRelayTest, EnrollPeerTwoArgLeavesSecondaryZero) {
@@ -1250,8 +1254,8 @@ TEST_F(JoinAckRelayTest, EnrollPeerTwoArgLeavesSecondaryZero) {
   ASSERT_TRUE(sawBroadcastOfType(MESH_TYPE_JOIN_ACK));
   mesh_message ack = lastEspNowBroadcastOfType(MESH_TYPE_JOIN_ACK);
   uint8_t zero6[6] = {}, zero32[32] = {};
-  EXPECT_EQ(0, memcmp(ack.secondary_master_mac, zero6, 6));
-  EXPECT_EQ(0, memcmp(ack.secondary_public_key, zero32, 32));
+  EXPECT_EQ(0, memcmp(ack.data + 4, zero6, 6));
+  EXPECT_EQ(0, memcmp(ack.data + 10, zero32, 32));
 }
 
 // ─── Config-opcode injection resistance (CRITICAL finding) ──────────────────

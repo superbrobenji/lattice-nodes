@@ -1120,10 +1120,16 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint
   memcpy(ack.enrollment_public_key, enrollment.getPublicKey(), 32);
   // Stamp the server-provided secondary-master identity, if any, so the
   // enrolling node can TOFU-learn its failover master from this same ACK
-  // (Phase 4). Left zeroed (ack's default) when there is no secondary.
+  // (Phase 4). Protocol v0.6.0 (wire shrink §8) packs this into the JOIN_ACK
+  // data[] payload rather than top-level MeshMessage fields:
+  //   data[0..4]   = node pubkey fingerprint (set above)
+  //   data[4..10]  = secondaryMasterMac
+  //   data[10..42] = secondaryPublicKey
+  //   data[42..64] = zero
+  // Left zeroed (ack's default) when there is no secondary.
   if (secondaryMac && secondaryPubKey32) {
-    memcpy(ack.secondary_master_mac, secondaryMac, 6);
-    memcpy(ack.secondary_public_key, secondaryPubKey32, 32);
+    memcpy(ack.data + 4, secondaryMac, 6);
+    memcpy(ack.data + 10, secondaryPubKey32, 32);
   }
   // Broadcast via the registered FF:FF:… peer so the new node receives the ACK
   // even before it is individually registered as a unicast peer.

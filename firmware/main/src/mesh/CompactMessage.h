@@ -6,11 +6,12 @@ namespace lattice {
 namespace mesh {
 
 // Compact in-RAM representation of mesh_message for buffered/queued processing
-// (Phase G §7, RAM residency). The wire form (mesh_message, 250B) remains the
-// source of truth for anything that touches the radio (SerialFraming / ESP-NOW
-// send path) — this type only shrinks what a frame costs while it sits in
-// Mesh::recvQueue or is carried on the stack past the initial decode boundary
-// (Mesh::onDataRecvCallback / Mesh::drainRecvQueue).
+// (Phase G §7, RAM residency). The wire form (mesh_message, 200B as of the
+// protocol v0.6.0 wire shrink, §8 — was 250B when this type was designed)
+// remains the source of truth for anything that touches the radio
+// (SerialFraming / ESP-NOW send path) — this type only shrinks what a frame
+// costs while it sits in Mesh::recvQueue or is carried on the stack past the
+// initial decode boundary (Mesh::onDataRecvCallback / Mesh::drainRecvQueue).
 //
 // Field-drop rationale (audited against every recvQueue-reachable consumer in
 // Mesh.cpp/Enrollment.cpp before finalizing — see task-3-report.md for the
@@ -58,14 +59,21 @@ struct CompactMessage {
   uint8_t route_len;
   uint8_t data[64];
   uint8_t enrollment_public_key[32];
-  uint8_t route_path[60];
+  // Mirrors mesh_message::route_path, which protocol v0.6.0 (wire shrink §8)
+  // shrank 60→48 (MAX_HOPS 10→8). Must track the wire size exactly — toWire()
+  // memcpy's sizeof(this field) into mesh_message::route_path[48].
+  uint8_t route_path[48];
   uint8_t auth_tag[16];
   uint8_t auth_path[8];
-  // Skipped (see rationale above): secondary_master_mac[6], secondary_public_key[32].
+  // Skipped (see rationale above): secondary_master_mac[6], secondary_public_key[32]
+  // (protocol v0.6.0 dropped these top-level wire fields entirely — see
+  // Enrollment::processJoinAck, which now reads the JOIN_ACK secondary from
+  // data[4..42] instead).
 };
-// Achieved: 212B (vs mesh_message's packed 250B) — the 38B saved is exactly
-// secondary_master_mac[6] + secondary_public_key[32], the only fields proven
-// safe to drop (see rationale above). Not currently used for Mesh::recvQueue
+// CompactMessage carries every field mesh_message still has except
+// secondary_master_mac/secondary_public_key, which no longer exist on the
+// wire at all as of protocol v0.6.0 (they moved into JOIN_ACK's data[]
+// payload — see Enrollment::processJoinAck). Not currently used for Mesh::recvQueue
 // (see Mesh.h's RecvQueueEntry comment) — kept at <= 220 so a future consumer
 // noticing this doesn't have to re-derive the achievable budget from scratch.
 static_assert(sizeof(CompactMessage) <= 220, "CompactMessage residency budget");

@@ -166,7 +166,9 @@ inline constexpr size_t LATTICE_ROUTE_TABLE_MAX = 16;
 // under the ~20 cap on realistic relays.
 inline constexpr size_t LATTICE_DOWNLINK_PEER_MAX = 4;
 // Maximum allowed routing hops in the mesh network
-constexpr uint8_t MAX_HOPS = 10;
+// (protocol v0.6.0 wire shrink §8: routePath 60→48B, 10→8 hops. Observed
+// deployments never exceeded 4 hops, so this is safe with margin.)
+constexpr uint8_t MAX_HOPS = 8;
 // Peer staleness threshold (ms) before being considered offline
 constexpr uint32_t STALE_PEER_THRESHOLD_MS = 8000UL;
 // Routing timeout used by MessageRouter (ms)

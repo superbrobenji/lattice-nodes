@@ -45,7 +45,7 @@ TEST(RouteTable, RecordUpdatesExistingNode) {
 TEST(RouteTable, RejectsOverlongPath) {
   RouteTable t;
   uint8_t big[66] = {};
-  t.record(NODE, big, 11, 1000); // 11 > MAX_HOPS(10) → ignored
+  t.record(NODE, big, 11, 1000); // 11 > MAX_HOPS(8) → ignored
   uint8_t out[60], outLen = 0;
   EXPECT_FALSE(t.lookup(NODE, out, &outLen));
 }

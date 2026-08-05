@@ -28,14 +28,10 @@ mesh_message makeFullWireMessage() {
   for (int i = 0; i < 32; ++i)
     msg.enrollment_public_key[i] = static_cast<uint8_t>(0x50 + i);
   msg.route_len = 3;
-  for (int i = 0; i < 60; ++i)
-    msg.route_path[i] = static_cast<uint8_t>(0x60 + (i % 60));
+  for (int i = 0; i < 48; ++i)
+    msg.route_path[i] = static_cast<uint8_t>(0x60 + (i % 48));
   for (int i = 0; i < 16; ++i)
     msg.auth_tag[i] = static_cast<uint8_t>(0x70 + i);
-  for (int i = 0; i < 6; ++i)
-    msg.secondary_master_mac[i] = static_cast<uint8_t>(0x80 + i);
-  for (int i = 0; i < 32; ++i)
-    msg.secondary_public_key[i] = static_cast<uint8_t>(0x90 + i);
   for (int i = 0; i < 8; ++i)
     msg.auth_path[i] = static_cast<uint8_t>(0xA0 + i);
   return msg;
@@ -71,27 +67,12 @@ TEST(CompactMessage, RoundTripPreservesStoredFields) {
   EXPECT_EQ(0, memcmp(out.auth_path, src.auth_path, sizeof(src.auth_path)));
 }
 
-// Fields CompactMessage does NOT declare (secondary_master_mac,
-// secondary_public_key — see CompactMessage.h's rationale comment) must come
-// back zeroed after a round trip, even though the source wire message had
-// them populated with non-zero data.
-TEST(CompactMessage, RoundTripZeroesSkippedFields) {
-  mesh_message src = makeFullWireMessage();
-  // Sanity: the fixture really did populate the fields we expect to be dropped.
-  ASSERT_NE(0, src.secondary_master_mac[0]);
-  ASSERT_NE(0, src.secondary_public_key[0]);
-
-  CompactMessage compact{};
-  toCompact(src, compact);
-
-  mesh_message out{};
-  toWire(compact, out);
-
-  uint8_t zero6[6] = {0};
-  uint8_t zero32[32] = {0};
-  EXPECT_EQ(0, memcmp(out.secondary_master_mac, zero6, 6));
-  EXPECT_EQ(0, memcmp(out.secondary_public_key, zero32, 32));
-}
+// NOTE: the old "RoundTripZeroesSkippedFields" test (secondary_master_mac /
+// secondary_public_key dropped by CompactMessage) was removed here — protocol
+// v0.6.0 (wire shrink §8) deleted those top-level mesh_message fields
+// entirely, so there is nothing left for CompactMessage to skip; JOIN_ACK's
+// secondary identity now lives in data[4..42], which round-trips as part of
+// the ordinary `data` field coverage in RoundTripPreservesStoredFields above.
 
 // toWire() fully overwrites its output — no stale data from a previous
 // reconstruction should leak through (matters since drainRecvQueue reuses a
@@ -122,6 +103,14 @@ TEST(CompactMessage, ZeroMessageRoundTripsToZero) {
   EXPECT_EQ(0, memcmp(&out, &allZero, sizeof(mesh_message)));
 }
 
-TEST(CompactMessage, SizeIsSmallerThanWire) {
-  EXPECT_LT(sizeof(CompactMessage), sizeof(mesh_message));
+// Protocol v0.6.0 (wire shrink §8) removed secondary_master_mac/
+// secondary_public_key from mesh_message entirely — those were the only two
+// fields CompactMessage ever dropped (see CompactMessage.h's rationale
+// comment), so there is nothing left for it to shrink relative to the
+// now-200B wire struct. This asserts CompactMessage never grows PAST the
+// wire size (it still carries every field mesh_message has), not that it is
+// smaller — that guarantee no longer holds now that its one differentiator
+// was deleted upstream rather than dropped by CompactMessage itself.
+TEST(CompactMessage, SizeDoesNotExceedWire) {
+  EXPECT_LE(sizeof(CompactMessage), sizeof(mesh_message));
 }
