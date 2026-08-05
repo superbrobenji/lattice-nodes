@@ -1,10 +1,13 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include "E2ECrypto.h"
 #include "../../project_config.h"
 #include "src/network/MacEq.h"
+#include "src/network/mac_table.h"
+#include "src/network/mem.h"
 
 namespace lattice {
 namespace mesh {
@@ -55,23 +58,18 @@ public:
                const uint8_t** kUpOut, const uint8_t** kDownOut) {
     if (capacity_ == 0)
       return false;
-    for (size_t i = 0; i < capacity_; ++i) {
-      if (entries[i].valid && lattice::mac::eq(entries[i].mac, mac)) {
-        *kUpOut = entries[i].kUp;
-        *kDownOut = entries[i].kDown;
-        return true;
-      }
+    // Thinned via lattice::mac_table::find (Phase H2 audit item Y).
+    size_t idx = lattice::mac_table::find(entries.get(), capacity_, sizeof(Entry),
+                                          offsetof(Entry, mac), mac);
+    if (idx != SIZE_MAX && entries[idx].valid) {
+      *kUpOut = entries[idx].kUp;
+      *kDownOut = entries[idx].kDown;
+      return true;
     }
     if (!peerPub32)
       return false;
-    bool allZero = true;
-    for (int i = 0; i < 32; ++i) {
-      if (peerPub32[i] != 0) {
-        allZero = false;
-        break;
-      }
-    }
-    if (allZero)
+    // Thinned via lattice::mem::is_zero (Phase H2 audit item Z).
+    if (lattice::mem::is_zero(peerPub32, 32))
       return false;
     Entry& e = entries[nextSlot];
     nextSlot = (nextSlot + 1) % capacity_;

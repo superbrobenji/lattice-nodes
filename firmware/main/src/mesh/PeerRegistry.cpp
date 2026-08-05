@@ -2,7 +2,9 @@
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/network/MacEq.h"
+#include "src/network/mac_table.h"
 #include <esp_now.h>
+#include <cstddef>
 #include <cstring>
 
 namespace lattice {
@@ -19,22 +21,19 @@ void PeerRegistry::setDeviceMac(const uint8_t* mac) {
   memcpy(deviceMac, mac, 6);
 }
 
+// Thinned via lattice::mac_table::find (Phase H2 audit item Y). peerMacs has
+// no per-entry "valid" bit — every slot in [0, peerCount) is live — so the
+// found index maps straight to a pointer, no extra flag check needed.
 PeerInfo* PeerRegistry::find(const uint8_t* mac) {
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::mac::eq(peerMacs[i].mac, mac)) {
-      return &peerMacs[i];
-    }
-  }
-  return nullptr;
+  size_t idx = lattice::mac_table::find(peerMacs, peerCount, sizeof(PeerInfo),
+                                        offsetof(PeerInfo, mac), mac);
+  return idx == SIZE_MAX ? nullptr : &peerMacs[idx];
 }
 
 const PeerInfo* PeerRegistry::find(const uint8_t* mac) const {
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::mac::eq(peerMacs[i].mac, mac)) {
-      return &peerMacs[i];
-    }
-  }
-  return nullptr;
+  size_t idx = lattice::mac_table::find(peerMacs, peerCount, sizeof(PeerInfo),
+                                        offsetof(PeerInfo, mac), mac);
+  return idx == SIZE_MAX ? nullptr : &peerMacs[idx];
 }
 
 bool PeerRegistry::append(const PeerInfo& peer) {

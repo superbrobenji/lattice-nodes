@@ -1,8 +1,10 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include "../../project_config.h"
 #include "src/network/MacEq.h"
+#include "src/network/mac_table.h"
 
 namespace lattice {
 namespace mesh {
@@ -153,11 +155,11 @@ public:
     return best;
   }
 
+  // Thinned via lattice::mac_table::find (Phase H2 audit item Y).
   bool contains(const uint8_t* mac) const {
-    for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i)
-      if (entries[i].valid && lattice::mac::eq(entries[i].mac, mac))
-        return true;
-    return false;
+    size_t idx = lattice::mac_table::find(entries, config::LATTICE_NEIGHBOR_MAX, sizeof(Entry),
+                                          offsetof(Entry, mac), mac);
+    return idx != SIZE_MAX && entries[idx].valid;
   }
 
   void clear() { memset(entries, 0, sizeof(entries)); }
@@ -171,11 +173,13 @@ private:
   };
   Entry entries[config::LATTICE_NEIGHBOR_MAX]{};
 
+  // Thinned via lattice::mac_table::find (Phase H2 audit item Y).
   Entry* findSlot(const uint8_t* mac) {
-    for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i)
-      if (entries[i].valid && lattice::mac::eq(entries[i].mac, mac))
-        return &entries[i];
-    return nullptr;
+    size_t idx = lattice::mac_table::find(entries, config::LATTICE_NEIGHBOR_MAX, sizeof(Entry),
+                                          offsetof(Entry, mac), mac);
+    if (idx == SIZE_MAX || !entries[idx].valid)
+      return nullptr;
+    return &entries[idx];
   }
 
   // Pick a slot for a new neighbor: first invalid, else a stale one, else the
