@@ -70,6 +70,7 @@ set(FIRMWARE_SOURCES
   ../firmware/main/src/hardware/output/SevenSegDisplay.cpp
   ../firmware/main/src/hardware/input/GpioInput.cpp
   ../firmware/main/src/hardware/input/Pir.cpp
+  ../firmware/main/src/hardware/input/Button.cpp
   mocks/esp_now_mock.cpp
   mocks/esp_wifi_mock.cpp
   mocks/time_mock.cpp
@@ -108,6 +109,8 @@ add_unit_test(test_e2e_keystore       unit/test_e2e_keystore.cpp)
 add_unit_test(test_neighbor_table     unit/test_neighbor_table.cpp)
 add_unit_test(test_route_table        unit/test_route_table.cpp)
 add_unit_test(test_compact_message    unit/test_compact_message.cpp)
+add_unit_test(test_button             unit/test_button.cpp)
+add_unit_test(test_display_manager    unit/test_display_manager.cpp)
 
 # ---- E2E simulation target — SIMULATE_MODE recompiles all firmware sources ----
 add_executable(lattice_e2e
