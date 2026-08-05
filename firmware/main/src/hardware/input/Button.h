@@ -10,7 +10,7 @@ class Button : public GpioInput {
 public:
   explicit Button(uint8_t pin);
   // Initialize the button GPIO (uses internal PULL-DOWN)
-  bool init() override;
+  bool init();
   // Returns true if the button is currently pressed (active HIGH)
   bool isPressed();
   // Returns true if held for the given ms (blocking call)
