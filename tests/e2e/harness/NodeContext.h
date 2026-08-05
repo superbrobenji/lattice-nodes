@@ -40,7 +40,11 @@ struct NodeContext {
   // Firmware statics
   lattice::mesh::Mesh* meshInstance = nullptr;
   lattice::adapter::PirAdapter* pirInstance = nullptr;
-  uint32_t serialAdapterLastHealthMillis = 0;
+  // Phase H2 item W: the health-report interval timer moved from a
+  // SerialAdapter-static (process-global, needed swapping here) to a plain
+  // Adapter instance member (Adapter::_lastHealthMillis). Each SimNode owns
+  // its own Adapter object (see SimNode::adapter_), so that state is already
+  // node-isolated and no longer needs a slot here.
   // Singleton object byte-images (EepromManager, ErrorCore hold per-node flags/pointers;
   // copy ctors are deleted so we snapshot raw bytes — states are flat PODs + raw pointers)
   std::vector<uint8_t> eepromManagerImage;

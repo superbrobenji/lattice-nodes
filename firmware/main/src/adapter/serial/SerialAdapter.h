@@ -38,6 +38,11 @@ public:
   // Relay a completed enrollment public key to the server over serial
   static void relayEnrollmentToServer(const uint8_t* mac, const uint8_t* pubKey);
 
+  // Phase H2 item V: OP_CONFIG_SET/OP_NODE_ID_SET/OP_HEALTH_REQ/OP_TX_POWER_SET
+  // handling now lives once, in the shared Adapter::dispatchControlOp table
+  // (see Adapter.h/.cpp), reached from both onMeshData() (mesh-received) and
+  // handleCompleteFrame() (direct serial) below.
+
 #if SIMULATE_MODE
   // WARNING: SIMULATE_MODE opcodes 0xD0-0xD2 overlap with OP_LED_SOLID/OFF/BLINK from the
   // shared protocol. SIMULATE_MODE must never be enabled alongside LED output handling.
@@ -58,15 +63,9 @@ private:
   // MESH_TYPE_SERIAL_CMD_BROADCAST (3) : broadcast adapter data via mesh (server→device)
   // MESH_TYPE_JOIN_ACK (4)             : server approved or rejected enrollment (server→device)
 
-  // Health reporter
-  static void sendHealthReport();
-
-#ifdef UNIT_TEST
-public:
-#else
-private:
-#endif
-  static uint32_t lastHealthMillis;
+  // Health reporter — thin wrapper around the shared Adapter::sendSelfHealthReport()
+  // (Phase H2 item W); kept as its own method since it's called from loop().
+  void sendHealthReport();
 
 private:
   uint32_t lastReportedHopCount;

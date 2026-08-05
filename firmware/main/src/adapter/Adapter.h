@@ -2,6 +2,7 @@
 #define ADAPTER_H
 
 #include <Arduino.h>
+#include <cstddef>
 
 // Include generated mesh message type — no circular dependency since lattice-protocol
 // headers only include standard types and each other, not local firmware headers.
@@ -57,6 +58,79 @@ public:
 protected:
   // Implement in subclasses: only called when message.dataType == this adapter's type
   virtual void onMeshDataImpl(const lattice::mesh::mesh_message& message);
+
+  // ------------------------------------------------------------------------
+  // Phase H2 audit item W: health-report frame builder + shared interval tick.
+  // ------------------------------------------------------------------------
+
+  // Builds the health-report payload shared by every adapter's periodic
+  // health report: [opcode][1B adapterType][6B MAC][4B little-endian
+  // uptime-seconds]. Only fills bytes — callers own transmission, since that
+  // differs by adapter (PIR routes through the mesh to reach the master via
+  // sendDataThroughMesh; the serial/master adapter injects directly into its
+  // own outbound serial pipeline via Mesh::transmitSelfOriginated, see
+  // sendSelfHealthReport() below). No-op if bufsize < 12.
+  void buildHealthFrame(uint8_t opcode, uint8_t* buf, size_t bufsize) const;
+
+  // Builds an OP_HEALTH_REPORT frame and delivers it via
+  // Mesh::transmitSelfOriginated. Meaningful only for a node acting as the
+  // serial-attached master (the only adapter with a direct serial link to
+  // the server); shared by SerialAdapter's periodic health tick and the
+  // OP_HEALTH_REQ control-op handler (see dispatchControlOp below).
+  void sendSelfHealthReport() const;
+
+  // Shared "has the health-report interval elapsed" tick used by every
+  // adapter's loop(). Returns true exactly once per HEALTH_REPORT_INTERVAL_MS
+  // and resets the internal timer when it does. Callers that need to reset
+  // the timer early for another reason (e.g. SerialAdapter firing a report
+  // immediately on hop-count change) should call resetHealthTick() themselves
+  // once they've sent.
+  bool healthTickDue(uint32_t now);
+  void resetHealthTick(uint32_t now);
+
+  // ------------------------------------------------------------------------
+  // Phase H2 audit item V: shared control-op dispatch table.
+  // ------------------------------------------------------------------------
+  //
+  // OP_CONFIG_SET / OP_NODE_ID_SET / OP_HEALTH_REQ / OP_TX_POWER_SET are each
+  // handled in exactly one place (below) and reached from both entry points
+  // that see them: the mesh-received path (onMeshData, above) and
+  // SerialAdapter's direct-serial path (handleCompleteFrame). Target-mac
+  // addressing for CONFIG_SET/NODE_ID_SET always comes from the opcode's own
+  // payload (data[1..6] — see lattice-protocol/c/opcodes.h), which both
+  // entry points populate identically, so handlers don't need it supplied
+  // separately. OP_HEALTH_REQ/OP_TX_POWER_SET are meaningful only for a node
+  // acting as the serial-attached master, so those two handlers no-op when
+  // _adapterType isn't SERIAL_ADAPTER — this reproduces the original
+  // behavior where they lived exclusively in SerialAdapter's code path.
+  //
+  // rebroadcastOnMaster: OP_TX_POWER_SET must re-broadcast to the rest of
+  // the mesh only when the preset change was just introduced locally by the
+  // server over direct serial — a TX_POWER_SET received via the mesh has
+  // already been broadcast once and must not be re-broadcast (would loop).
+  using ControlOpFn = void (Adapter::*)(const lattice::mesh::mesh_message&, bool);
+  struct ControlOpEntry {
+    uint8_t opcode;
+    ControlOpFn handler;
+  };
+  static const ControlOpEntry kControlOps[];
+  static const size_t kControlOpCount;
+
+  void opConfigSet(const lattice::mesh::mesh_message& message, bool rebroadcastOnMaster);
+  void opNodeIdSet(const lattice::mesh::mesh_message& message, bool rebroadcastOnMaster);
+  void opHealthReq(const lattice::mesh::mesh_message& message, bool rebroadcastOnMaster);
+  void opTxPowerSet(const lattice::mesh::mesh_message& message, bool rebroadcastOnMaster);
+
+  // Looks up message.data[0] in kControlOps and, if present, invokes the
+  // matching handler. Returns true iff a handler ran.
+  bool dispatchControlOp(const lattice::mesh::mesh_message& message, bool rebroadcastOnMaster);
+
+private:
+  // True if candidateMac (a 6-byte MAC) is either this node's own station MAC
+  // or the FF:FF:FF:FF:FF:FF broadcast placeholder.
+  static bool isTargetedAtSelf(const uint8_t* candidateMac);
+
+  uint32_t _lastHealthMillis = 0;
 };
 
 } // namespace adapter
