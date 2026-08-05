@@ -14,16 +14,16 @@ struct ButtonHandler {
   static constexpr unsigned long HOLD_MS = 5000;
 
   static void tick(lattice::hardware::Button& configBtn, lattice::hardware::Button& resetBtn,
-                   lattice::mesh::Mesh& mesh, lattice::utils::EepromManager& em,
+                   lattice::mesh::Mesh& mesh,
                    lattice::hardware::Led& greenLed, lattice::hardware::Led& redLed, bool isDevMode,
                    bool& devMasterFlag) {
-    tickConfig(configBtn, mesh, em, greenLed, isDevMode, devMasterFlag);
-    tickReset(resetBtn, em, greenLed, redLed);
+    tickConfig(configBtn, mesh, greenLed, isDevMode, devMasterFlag);
+    tickReset(resetBtn, greenLed, redLed);
   }
 
 private:
   static void tickConfig(lattice::hardware::Button& btn, lattice::mesh::Mesh& mesh,
-                         lattice::utils::EepromManager& em, lattice::hardware::Led& greenLed,
+                         lattice::hardware::Led& greenLed,
                          bool isDevMode, bool& devMasterFlag) {
     static bool wasPressed = false;
     static unsigned long holdStart = 0;
@@ -46,9 +46,9 @@ private:
           }
           greenLed.blink(newMaster ? 3 : 2, 150, 150);
         } else {
-          bool wasMaster = em.loadMasterFlag();
+          bool wasMaster = lattice::eeprom::loadMasterFlag();
           bool newMaster = !wasMaster;
-          em.saveMasterFlag(newMaster);
+          lattice::eeprom::saveMasterFlag(newMaster);
           {
             char buf[64];
             snprintf(buf, sizeof(buf), "Button held 5s: CONFIG TOGGLED. Now %s",
@@ -59,7 +59,7 @@ private:
                         lattice::utils::LogLevel::LOG_INFO);
           greenLed.blink(newMaster ? 3 : 2, 200, 200);
           delay(2000);
-          em.forceFlush();
+          lattice::eeprom::forceFlush();
           ESP.restart();
         }
       }
@@ -68,7 +68,7 @@ private:
     }
   }
 
-  static void tickReset(lattice::hardware::Button& btn, lattice::utils::EepromManager& em,
+  static void tickReset(lattice::hardware::Button& btn,
                         lattice::hardware::Led& greenLed, lattice::hardware::Led& redLed) {
     static bool wasPressed = false;
     static unsigned long holdStart = 0;
@@ -91,11 +91,11 @@ private:
           confirmPending = false;
           LATTICE_LOGLN("MAIN", "EEPROM wipe confirmed. Clearing all...",
                         lattice::utils::LogLevel::LOG_WARN);
-          em.clearAll();
+          lattice::eeprom::clearAll();
           redLed.blink(5, 100, 100);
           greenLed.blink(5, 100, 100);
           delay(3000);
-          em.forceFlush();
+          lattice::eeprom::forceFlush();
           ESP.restart();
         }
       }

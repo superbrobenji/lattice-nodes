@@ -161,7 +161,7 @@ void Adapter::opNodeIdSet(const lattice::mesh::mesh_message& message, bool /*reb
   if (!isTargetedAtSelf(&message.data[1]))
     return;
   uint8_t nodeId = message.data[7];
-  lattice::utils::EepromManager::getInstance().saveNodeId(nodeId);
+  lattice::eeprom::saveNodeId(nodeId);
   char buf[32];
   snprintf(buf, sizeof(buf), "Node ID set: %u", (unsigned)nodeId);
   LATTICE_LOGLN("ADAPTER", buf, LogLevel::LOG_INFO);
@@ -188,7 +188,7 @@ void Adapter::opTxPowerSet(const lattice::mesh::mesh_message& message, bool rebr
   }
 
   auto preset = static_cast<lattice::config::TxPowerPreset>(presetByte);
-  lattice::utils::EepromManager::getInstance().saveTxPowerPreset(preset);
+  lattice::eeprom::saveTxPowerPreset(preset);
   esp_err_t txErr = esp_wifi_set_max_tx_power(
       static_cast<int8_t>(lattice::config::TX_POWER_VALUES[presetByte]));
   if (txErr != ESP_OK) {

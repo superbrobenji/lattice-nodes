@@ -77,7 +77,7 @@ void PeerRegistry::loadFromEEPROM() {
 
   // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key
   uint8_t peerRecords[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_RECORD_SIZE];
-  bool eepromOk = EepromManager::getInstance().loadPeerList(peerRecords, EEPROM_SIZES::MAX_PEERS);
+  bool eepromOk = lattice::eeprom::loadPeerList(peerRecords, EEPROM_SIZES::MAX_PEERS);
 
   if (eepromOk) {
     for (int i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
@@ -124,7 +124,7 @@ void PeerRegistry::saveToEEPROM() {
     memcpy(record + 6, peerMacs[i].publicKey, 32);
   }
 
-  EepromManager::getInstance().savePeerList(peerRecords, peerCount);
+  lattice::eeprom::savePeerList(peerRecords, peerCount);
 }
 
 void PeerRegistry::addAndPersist(const uint8_t* mac) {
