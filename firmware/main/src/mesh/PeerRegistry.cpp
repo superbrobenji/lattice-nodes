@@ -25,14 +25,14 @@ void PeerRegistry::setDeviceMac(const uint8_t* mac) {
 // no per-entry "valid" bit — every slot in [0, peerCount) is live — so the
 // found index maps straight to a pointer, no extra flag check needed.
 PeerInfo* PeerRegistry::find(const uint8_t* mac) {
-  size_t idx = lattice::mac_table::find(peerMacs, peerCount, sizeof(PeerInfo),
-                                        offsetof(PeerInfo, mac), mac);
+  size_t idx =
+      lattice::mac_table::find(peerMacs, peerCount, sizeof(PeerInfo), offsetof(PeerInfo, mac), mac);
   return idx == SIZE_MAX ? nullptr : &peerMacs[idx];
 }
 
 const PeerInfo* PeerRegistry::find(const uint8_t* mac) const {
-  size_t idx = lattice::mac_table::find(peerMacs, peerCount, sizeof(PeerInfo),
-                                        offsetof(PeerInfo, mac), mac);
+  size_t idx =
+      lattice::mac_table::find(peerMacs, peerCount, sizeof(PeerInfo), offsetof(PeerInfo, mac), mac);
   return idx == SIZE_MAX ? nullptr : &peerMacs[idx];
 }
 

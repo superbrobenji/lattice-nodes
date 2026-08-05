@@ -143,7 +143,8 @@ bool Adapter::isTargetedAtSelf(const uint8_t* candidateMac) {
   return allFF || lattice::mac::eq(candidateMac, ownMac);
 }
 
-void Adapter::opConfigSet(const lattice::mesh::mesh_message& message, bool /*rebroadcastOnMaster*/) {
+void Adapter::opConfigSet(const lattice::mesh::mesh_message& message,
+                          bool /*rebroadcastOnMaster*/) {
   // Wire format: [C1][6B targetMac][1B adapterType] (opcodes.h).
   if (!isTargetedAtSelf(&message.data[1])) {
     LATTICE_LOGLN("ADAPTER", "CONFIG_SET not targeted to this node, ignoring", LogLevel::LOG_DEBUG);
@@ -156,7 +157,8 @@ void Adapter::opConfigSet(const lattice::mesh::mesh_message& message, bool /*reb
   ESP.restart();
 }
 
-void Adapter::opNodeIdSet(const lattice::mesh::mesh_message& message, bool /*rebroadcastOnMaster*/) {
+void Adapter::opNodeIdSet(const lattice::mesh::mesh_message& message,
+                          bool /*rebroadcastOnMaster*/) {
   // Wire format: [C0][6B targetMAC][1B nodeId] (opcodes.h).
   if (!isTargetedAtSelf(&message.data[1]))
     return;
@@ -187,8 +189,8 @@ void Adapter::opTxPowerSet(const lattice::mesh::mesh_message& message, bool rebr
 
   auto preset = static_cast<lattice::config::TxPowerPreset>(presetByte);
   lattice::eeprom::saveTxPowerPreset(preset);
-  esp_err_t txErr = esp_wifi_set_max_tx_power(
-      static_cast<int8_t>(lattice::config::TX_POWER_VALUES[presetByte]));
+  esp_err_t txErr =
+      esp_wifi_set_max_tx_power(static_cast<int8_t>(lattice::config::TX_POWER_VALUES[presetByte]));
   if (txErr != ESP_OK) {
     LATTICE_LOGF("ADAPTER", LogLevel::LOG_WARN, "TX power set failed: %s", esp_err_to_name(txErr));
   } else {

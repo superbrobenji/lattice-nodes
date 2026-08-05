@@ -684,8 +684,7 @@ void Mesh::sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
 }
 
 bool Mesh::sendBroadcast(const mesh_message& msg) {
-  esp_err_t err =
-      esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  esp_err_t err = esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
   if (err != ESP_OK) {
     LATTICE_LOGF("MESH", LogLevel::LOG_WARN, "Broadcast send failed: %s", esp_err_to_name(err));
     return false;
@@ -823,7 +822,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   // as shorter-path neighbors age out; no oscillation because state can only
   // flap if NeighborTable itself flaps.
   memcpy(currentMaster.mac, msg.origin_mac_address, 6);
-  uint8_t min_d = neighbors.observeAndMinDistance(msg.last_hop_mac_address, msg.hop_count, millis());
+  uint8_t min_d =
+      neighbors.observeAndMinDistance(msg.last_hop_mac_address, msg.hop_count, millis());
   uint8_t derived = (min_d == 0xFF) ? 0xFF : static_cast<uint8_t>(min_d + 1);
   if (derived != currentMaster.distance) {
     currentMaster.distance = derived;

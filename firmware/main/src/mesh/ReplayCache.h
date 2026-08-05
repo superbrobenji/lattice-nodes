@@ -49,9 +49,9 @@ struct ReplayCache {
   inline bool isReplay(const mesh_message& msg, uint32_t nowMs) {
     // 1. Find slot for this origin. Thinned via lattice::mac_table::find
     // (Phase H2 audit item Y).
-    size_t found = lattice::mac_table::find(cache, config::LATTICE_REPLAY_MAX_ORIGINS,
-                                            sizeof(Entry), offsetof(Entry, mac),
-                                            msg.origin_mac_address);
+    size_t found =
+        lattice::mac_table::find(cache, config::LATTICE_REPLAY_MAX_ORIGINS, sizeof(Entry),
+                                 offsetof(Entry, mac), msg.origin_mac_address);
     if (found != SIZE_MAX && cache[found].used) {
       bool newer = (msg.epoch_num > cache[found].epoch) ||
                    (msg.epoch_num == cache[found].epoch && msg.seq_num > cache[found].seq);
@@ -74,8 +74,8 @@ struct ReplayCache {
       }
     }
     if (!foundEmpty) {
-      slot = lattice::mac_table::evict_oldest_by_ts(
-          cache, config::LATTICE_REPLAY_MAX_ORIGINS, sizeof(Entry), offsetof(Entry, lastSeenMs));
+      slot = lattice::mac_table::evict_oldest_by_ts(cache, config::LATTICE_REPLAY_MAX_ORIGINS,
+                                                    sizeof(Entry), offsetof(Entry, lastSeenMs));
     }
     memcpy(cache[slot].mac, msg.origin_mac_address, 6);
     cache[slot].epoch = msg.epoch_num;

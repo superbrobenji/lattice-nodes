@@ -14,17 +14,15 @@ struct ButtonHandler {
   static constexpr unsigned long HOLD_MS = 5000;
 
   static void tick(lattice::hardware::Button& configBtn, lattice::hardware::Button& resetBtn,
-                   lattice::mesh::Mesh& mesh,
-                   lattice::hardware::Led& greenLed, lattice::hardware::Led& redLed, bool isDevMode,
-                   bool& devMasterFlag) {
+                   lattice::mesh::Mesh& mesh, lattice::hardware::Led& greenLed,
+                   lattice::hardware::Led& redLed, bool isDevMode, bool& devMasterFlag) {
     tickConfig(configBtn, mesh, greenLed, isDevMode, devMasterFlag);
     tickReset(resetBtn, greenLed, redLed);
   }
 
 private:
   static void tickConfig(lattice::hardware::Button& btn, lattice::mesh::Mesh& mesh,
-                         lattice::hardware::Led& greenLed,
-                         bool isDevMode, bool& devMasterFlag) {
+                         lattice::hardware::Led& greenLed, bool isDevMode, bool& devMasterFlag) {
     static bool wasPressed = false;
     static unsigned long holdStart = 0;
 
@@ -60,8 +58,8 @@ private:
     }
   }
 
-  static void tickReset(lattice::hardware::Button& btn,
-                        lattice::hardware::Led& greenLed, lattice::hardware::Led& redLed) {
+  static void tickReset(lattice::hardware::Button& btn, lattice::hardware::Led& greenLed,
+                        lattice::hardware::Led& redLed) {
     static bool wasPressed = false;
     static unsigned long holdStart = 0;
     static bool confirmPending = false;

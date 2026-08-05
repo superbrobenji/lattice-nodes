@@ -410,7 +410,8 @@ void clearAll() {
 }
 
 void dumpEEPROM() {
-  LATTICE_LOGLN("NVS", "NVS dump not implemented (use idf.py nvs-dump)", lattice::utils::LogLevel::LOG_INFO);
+  LATTICE_LOGLN("NVS", "NVS dump not implemented (use idf.py nvs-dump)",
+                lattice::utils::LogLevel::LOG_INFO);
 }
 
 #ifdef UNIT_TEST
