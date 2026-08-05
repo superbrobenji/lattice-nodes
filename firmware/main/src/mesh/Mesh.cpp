@@ -1032,10 +1032,11 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     LATTICE_LOGLN("MESH", "JOIN_ACK addressed to master — ignoring", LogLevel::LOG_WARN);
     return;
   }
-  enrollment.processJoinAck(msg, deviceMacAddress,
-                            [this](const uint8_t* mac, const uint8_t* pubKey32) {
-                              return registerPeerWithKey(mac, pubKey32, /*allowRekey=*/false);
-                            });
+  enrollment.processJoinAck(msg, deviceMacAddress, &Mesh::registerPeerWithKeyTrampoline);
+}
+
+bool Mesh::registerPeerWithKeyTrampoline(const uint8_t* mac, const uint8_t* publicKey32) {
+  return instance->registerPeerWithKey(mac, publicKey32, /*allowRekey=*/false);
 }
 
 void Mesh::addPeer(const uint8_t* mac) {

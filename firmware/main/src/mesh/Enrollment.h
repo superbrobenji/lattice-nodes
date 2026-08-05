@@ -1,7 +1,6 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 
 namespace lattice {
@@ -9,7 +8,11 @@ namespace mesh {
 
 using EnrollmentRelayFn = void (*)(const uint8_t* mac, const uint8_t* pubKey);
 // Returns false if the peer could not be registered (e.g. registry full).
-using RegisterPeerFn = std::function<bool(const uint8_t* mac, const uint8_t* pubKey32)>;
+// Plain function pointer (post-Phase-G audit item H): the only production
+// binding (Mesh::processJoinAck) goes through a static trampoline
+// (Mesh::registerPeerWithKeyTrampoline) instead of a `[this]`-capturing
+// lambda, since a capturing lambda cannot convert to a function pointer.
+using RegisterPeerFn = bool (*)(const uint8_t* mac, const uint8_t* pubKey32);
 
 class Enrollment {
 public:
