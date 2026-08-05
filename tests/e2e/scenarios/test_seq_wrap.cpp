@@ -67,7 +67,7 @@ TEST_F(MeshSimTest, SeqWrapBumpsEpochAndKeepsSealing) {
   // read reflect the leaf's own persisted BOOT_EPOCH rather than whichever
   // node's state happened to be live globally beforehand.
   uint32_t persistedEpoch = sensor->with([](lattice::mesh::Mesh&, lattice::adapter::Adapter*) {
-    return lattice::utils::EepromManager::getInstance().loadBootEpoch();
+    return lattice::eeprom::loadBootEpoch();
   });
   EXPECT_EQ(persistedEpoch, epochBefore + 1)
       << "the bumped epoch must be persisted to EEPROM, not just held in RAM — "

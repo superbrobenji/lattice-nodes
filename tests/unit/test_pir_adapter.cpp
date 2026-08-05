@@ -26,7 +26,7 @@ class PIRHealthTest : public ::testing::Test {
 protected:
   void SetUp() override {
     EEPROM.reset();
-    lattice::utils::EepromManager::getInstance().init();
+    lattice::eeprom::init();
     resetMillis();
     resetWifiMock();
     lastTxType = adapter_types::UNKNOWN_ADAPTER;
@@ -168,7 +168,7 @@ TEST_F(PIRHealthTest, OpNodeIdSet_AssignsNodeId_WhenTargetMatchesMac) {
 
   pir->onMeshData(msg);
 
-  EXPECT_EQ(lattice::utils::EepromManager::getInstance().loadNodeId(), 99u);
+  EXPECT_EQ(lattice::eeprom::loadNodeId(), 99u);
   delete pir;
 }
 
@@ -192,6 +192,6 @@ TEST_F(PIRHealthTest, OpNodeIdSet_IgnoresMessage_WhenTargetMismatch) {
 
   pir->onMeshData(msg);
 
-  EXPECT_EQ(lattice::utils::EepromManager::getInstance().loadNodeId(), 0u);
+  EXPECT_EQ(lattice::eeprom::loadNodeId(), 0u);
   delete pir;
 }

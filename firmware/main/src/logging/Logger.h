@@ -49,6 +49,36 @@
 #define LATTICE_LOGLN(tag, msg, level) ::lattice::utils::Logger::logln(tag, msg, level)
 #endif
 
+// ---------------------------------------------------------------------------------------------
+// LATTICE_LOGF — printf-style variant (fix for a Phase H2 regression, item R / PR #86).
+//
+// Item R converted ~35 String-concat LATTICE_LOGLN call sites to a
+// `char buf[N]; snprintf(buf, sizeof(buf), fmt, args...); LATTICE_LOGLN(tag, buf, level);`
+// pattern. That put the snprintf call and its format-string literal OUTSIDE the
+// LATTICE_LOGLN macro, as plain statements — so under LATTICE_DEFAULT_LOG_LEVEL ==
+// LOG_NONE they ran (and the format strings stayed in .rodata) even though the
+// LOGLN call itself folded to ((void)0). LATTICE_LOGF closes that gap by gating the
+// snprintf and its format string inside the same #if as LATTICE_LOG/LATTICE_LOGLN
+// above (mirrors the LOG_D pattern), so under LOG_NONE the whole call — buffer,
+// snprintf, and format-string literal — folds to ((void)0) and is eligible for the
+// linker to drop from .rodata via -fdata-sections/--gc-sections.
+//
+// Buffer size: 128 bytes. Audited every existing snprintf+LATTICE_LOGLN call site
+// being migrated onto this macro; the largest local buffer among them was 96 bytes
+// (Error.h checkEsp, ErrorCore.cpp signalError, EepromManager.cpp persistOrEscalate,
+// SerialAdapter.cpp onMeshDataImpl). 128 covers all of them with headroom, and
+// matches LOG_D's existing buffer size above for consistency.
+#if LATTICE_DEFAULT_LOG_LEVEL == LATTICE_LOG_LEVEL_NONE
+#define LATTICE_LOGF(tag, level, fmt, ...) ((void)0)
+#else
+#define LATTICE_LOGF(tag, level, fmt, ...)                                                         \
+  do {                                                                                             \
+    char _lf_buf[128];                                                                             \
+    ::snprintf(_lf_buf, sizeof(_lf_buf), fmt, ##__VA_ARGS__);                                      \
+    ::lattice::utils::Logger::logln(tag, _lf_buf, level);                                          \
+  } while (0)
+#endif
+
 namespace lattice {
 namespace utils {
 

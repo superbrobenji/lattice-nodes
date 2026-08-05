@@ -18,8 +18,6 @@
 
 namespace sim {
 
-using lattice::utils::EepromManager;
-
 SimNode::SimNode(const NodeConfig& cfg) : cfg_(cfg) {
   memcpy(ctx_.mac, cfg.mac, 6);
 }
@@ -41,10 +39,9 @@ void SimNode::boot() {
     Serial.begin(115200);
     lattice::utils::Logger::setLogLevel(lattice::utils::LogLevel::LOG_NONE);
 
-    auto& em = EepromManager::getInstance();
-    em.init();
-    lattice::app::BootManager::check(em);
-    em.setDevMode(false);
+    lattice::eeprom::init();
+    lattice::app::BootManager::check();
+    lattice::eeprom::setDevMode(false);
     lattice::adapter::AdapterFactory::setDevMode(false);
 
     greenLed_ = std::make_unique<lattice::hardware::Led>(lattice::config::GREEN_LED_PIN);
@@ -52,19 +49,19 @@ void SimNode::boot() {
     greenLed_->init();
     redLed_->init();
     lattice::hardware::Led::setSystemErrorLed(redLed_.get());
-    lattice::utils::ErrorCore::getInstance().init(redLed_.get(), nullptr);
+    lattice::err_core::init(redLed_.get(), nullptr);
 
     if (!booted_) {
       // First boot: seed role + adapter type (a provisioned device's EEPROM)
-      em.saveMasterFlag(cfg_.isMaster);
+      lattice::eeprom::saveMasterFlag(cfg_.isMaster);
       lattice::adapter::AdapterFactory::saveAdapterTypeToEEPROM(cfg_.adapterType);
       // Phase D (#42): seed a fixed keypair BEFORE mesh_->init() (below) calls
       // Enrollment::init(), so its loadKeypair() succeeds and skips generating a
       // fresh random one — see NodeConfig::seedPrivateKey32/seedPublicKey32.
       if (cfg_.seedPrivateKey32 && cfg_.seedPublicKey32) {
-        em.saveKeypair(cfg_.seedPrivateKey32, cfg_.seedPublicKey32);
+        lattice::eeprom::saveKeypair(cfg_.seedPrivateKey32, cfg_.seedPublicKey32);
       }
-      em.forceFlush();
+      lattice::eeprom::forceFlush();
     }
 
     lattice::adapter::AdapterFactory::initializeDefaultsIfUnset();
@@ -100,7 +97,7 @@ void SimNode::boot() {
     }
 
     mesh_->setEnrollmentRelayFn(lattice::adapter::SerialAdapter::relayEnrollmentToServer);
-    mesh_->setIsMaster(EepromManager::getInstance().loadMasterFlag());
+    mesh_->setIsMaster(lattice::eeprom::loadMasterFlag());
     adapter_->setTransmitFn(&lattice::mesh::Mesh::transmit);
     mesh_->linkDataRecvCallback([this](const mesh_message& m) {
       if (adapter_)
@@ -118,7 +115,7 @@ void SimNode::boot() {
 void SimNode::tick() {
   swapIn(ctx_);
   try {
-    lattice::utils::ErrorCore::getInstance().drainPendingBlink();
+    lattice::err_core::drainPendingBlink();
     mesh_->loop();
     mesh_->checkMasterTimeout();
 

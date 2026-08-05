@@ -2,6 +2,7 @@
 #include "src/network/MacAddress.h"
 #include "src/network/MacEq.h"
 #include "src/network/hw_mac.h"
+#include "src/network/mem.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
 #include "src/persistence/EepromManager.h"
@@ -9,6 +10,7 @@
 #include <esp_now.h>
 #include <WiFi.h>
 #include <cstring>
+#include <cstdio>
 #include "../../project_config.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "MeshCrypto.h"
@@ -73,8 +75,9 @@ void Mesh::readMacAddress() {
     // is a memcpy instead of a repeat esp_wifi_get_mac() syscall.
     lattice::hw::cacheDeviceMac(deviceMacAddress);
     LATTICE_LOG("MESH", "Device MAC: ", LogLevel::LOG_DEBUG);
-    LATTICE_LOGLN("MESH", lattice::utils::MacAddress(deviceMacAddress).toString(),
-                  LogLevel::LOG_DEBUG);
+    LATTICE_LOGF("MESH", LogLevel::LOG_DEBUG, "%02X:%02X:%02X:%02X:%02X:%02X", deviceMacAddress[0],
+                 deviceMacAddress[1], deviceMacAddress[2], deviceMacAddress[3], deviceMacAddress[4],
+                 deviceMacAddress[5]);
   }
 }
 
@@ -188,7 +191,7 @@ uint16_t Mesh::nextSeqGuarded() {
     // and by this method), so bump from it directly rather than re-reading
     // EEPROM.
     uint32_t epoch = replay.bootEpoch + 1;
-    EepromManager::getInstance().saveBootEpoch(epoch);
+    lattice::eeprom::saveBootEpoch(epoch);
     replay.bootEpoch = epoch;
     seq = replay.nextSeq();
   }
@@ -226,10 +229,10 @@ bool Mesh::init() {
   reevaluateRouteTable();
 
   // 2. Increment and save boot epoch (replay protection)
-  uint32_t epoch = EepromManager::getInstance().loadBootEpoch() + 1;
-  EepromManager::getInstance().saveBootEpoch(epoch);
+  uint32_t epoch = lattice::eeprom::loadBootEpoch() + 1;
+  lattice::eeprom::saveBootEpoch(epoch);
   replay.init(epoch);
-  LATTICE_LOGLN("MESH", "Boot epoch: " + String(replay.bootEpoch), LogLevel::LOG_INFO);
+  LATTICE_LOGF("MESH", LogLevel::LOG_INFO, "Boot epoch: %lu", (unsigned long)replay.bootEpoch);
 
   // Phase D (#42): DEV_MODE bypasses the beacon origin-MAC pin (dev firmware
   // regenerates a fresh keypair/MAC each boot, so pinning would reject the
@@ -245,12 +248,11 @@ bool Mesh::init() {
 
   // 3a. Apply TX power preset from EEPROM (deployment-specific)
   {
-    lattice::config::TxPowerPreset preset = EepromManager::getInstance().loadTxPowerPreset();
+    lattice::config::TxPowerPreset preset = lattice::eeprom::loadTxPowerPreset();
     uint8_t txPowerVal = lattice::config::TX_POWER_VALUES[static_cast<uint8_t>(preset)];
     esp_err_t txErr = esp_wifi_set_max_tx_power(static_cast<int8_t>(txPowerVal));
     if (txErr != ESP_OK) {
-      LATTICE_LOGLN("MESH", String("TX power set failed: ") + esp_err_to_name(txErr),
-                    LogLevel::LOG_WARN);
+      LATTICE_LOGF("MESH", LogLevel::LOG_WARN, "TX power set failed: %s", esp_err_to_name(txErr));
     } else {
       LATTICE_LOGLN("MESH", "TX power preset applied", LogLevel::LOG_INFO);
     }
@@ -322,8 +324,11 @@ bool Mesh::setupEspNow() {
 // ------------------------------------------------
 
 void Mesh::onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status) {
-  String statusStr = (status == ESP_NOW_SEND_SUCCESS) ? "Delivery Success" : "Delivery Fail";
-  LATTICE_LOGLN("MESH", "Last Packet Send Status: " + statusStr, LogLevel::LOG_DEBUG);
+  // Inlined into the LATTICE_LOGF call (rather than a local `statusStr`) so that
+  // under LOG_NONE, where the whole call folds to ((void)0), there's no
+  // now-unused local left behind to warn about.
+  LATTICE_LOGF("MESH", LogLevel::LOG_DEBUG, "Last Packet Send Status: %s",
+               (status == ESP_NOW_SEND_SUCCESS) ? "Delivery Success" : "Delivery Fail");
 }
 
 void IRAM_ATTR Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uint8_t* incomingData,
@@ -560,15 +565,12 @@ void Mesh::broadcastMasterBeacon() {
   // Broadcast-only: send to the registered FF:FF:… broadcast peer so the frame
   // reaches all nodes — including those not yet individually registered.
   // esp_now_send(nullptr, …) only delivers to already-registered unicast peers.
-  esp_err_t br =
-      esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&beacon), sizeof(beacon));
-  LATTICE_LOGLN("MESH", String("Beacon broadcast ") + (br == ESP_OK ? "OK" : "FAIL"),
-                LogLevel::LOG_DEBUG);
+  (void)sendBroadcast(beacon); // sendBroadcast already logs on failure
 }
 
 void Mesh::loadMeshKeyFromEEPROM() {
   // Attempt to load mesh key from EEPROM
-  if (!EepromManager::getInstance().loadMeshKey(meshKey, MESH_KEY_SIZE)) {
+  if (!lattice::eeprom::loadMeshKey(meshKey, MESH_KEY_SIZE)) {
     LATTICE_LOGLN("MESH", "EEPROM read failed, using default mesh key", LogLevel::LOG_WARN);
   }
 
@@ -596,7 +598,7 @@ void Mesh::loadMeshKeyFromEEPROM() {
 }
 
 void Mesh::saveMeshKeyToEEPROM(const uint8_t* key) {
-  EepromManager::getInstance().saveMeshKey(key, MESH_KEY_SIZE);
+  lattice::eeprom::saveMeshKey(key, MESH_KEY_SIZE);
 }
 
 void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally) {
@@ -679,18 +681,34 @@ void Mesh::sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
     instance->sendDownlinkToNode(destMac, type, data);
 }
 
+bool Mesh::sendBroadcast(const mesh_message& msg) {
+  esp_err_t err = esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  if (err != ESP_OK) {
+    LATTICE_LOGF("MESH", LogLevel::LOG_WARN, "Broadcast send failed: %s", esp_err_to_name(err));
+    return false;
+  }
+  return true;
+}
+
 void Mesh::debugDumpRadio() {
-  if (!EepromManager::getInstance().getDevMode())
+  if (!lattice::eeprom::getDevMode())
     return;
   uint8_t ch;
   esp_wifi_get_channel(&ch, nullptr);
-  String out = String("DBG Channel=") + String(ch) + " Key=";
-  for (int i = 0; i < MESH_KEY_SIZE; ++i) {
-    if (meshKey[i] < 0x10)
-      out += "0";
-    out += String(meshKey[i], HEX) + " ";
+  // Doesn't fit LATTICE_LOGF's single-fmt-string shape (variable-length hex dump
+  // built in a loop), so it's gated by hand with the same #if LATTICE_LOGF uses —
+  // under LATTICE_DEFAULT_LOG_LEVEL == LOG_NONE this whole block (buffer,
+  // snprintf calls, format-string literals) compiles out entirely instead of
+  // relying solely on the runtime getDevMode() check above (fix for the same
+  // regression class as LATTICE_LOGF — item R / PR #86).
+#if LATTICE_DEFAULT_LOG_LEVEL != LATTICE_LOG_LEVEL_NONE
+  char buf[96];
+  int off = snprintf(buf, sizeof(buf), "DBG Channel=%u Key=", (unsigned)ch);
+  for (int i = 0; i < MESH_KEY_SIZE && off > 0 && off < (int)sizeof(buf); ++i) {
+    off += snprintf(buf + off, sizeof(buf) - off, "%02X ", meshKey[i]);
   }
-  LATTICE_LOGLN("MESH", out, LogLevel::LOG_INFO);
+  LATTICE_LOGLN("MESH", buf, LogLevel::LOG_INFO);
+#endif
 }
 
 void Mesh::checkMasterTimeout() {
@@ -748,7 +766,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
     memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
     enrollment.hasMasterMac = true;
-    EepromManager::getInstance().saveKnownMasterMac(enrollment.knownMasterMac);
+    lattice::eeprom::saveKnownMasterMac(enrollment.knownMasterMac);
     LATTICE_LOGLN("MESH", "Master MAC learned from first beacon (TOFU fallback)",
                   LogLevel::LOG_INFO);
   } else if (!fromPrimary && !fromSecondary) {
@@ -757,7 +775,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       // Second master TOFU — learn and save as secondary
       memcpy(enrollment.knownMasterMacSecondary, msg.origin_mac_address, 6);
       enrollment.hasMasterMacSecondary = true;
-      EepromManager::getInstance().saveKnownMasterMacSecondary(enrollment.knownMasterMacSecondary);
+      lattice::eeprom::saveKnownMasterMacSecondary(enrollment.knownMasterMacSecondary);
       LATTICE_LOGLN("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
       // fall through to process this beacon as valid
     } else if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
@@ -769,7 +787,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       // All known masters stale — accept as new primary (hotswap)
       LATTICE_LOGLN("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
       memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
-      EepromManager::getInstance().saveKnownMasterMac(enrollment.knownMasterMac);
+      lattice::eeprom::saveKnownMasterMac(enrollment.knownMasterMac);
     }
   }
 
@@ -793,18 +811,21 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   // is msg.hop_count, not +1: a direct beacon straight from the master
   // (hop_count == 0, last_hop == master) must record the master itself as a
   // distance-0 neighbor. Learned here, not from enrollment — routing only.
-  neighbors.observe(msg.last_hop_mac_address, msg.hop_count, millis());
-
-  // Derive currentMaster.distance from live NeighborTable state (issue #45).
+  //
+  // Derive currentMaster.distance from live NeighborTable state (issue #45) in
+  // the SAME pass as the observe (post-Phase-G audit item X) — this used to be
+  // neighbors.observe(...) followed by a separate neighbors.minFreshDistance(...)
+  // call, two full linear scans of the neighbor table per beacon RX.
   // Sticky-min replaced by a pure function of neighbor state: rises monotonically
   // as shorter-path neighbors age out; no oscillation because state can only
   // flap if NeighborTable itself flaps.
   memcpy(currentMaster.mac, msg.origin_mac_address, 6);
-  uint8_t min_d = neighbors.minFreshDistance(millis());
+  uint8_t min_d =
+      neighbors.observeAndMinDistance(msg.last_hop_mac_address, msg.hop_count, millis());
   uint8_t derived = (min_d == 0xFF) ? 0xFF : static_cast<uint8_t>(min_d + 1);
   if (derived != currentMaster.distance) {
     currentMaster.distance = derived;
-    LATTICE_LOGLN("MESH", "Route distance derived: " + String(derived), LogLevel::LOG_INFO);
+    LATTICE_LOGF("MESH", LogLevel::LOG_INFO, "Route distance derived: %u", (unsigned)derived);
   }
 
   if (!isMaster) {
@@ -1017,7 +1038,7 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     mesh_message relay = msg;
     relay.hop_count++;
     memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-    esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&relay), sizeof(relay));
+    sendBroadcast(relay);
     return;
   }
   // Masters issue JOIN_ACKs; they never enroll via one. Without this guard a
@@ -1051,13 +1072,8 @@ bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, b
       // otherwise re-key the link to attacker-chosen material. An all-zero
       // stored key is a pre-enrollment placeholder (e.g. DEFAULT_PEERS), not
       // an established key, so upgrading it is allowed.
-      bool keyEstablished = false;
-      for (int i = 0; i < 32; ++i) {
-        if (p->publicKey[i] != 0) {
-          keyEstablished = true;
-          break;
-        }
-      }
+      // Thinned via lattice::mem::is_zero (Phase H2 audit item Z).
+      bool keyEstablished = !lattice::mem::is_zero(p->publicKey, 32);
       if (keyEstablished) {
         LATTICE_LOGLN("MESH", "Peer already registered — keeping established key",
                       LogLevel::LOG_DEBUG);
@@ -1133,7 +1149,7 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint
   }
   // Broadcast via the registered FF:FF:… peer so the new node receives the ACK
   // even before it is individually registered as a unicast peer.
-  esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&ack), sizeof(ack));
+  sendBroadcast(ack);
   LATTICE_LOGLN("MESH", "JOIN_ACK sent to newly enrolled node", LogLevel::LOG_INFO);
 }
 // --------------------------------------------------------
@@ -1273,7 +1289,7 @@ void Mesh::processRouteReport(const mesh_message& msg) {
 
 void Mesh::loop() {
   drainRecvQueue();
-  EepromManager::getInstance().flushIfDirty();
+  lattice::eeprom::flushIfDirty();
 
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
   // Serial.write() must not be called from that callback — safe to do here in loop().
@@ -1295,12 +1311,7 @@ void Mesh::loop() {
   // err::fail every beacon interval on any node without a route (e.g. pre-enrollment).
   if (relayPending && millis() >= relayPendingAt) {
     relayPending = false;
-    esp_err_t res = esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&relayPendingMsg),
-                                 sizeof(relayPendingMsg));
-    if (res != ESP_OK) {
-      LATTICE_LOGLN("MESH", String("Beacon relay broadcast failed: ") + esp_err_to_name(res),
-                    LogLevel::LOG_WARN);
-    }
+    sendBroadcast(relayPendingMsg);
   }
 
   // Master beacon — broadcastMasterBeacon() guards timing internally via lastBeaconMillis

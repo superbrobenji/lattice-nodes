@@ -58,7 +58,7 @@ constexpr int NUM_DEFAULT_PEERS = lattice::config::NUM_DEFAULT_PEERS;
 // Validate configuration for server communication
 static inline void validateServerConfiguration() {
   // Check if this is a master node intended for server communication
-  bool isMasterNode = isDevMode ? devMasterFlag : EepromManager::getInstance().loadMasterFlag();
+  bool isMasterNode = isDevMode ? devMasterFlag : lattice::eeprom::loadMasterFlag();
   bool hasSerialAdapter = (adapter && adapter->getAdapterType() == lattice::adapter::adapter_types::SERIAL_ADAPTER);
   bool loggingDisabled = (lattice::config::DEFAULT_LOG_LEVEL == lattice::utils::LogLevel::LOG_NONE);
   
@@ -96,8 +96,8 @@ void setup() {
 
   // Check and log reset reason; escalate if WDT looping
   // Must init EEPROM before BootManager::check — saveRebootReason/saveRebootCount no-op if not initialized
-  EepromManager::getInstance().init();
-  lattice::app::BootManager::check(EepromManager::getInstance());
+  lattice::eeprom::init();
+  lattice::app::BootManager::check();
 
   Logger::logln("MAIN", "Logger initialized", LogLevel::LOG_INFO);
 
@@ -121,9 +121,9 @@ void setup() {
   // Seven segment conditional init
   if (lattice::config::ENABLE_SEVSEG_DISPLAY) {
     sevenSeg.init();
-    lattice::utils::ErrorCore::getInstance().init(&redLed, &sevenSeg);
+    lattice::err_core::init(&redLed, &sevenSeg);
   } else {
-    lattice::utils::ErrorCore::getInstance().init(&redLed, nullptr);
+    lattice::err_core::init(&redLed, nullptr);
   }
 
   if (!greenLed.isInitialized()) {
@@ -147,7 +147,7 @@ void setup() {
   }
 
   // Initialize EEPROM Manager
-  if (!EepromManager::getInstance().init()) {
+  if (!lattice::eeprom::init()) {
     Logger::logln("MAIN", "Failed to initialize EEPROM Manager", LogLevel::LOG_ERROR);
     lattice::err::fatal(lattice::core::ErrorTypeDigit::MEMORY,
                           lattice::core::ModuleDigit::CORE,
@@ -161,19 +161,19 @@ void setup() {
   isDevMode = DEV_MODE;
   if (!isDevMode) {
     // If not compile-time dev mode, check EEPROM
-    isDevMode = EepromManager::getInstance().loadDevFlag();
+    isDevMode = lattice::eeprom::loadDevFlag();
   }
 
   Logger::logln("MAIN", String("Running in ") + (isDevMode ? "DEV" : "PRODUCTION") + " mode", LogLevel::LOG_INFO);
 
   // Set dev mode in AdapterFactory and EEPROM Manager
   lattice::adapter::AdapterFactory::setDevMode(isDevMode);
-  EepromManager::getInstance().setDevMode(isDevMode);
+  lattice::eeprom::setDevMode(isDevMode);
 
   // Declare peers to EEPROM (only if not in dev mode and EEPROM is empty)
-  if (!isDevMode && !EepromManager::getInstance().hasPeers()) {
+  if (!isDevMode && !lattice::eeprom::hasPeers()) {
     // Write default peers to EEPROM
-    EepromManager::getInstance().savePeerList(
+    lattice::eeprom::savePeerList(
       reinterpret_cast<const uint8_t*>(defaultPeerList),
       NUM_DEFAULT_PEERS);
     Logger::logln("MAIN", "Wrote default peer MACs to EEPROM.", LogLevel::LOG_INFO);
@@ -252,7 +252,7 @@ void setup() {
     Logger::logln("MAIN", String("DEV mode: starting as ") + (isMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
   } else {
     // In production mode, load from EEPROM
-    isMaster = EepromManager::getInstance().loadMasterFlag();
+    isMaster = lattice::eeprom::loadMasterFlag();
   }
 
   // Master keeps 240MHz for serial USB reliability
@@ -284,7 +284,7 @@ void setup() {
 }
 
 void loop() {
-  lattice::utils::ErrorCore::getInstance().drainPendingBlink();
+  lattice::err_core::drainPendingBlink();
 
   static bool startupBlinkDone = false;
   if (!startupBlinkDone) {
@@ -300,7 +300,7 @@ void loop() {
   // Display state machine: show node identity on 7-segment display
   if (lattice::config::ENABLE_SEVSEG_DISPLAY) {
     bool enrolled = mesh.isEnrolled() || mesh.getIsMaster();
-    uint8_t nodeId = lattice::utils::EepromManager::getInstance().loadNodeId();
+    uint8_t nodeId = lattice::eeprom::loadNodeId();
     lattice::app::DisplayManager::tick(sevenSeg, enrolled, mesh.getIsMaster(), nodeId);
   }
 
@@ -325,7 +325,6 @@ void loop() {
   }
 
   lattice::app::ButtonHandler::tick(configButton, resetButton, mesh,
-    lattice::utils::EepromManager::getInstance(),
     greenLed, redLed, isDevMode, devMasterFlag);
   // REMOVED: periodic health report was here.
   // Serial_Adapter::loop() handles this correctly when adapter type is SERIAL_ADAPTER.

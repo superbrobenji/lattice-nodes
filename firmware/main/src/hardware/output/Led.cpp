@@ -1,6 +1,7 @@
 #include "Led.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
+#include <cstdio>
 
 namespace lattice {
 namespace hardware {
@@ -29,12 +30,13 @@ bool Led::init() {
       lattice::err::fail(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::HW, 1,
                          "Led: Invalid pin number");
     }
-    LATTICE_LOGLN("Led", "ERROR: Invalid pin number for LED: " + String(_pin), LogLevel::LOG_ERROR);
+    LATTICE_LOGF("Led", LogLevel::LOG_ERROR, "ERROR: Invalid pin number for LED: %u",
+                 (unsigned)_pin);
     return false;
   }
   digitalWrite(_pin, LOW);
   _isOn = false;
-  LATTICE_LOGLN("Led", "Initialized LED on pin " + String(_pin), LogLevel::LOG_INFO);
+  LATTICE_LOGF("Led", LogLevel::LOG_INFO, "Initialized LED on pin %u", (unsigned)_pin);
   return true;
 }
 
@@ -89,8 +91,8 @@ bool Led::setState(bool state) {
     return true;
   digitalWrite(_pin, state ? HIGH : LOW);
   _isOn = state;
-  LATTICE_LOGLN("Led", String("LED on pin ") + String(_pin) + (state ? " ON" : " OFF"),
-                LogLevel::LOG_DEBUG);
+  LATTICE_LOGF("Led", LogLevel::LOG_DEBUG, "LED on pin %u %s", (unsigned)_pin,
+               state ? "ON" : "OFF");
   return true;
 }
 
@@ -114,8 +116,8 @@ bool Led::blink(uint8_t times, unsigned int onTimeMs, unsigned int offTimeMs) {
     if (i < times - 1)
       delay(offTimeMs);
   }
-  LATTICE_LOGLN("Led", String("Blink pattern: ") + String(times) + "x on pin " + String(_pin),
-                LogLevel::LOG_DEBUG);
+  LATTICE_LOGF("Led", LogLevel::LOG_DEBUG, "Blink pattern: %ux on pin %u", (unsigned)times,
+               (unsigned)_pin);
   return true;
 }
 

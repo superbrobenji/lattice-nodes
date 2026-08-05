@@ -1,9 +1,11 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 #include "../../project_config.h"
 #include "src/network/MacEq.h"
+#include "src/network/mac_table.h"
 
 namespace lattice {
 namespace mesh {
@@ -45,20 +47,23 @@ struct ReplayCache {
   // older frame — AEAD still authenticates content, so worst-case is genuine
   // old delivery, not forgery. Size the knob to expected origins × 1.5.
   inline bool isReplay(const mesh_message& msg, uint32_t nowMs) {
-    // 1. Find slot for this origin.
-    for (size_t i = 0; i < config::LATTICE_REPLAY_MAX_ORIGINS; ++i) {
-      if (cache[i].used && lattice::mac::eq(cache[i].mac, msg.origin_mac_address)) {
-        bool newer = (msg.epoch_num > cache[i].epoch) ||
-                     (msg.epoch_num == cache[i].epoch && msg.seq_num > cache[i].seq);
-        if (!newer)
-          return true;
-        cache[i].epoch = msg.epoch_num;
-        cache[i].seq = msg.seq_num;
-        cache[i].lastSeenMs = nowMs;
-        return false;
-      }
+    // 1. Find slot for this origin. Thinned via lattice::mac_table::find
+    // (Phase H2 audit item Y).
+    size_t found =
+        lattice::mac_table::find(cache, config::LATTICE_REPLAY_MAX_ORIGINS, sizeof(Entry),
+                                 offsetof(Entry, mac), msg.origin_mac_address);
+    if (found != SIZE_MAX && cache[found].used) {
+      bool newer = (msg.epoch_num > cache[found].epoch) ||
+                   (msg.epoch_num == cache[found].epoch && msg.seq_num > cache[found].seq);
+      if (!newer)
+        return true;
+      cache[found].epoch = msg.epoch_num;
+      cache[found].seq = msg.seq_num;
+      cache[found].lastSeenMs = nowMs;
+      return false;
     }
-    // 2. No slot — allocate: first !used, else LRU-evict (smallest lastSeenMs).
+    // 2. No slot — allocate: first !used, else LRU-evict (smallest lastSeenMs,
+    // via lattice::mac_table::evict_oldest_by_ts).
     size_t slot = 0;
     bool foundEmpty = false;
     for (size_t i = 0; i < config::LATTICE_REPLAY_MAX_ORIGINS; ++i) {
@@ -69,11 +74,8 @@ struct ReplayCache {
       }
     }
     if (!foundEmpty) {
-      slot = 0;
-      for (size_t i = 1; i < config::LATTICE_REPLAY_MAX_ORIGINS; ++i) {
-        if (cache[i].lastSeenMs < cache[slot].lastSeenMs)
-          slot = i;
-      }
+      slot = lattice::mac_table::evict_oldest_by_ts(cache, config::LATTICE_REPLAY_MAX_ORIGINS,
+                                                    sizeof(Entry), offsetof(Entry, lastSeenMs));
     }
     memcpy(cache[slot].mac, msg.origin_mac_address, 6);
     cache[slot].epoch = msg.epoch_num;

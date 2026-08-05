@@ -1,8 +1,10 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include "../../project_config.h"
 #include "src/network/MacEq.h"
+#include "src/network/mac_table.h"
 
 namespace lattice {
 namespace mesh {
@@ -37,17 +39,17 @@ public:
     slot->valid = true;
   }
 
+  // Thinned via lattice::mac_table::find (Phase H2 audit item Y).
   bool lookup(const uint8_t* nodeMac, uint8_t* pathOut, uint8_t* pathLenOut) const {
-    for (size_t i = 0; i < config::LATTICE_ROUTE_TABLE_MAX; ++i) {
-      const Entry& e = entries[i];
-      if (e.valid && lattice::mac::eq(e.nodeMac, nodeMac)) {
-        *pathLenOut = e.pathLen;
-        if (e.pathLen)
-          memcpy(pathOut, e.path, static_cast<size_t>(e.pathLen) * 6);
-        return true;
-      }
-    }
-    return false;
+    size_t idx = lattice::mac_table::find(entries, config::LATTICE_ROUTE_TABLE_MAX, sizeof(Entry),
+                                          offsetof(Entry, nodeMac), nodeMac);
+    if (idx == SIZE_MAX || !entries[idx].valid)
+      return false;
+    const Entry& e = entries[idx];
+    *pathLenOut = e.pathLen;
+    if (e.pathLen)
+      memcpy(pathOut, e.path, static_cast<size_t>(e.pathLen) * 6);
+    return true;
   }
 
   void clear() { memset(entries, 0, sizeof(entries)); }
@@ -62,22 +64,23 @@ private:
   };
   Entry entries[config::LATTICE_ROUTE_TABLE_MAX]{};
 
+  // Thinned via lattice::mac_table::find (Phase H2 audit item Y).
   Entry* findSlot(const uint8_t* nodeMac) {
-    for (size_t i = 0; i < config::LATTICE_ROUTE_TABLE_MAX; ++i)
-      if (entries[i].valid && lattice::mac::eq(entries[i].nodeMac, nodeMac))
-        return &entries[i];
-    return nullptr;
+    size_t idx = lattice::mac_table::find(entries, config::LATTICE_ROUTE_TABLE_MAX, sizeof(Entry),
+                                          offsetof(Entry, nodeMac), nodeMac);
+    if (idx == SIZE_MAX || !entries[idx].valid)
+      return nullptr;
+    return &entries[idx];
   }
 
+  // Thinned via lattice::mac_table::evict_oldest_by_ts (Phase H2 audit item Y).
   Entry* allocateSlot() {
     for (size_t i = 0; i < config::LATTICE_ROUTE_TABLE_MAX; ++i)
       if (!entries[i].valid)
         return &entries[i];
-    Entry* oldest = &entries[0];
-    for (size_t i = 1; i < config::LATTICE_ROUTE_TABLE_MAX; ++i)
-      if (entries[i].lastSeenMillis < oldest->lastSeenMillis)
-        oldest = &entries[i];
-    return oldest;
+    size_t idx = lattice::mac_table::evict_oldest_by_ts(
+        entries, config::LATTICE_ROUTE_TABLE_MAX, sizeof(Entry), offsetof(Entry, lastSeenMillis));
+    return &entries[idx];
   }
 };
 

@@ -7,6 +7,7 @@
 #include "src/error/Error.h"
 #include "src/network/hw_mac.h"
 #include <cstring>
+#include <cstdio>
 
 namespace lattice {
 namespace adapter {
@@ -16,11 +17,9 @@ using lattice::hw::readOwnMac;
 
 size_t SerialFraming::encode(const lattice::mesh::mesh_message& msg, uint8_t* out, size_t maxLen) {
   using namespace lattice::utils;
-  LATTICE_LOGLN("Serial_Adapter",
-                "Encoding mesh message - Type: " + String((uint8_t)msg.message_type) +
-                    " DataType: " + String(static_cast<int32_t>(msg.data_type)) +
-                    " HopCount: " + String(msg.hop_count),
-                LogLevel::LOG_DEBUG);
+  LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_DEBUG,
+               "Encoding mesh message - Type: %u DataType: %ld HopCount: %u",
+               (unsigned)msg.message_type, (long)msg.data_type, (unsigned)msg.hop_count);
 
   mesh_MeshMessage pbMsg = mesh_MeshMessage_init_zero;
   pbMsg.messageType = static_cast<uint32_t>(msg.message_type);
@@ -89,16 +88,15 @@ size_t SerialFraming::encode(const lattice::mesh::mesh_message& msg, uint8_t* ou
     return 0;
   }
 
-  LATTICE_LOGLN("Serial_Adapter",
-                "Successfully encoded mesh message to " + String(stream.bytes_written) + " bytes",
-                LogLevel::LOG_DEBUG);
+  LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_DEBUG,
+               "Successfully encoded mesh message to %u bytes", (unsigned)stream.bytes_written);
   return stream.bytes_written;
 }
 
 bool SerialFraming::decode(const uint8_t* data, size_t len, lattice::mesh::mesh_message& outMsg) {
   using namespace lattice::utils;
-  LATTICE_LOGLN("Serial_Adapter", "Decoding protobuf message of " + String(len) + " bytes",
-                LogLevel::LOG_DEBUG);
+  LATTICE_LOGF("Serial_Adapter", LogLevel::LOG_DEBUG, "Decoding protobuf message of %u bytes",
+               (unsigned)len);
 
   memset(&outMsg, 0, sizeof(outMsg));
 

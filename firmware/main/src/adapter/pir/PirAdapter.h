@@ -44,7 +44,8 @@ private:
   PirState _state{PirState::IDLE};
   bool _interruptEnabled;
   bool _initialized;
-  uint32_t _lastHealthMillis;
+  // Phase H2 item W: the health-report interval timer moved to the shared
+  // Adapter base (_lastHealthMillis there, driven via healthTickDue()).
 
 #ifdef UNIT_TEST
 public:

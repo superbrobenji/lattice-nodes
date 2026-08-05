@@ -2,7 +2,9 @@
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/network/MacEq.h"
+#include "src/network/mac_table.h"
 #include <esp_now.h>
+#include <cstddef>
 #include <cstring>
 
 namespace lattice {
@@ -19,22 +21,19 @@ void PeerRegistry::setDeviceMac(const uint8_t* mac) {
   memcpy(deviceMac, mac, 6);
 }
 
+// Thinned via lattice::mac_table::find (Phase H2 audit item Y). peerMacs has
+// no per-entry "valid" bit — every slot in [0, peerCount) is live — so the
+// found index maps straight to a pointer, no extra flag check needed.
 PeerInfo* PeerRegistry::find(const uint8_t* mac) {
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::mac::eq(peerMacs[i].mac, mac)) {
-      return &peerMacs[i];
-    }
-  }
-  return nullptr;
+  size_t idx =
+      lattice::mac_table::find(peerMacs, peerCount, sizeof(PeerInfo), offsetof(PeerInfo, mac), mac);
+  return idx == SIZE_MAX ? nullptr : &peerMacs[idx];
 }
 
 const PeerInfo* PeerRegistry::find(const uint8_t* mac) const {
-  for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::mac::eq(peerMacs[i].mac, mac)) {
-      return &peerMacs[i];
-    }
-  }
-  return nullptr;
+  size_t idx =
+      lattice::mac_table::find(peerMacs, peerCount, sizeof(PeerInfo), offsetof(PeerInfo, mac), mac);
+  return idx == SIZE_MAX ? nullptr : &peerMacs[idx];
 }
 
 bool PeerRegistry::append(const PeerInfo& peer) {
@@ -78,7 +77,7 @@ void PeerRegistry::loadFromEEPROM() {
 
   // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key
   uint8_t peerRecords[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_RECORD_SIZE];
-  bool eepromOk = EepromManager::getInstance().loadPeerList(peerRecords, EEPROM_SIZES::MAX_PEERS);
+  bool eepromOk = lattice::eeprom::loadPeerList(peerRecords, EEPROM_SIZES::MAX_PEERS);
 
   if (eepromOk) {
     for (int i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
@@ -125,7 +124,7 @@ void PeerRegistry::saveToEEPROM() {
     memcpy(record + 6, peerMacs[i].publicKey, 32);
   }
 
-  EepromManager::getInstance().savePeerList(peerRecords, peerCount);
+  lattice::eeprom::savePeerList(peerRecords, peerCount);
 }
 
 void PeerRegistry::addAndPersist(const uint8_t* mac) {

@@ -2,6 +2,7 @@
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/persistence/EepromManager.h"
+#include <cstdio>
 // Include all adapter headers
 #include "src/adapter/pir/PirAdapter.h"
 #include "src/adapter/serial/SerialAdapter.h"
@@ -16,8 +17,7 @@ bool AdapterFactory::isDevMode_ = false;
 
 void AdapterFactory::setDevMode(bool isDev) {
   isDevMode_ = isDev;
-  LATTICE_LOGLN("Factory", String("Dev mode ") + (isDev ? "enabled" : "disabled"),
-                LogLevel::LOG_INFO);
+  LATTICE_LOGLN("Factory", isDev ? "Dev mode enabled" : "Dev mode disabled", LogLevel::LOG_INFO);
 }
 
 Adapter* AdapterFactory::createAdapter(adapter_types type, uint8_t pin) {
@@ -55,7 +55,7 @@ adapter_types AdapterFactory::loadAdapterTypeFromEEPROM() {
     return adapter_types::PIR_ADAPTER; // Always return default in dev mode
   }
 
-  uint8_t adapterType = EepromManager::getInstance().loadAdapterType();
+  uint8_t adapterType = lattice::eeprom::loadAdapterType();
   return adapterTypeFromEEPROM(adapterType);
 }
 
@@ -66,7 +66,7 @@ void AdapterFactory::saveAdapterTypeToEEPROM(adapter_types type) {
     return; // Don't save to EEPROM in dev mode
   }
 
-  EepromManager::getInstance().saveAdapterType(adapterTypeToEEPROM(type));
+  lattice::eeprom::saveAdapterType(adapterTypeToEEPROM(type));
 }
 
 Adapter* AdapterFactory::createFromEEPROM() {
@@ -82,9 +82,9 @@ void AdapterFactory::initializeDefaultsIfUnset() {
   }
 
   // Check if adapter type is unset (0xFF) and set default if needed
-  uint8_t currentType = EepromManager::getInstance().loadAdapterType();
+  uint8_t currentType = lattice::eeprom::loadAdapterType();
   if (currentType == 0xFF) {
-    EepromManager::getInstance().saveAdapterType(adapterTypeToEEPROM(adapter_types::PIR_ADAPTER));
+    lattice::eeprom::saveAdapterType(adapterTypeToEEPROM(adapter_types::PIR_ADAPTER));
   }
 }
 

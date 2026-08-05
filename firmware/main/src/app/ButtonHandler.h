@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <cstdio>
 #include "src/hardware/input/Button.h"
 #include "src/hardware/output/Led.h"
 #include "src/mesh/Mesh.h"
@@ -13,17 +14,15 @@ struct ButtonHandler {
   static constexpr unsigned long HOLD_MS = 5000;
 
   static void tick(lattice::hardware::Button& configBtn, lattice::hardware::Button& resetBtn,
-                   lattice::mesh::Mesh& mesh, lattice::utils::EepromManager& em,
-                   lattice::hardware::Led& greenLed, lattice::hardware::Led& redLed, bool isDevMode,
-                   bool& devMasterFlag) {
-    tickConfig(configBtn, mesh, em, greenLed, isDevMode, devMasterFlag);
-    tickReset(resetBtn, em, greenLed, redLed);
+                   lattice::mesh::Mesh& mesh, lattice::hardware::Led& greenLed,
+                   lattice::hardware::Led& redLed, bool isDevMode, bool& devMasterFlag) {
+    tickConfig(configBtn, mesh, greenLed, isDevMode, devMasterFlag);
+    tickReset(resetBtn, greenLed, redLed);
   }
 
 private:
   static void tickConfig(lattice::hardware::Button& btn, lattice::mesh::Mesh& mesh,
-                         lattice::utils::EepromManager& em, lattice::hardware::Led& greenLed,
-                         bool isDevMode, bool& devMasterFlag) {
+                         lattice::hardware::Led& greenLed, bool isDevMode, bool& devMasterFlag) {
     static bool wasPressed = false;
     static unsigned long holdStart = 0;
 
@@ -37,23 +36,20 @@ private:
           bool newMaster = !mesh.getIsMaster();
           mesh.setIsMaster(newMaster);
           devMasterFlag = newMaster;
-          LATTICE_LOGLN("MAIN",
-                        String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"),
-                        lattice::utils::LogLevel::LOG_INFO);
+          LATTICE_LOGF("MAIN", lattice::utils::LogLevel::LOG_INFO, "DEV MODE: Role toggled. Now %s",
+                       newMaster ? "MASTER" : "NODE");
           greenLed.blink(newMaster ? 3 : 2, 150, 150);
         } else {
-          bool wasMaster = em.loadMasterFlag();
+          bool wasMaster = lattice::eeprom::loadMasterFlag();
           bool newMaster = !wasMaster;
-          em.saveMasterFlag(newMaster);
-          LATTICE_LOGLN("MAIN",
-                        String("Button held 5s: CONFIG TOGGLED. Now ") +
-                            (newMaster ? "MASTER" : "NODE"),
-                        lattice::utils::LogLevel::LOG_INFO);
+          lattice::eeprom::saveMasterFlag(newMaster);
+          LATTICE_LOGF("MAIN", lattice::utils::LogLevel::LOG_INFO,
+                       "Button held 5s: CONFIG TOGGLED. Now %s", newMaster ? "MASTER" : "NODE");
           LATTICE_LOGLN("MAIN", "Restarting in 2 seconds for new role...",
                         lattice::utils::LogLevel::LOG_INFO);
           greenLed.blink(newMaster ? 3 : 2, 200, 200);
           delay(2000);
-          em.forceFlush();
+          lattice::eeprom::forceFlush();
           ESP.restart();
         }
       }
@@ -62,8 +58,8 @@ private:
     }
   }
 
-  static void tickReset(lattice::hardware::Button& btn, lattice::utils::EepromManager& em,
-                        lattice::hardware::Led& greenLed, lattice::hardware::Led& redLed) {
+  static void tickReset(lattice::hardware::Button& btn, lattice::hardware::Led& greenLed,
+                        lattice::hardware::Led& redLed) {
     static bool wasPressed = false;
     static unsigned long holdStart = 0;
     static bool confirmPending = false;
@@ -85,11 +81,11 @@ private:
           confirmPending = false;
           LATTICE_LOGLN("MAIN", "EEPROM wipe confirmed. Clearing all...",
                         lattice::utils::LogLevel::LOG_WARN);
-          em.clearAll();
+          lattice::eeprom::clearAll();
           redLed.blink(5, 100, 100);
           greenLed.blink(5, 100, 100);
           delay(3000);
-          em.forceFlush();
+          lattice::eeprom::forceFlush();
           ESP.restart();
         }
       }

@@ -38,93 +38,92 @@ constexpr uint8_t PEER_RECORD_SIZE = PEER_MAC_SIZE + PEER_PUBLIC_KEY_SIZE; // 38
 constexpr uint16_t PEER_LIST_SIZE = MAX_PEERS * PEER_RECORD_SIZE;          // 380 bytes
 } // namespace EEPROM_SIZES
 
-class EepromManager {
-private:
-  bool isInitialized;
-  bool isDevMode;
-  Preferences _prefs;
-  uint32_t _devEpoch = 0; // DEV_MODE RAM-only monotonic boot-epoch seed (issue #43)
+} // namespace utils
+} // namespace lattice
 
-  EepromManager();
-  bool ensureInitialized();
-  void logOperation(const char* operation, const char* details = nullptr);
+// Phase H2 item AA: Meyers singleton -> namespace of free functions backed by
+// file-static state (EepromManager.cpp). Each unique EepromManager::getInstance()
+// callsite used to cost a __cxa_guard_acquire/release prologue (~40B + a byte
+// flag); free functions drop that entirely. Public API (function names +
+// signatures) is unchanged from the old class's methods.
+namespace lattice {
+namespace eeprom {
 
-  // Tiered NVS write-return handling (issue #43). `got`/`want` are the
-  // bytes actually written vs. requested by the preceding put* call.
-  // securityRelevant=true escalates a short write via lattice::err::fail
-  // (halts the node); false logs at ERROR and lets the caller continue.
-  bool _persistOrEscalate(const char* key, size_t got, size_t want, bool securityRelevant);
+namespace detail {
+// Groups the module's mutable state into one struct so the e2e test harness
+// (tests/e2e/harness/NodeContext.cpp) can still snapshot/restore it as a flat
+// byte image per simulated node -- the same technique it used against the
+// old singleton object.
+struct State {
+  bool isInitialized = false;
+  bool isDevMode = false;
+  Preferences prefs;
+  uint32_t devEpoch = 0; // DEV_MODE RAM-only monotonic boot-epoch seed (issue #43)
+};
+} // namespace detail
 
-public:
-  static EepromManager& getInstance();
+bool init();
+void setDevMode(bool devMode);
+bool getDevMode();
 
-  EepromManager(const EepromManager&) = delete;
-  EepromManager& operator=(const EepromManager&) = delete;
-  EepromManager(EepromManager&&) = delete;
-  EepromManager& operator=(EepromManager&&) = delete;
+bool loadMasterFlag();
+void saveMasterFlag(bool isMaster);
 
-  bool init();
-  void setDevMode(bool devMode);
-  bool getDevMode() const;
+bool loadDevFlag();
+void saveDevFlag(bool isDev);
 
-  bool loadMasterFlag();
-  void saveMasterFlag(bool isMaster);
+bool loadMeshKey(uint8_t* key, size_t keySize);
+void saveMeshKey(const uint8_t* key, size_t keySize);
 
-  bool loadDevFlag();
-  void saveDevFlag(bool isDev);
+bool loadPeerList(uint8_t* peerRecords, size_t maxPeers);
+void savePeerList(const uint8_t* peerRecords, size_t numPeers);
+bool hasPeers();
+void clearPeerList();
 
-  bool loadMeshKey(uint8_t* key, size_t keySize);
-  void saveMeshKey(const uint8_t* key, size_t keySize);
+uint8_t loadAdapterType();
+void saveAdapterType(uint8_t adapterType);
 
-  bool loadPeerList(uint8_t* peerRecords, size_t maxPeers);
-  void savePeerList(const uint8_t* peerRecords, size_t numPeers);
-  bool hasPeers();
-  void clearPeerList();
+uint8_t loadRebootCount();
+void saveRebootCount(uint8_t count);
+void saveRebootReason(uint8_t reason);
+uint8_t loadRebootReason();
 
-  uint8_t loadAdapterType();
-  void saveAdapterType(uint8_t adapterType);
+bool loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32);
+void saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32);
+bool loadEnrolledFlag();
+void saveEnrolledFlag(bool enrolled);
 
-  uint8_t loadRebootCount();
-  void saveRebootCount(uint8_t count);
-  void saveRebootReason(uint8_t reason);
-  uint8_t loadRebootReason();
+uint32_t loadBootEpoch();
+void saveBootEpoch(uint32_t epoch);
 
-  bool loadKeypair(uint8_t* privateKey32, uint8_t* publicKey32);
-  void saveKeypair(const uint8_t* privateKey32, const uint8_t* publicKey32);
-  bool loadEnrolledFlag();
-  void saveEnrolledFlag(bool enrolled);
+bool loadKnownMasterMac(uint8_t* mac);
+void saveKnownMasterMac(const uint8_t* mac);
+void clearKnownMasterMac();
 
-  uint32_t loadBootEpoch();
-  void saveBootEpoch(uint32_t epoch);
+bool loadKnownMasterMacSecondary(uint8_t* mac);
+void saveKnownMasterMacSecondary(const uint8_t* mac);
+void clearKnownMasterMacSecondary();
 
-  bool loadKnownMasterMac(uint8_t* mac);
-  void saveKnownMasterMac(const uint8_t* mac);
-  void clearKnownMasterMac();
+lattice::config::TxPowerPreset loadTxPowerPreset();
+void saveTxPowerPreset(lattice::config::TxPowerPreset preset);
 
-  bool loadKnownMasterMacSecondary(uint8_t* mac);
-  void saveKnownMasterMacSecondary(const uint8_t* mac);
-  void clearKnownMasterMacSecondary();
+uint8_t loadNodeId();
+void saveNodeId(uint8_t nodeId);
 
-  lattice::config::TxPowerPreset loadTxPowerPreset();
-  void saveTxPowerPreset(lattice::config::TxPowerPreset preset);
+inline void flushIfDirty() {}
+inline void forceFlush() {}
 
-  uint8_t loadNodeId();
-  void saveNodeId(uint8_t nodeId);
-
-  void flushIfDirty() {}
-  void forceFlush() {}
-
-  void clearAll();
-  void dumpEEPROM();
-
-  ~EepromManager();
+void clearAll();
+void dumpEEPROM();
 
 #ifdef UNIT_TEST
-  bool isInitializedForTest() const { return isInitialized; }
+bool isInitializedForTest();
+// Raw access to the module's state blob for the e2e harness's byte-image
+// snapshot/restore (tests/e2e/harness/NodeContext.cpp).
+detail::State& debugStateForTest();
 #endif
-};
 
-} // namespace utils
+} // namespace eeprom
 } // namespace lattice
 
 #endif // EEPROM_MANAGER_H

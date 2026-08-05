@@ -40,12 +40,12 @@ static void saveImage(T& obj, std::vector<uint8_t>& image) {
 static void initPristineImages(std::vector<uint8_t>& em, std::vector<uint8_t>& ec) {
   static std::vector<uint8_t> pristineEm = [] {
     std::vector<uint8_t> v;
-    saveImage(lattice::utils::EepromManager::getInstance(), v);
+    saveImage(lattice::eeprom::debugStateForTest(), v);
     return v;
   }();
   static std::vector<uint8_t> pristineEc = [] {
     std::vector<uint8_t> v;
-    saveImage(lattice::utils::ErrorCore::getInstance(), v);
+    saveImage(lattice::err_core::debugStateForTest(), v);
     return v;
   }();
   em = pristineEm;
@@ -71,9 +71,8 @@ void swapIn(NodeContext& ctx) {
   ESP._restartRequested = ctx.espRestartRequested;
   lattice::mesh::Mesh::instance = ctx.meshInstance;
   lattice::adapter::PirAdapter::instance = ctx.pirInstance;
-  lattice::adapter::SerialAdapter::lastHealthMillis = ctx.serialAdapterLastHealthMillis;
-  loadImage(lattice::utils::EepromManager::getInstance(), ctx.eepromManagerImage);
-  loadImage(lattice::utils::ErrorCore::getInstance(), ctx.errorCoreImage);
+  loadImage(lattice::eeprom::debugStateForTest(), ctx.eepromManagerImage);
+  loadImage(lattice::err_core::debugStateForTest(), ctx.errorCoreImage);
 }
 
 void swapOut(NodeContext& ctx) {
@@ -90,9 +89,8 @@ void swapOut(NodeContext& ctx) {
   ctx.espRestartRequested = ESP._restartRequested;
   ctx.meshInstance = lattice::mesh::Mesh::instance;
   ctx.pirInstance = lattice::adapter::PirAdapter::instance;
-  ctx.serialAdapterLastHealthMillis = lattice::adapter::SerialAdapter::lastHealthMillis;
-  saveImage(lattice::utils::EepromManager::getInstance(), ctx.eepromManagerImage);
-  saveImage(lattice::utils::ErrorCore::getInstance(), ctx.errorCoreImage);
+  saveImage(lattice::eeprom::debugStateForTest(), ctx.eepromManagerImage);
+  saveImage(lattice::err_core::debugStateForTest(), ctx.errorCoreImage);
 }
 
 } // namespace sim

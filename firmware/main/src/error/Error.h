@@ -6,6 +6,7 @@
 #include "../logging/Logger.h"
 #include <esp_err.h>
 #include <cstdint>
+#include <cstdio>
 #ifdef UNIT_TEST
 #include <stdexcept>
 extern int lattice_test_errFailCount;
@@ -49,7 +50,7 @@ inline bool fail(::lattice::core::ErrorTypeDigit t, ::lattice::core::ModuleDigit
   ++::lattice_test_errFailCount;
 #endif
   LATTICE_LOGLN("ERROR", msg, utils::LogLevel::LOG_ERROR);
-  utils::ErrorCore::getInstance().signalError(t, m, sub, msg);
+  err_core::signalError(t, m, sub, msg);
   return false;
 }
 
@@ -60,7 +61,7 @@ inline bool fail(utils::ErrorType type, const char* msg) {
 [[noreturn]] inline void fatal(::lattice::core::ErrorTypeDigit t, ::lattice::core::ModuleDigit m,
                                uint8_t sub, const char* msg) {
   LATTICE_LOGLN("FATAL", msg, utils::LogLevel::LOG_ERROR);
-  utils::ErrorCore::getInstance().signalError(t, m, sub, msg);
+  err_core::signalError(t, m, sub, msg);
 #ifdef UNIT_TEST
   throw FatalError(msg ? msg : "fatal");
 #else
@@ -78,7 +79,8 @@ inline bool check(bool condition, utils::ErrorType type, const char* msg) {
 inline bool checkEsp(esp_err_t status, utils::ErrorType type, const char* msg) {
   if (status == ESP_OK)
     return true;
-  LATTICE_LOGLN("ESP", String(msg) + ": " + esp_err_to_name(status), utils::LogLevel::LOG_ERROR);
+  LATTICE_LOGF("ESP", utils::LogLevel::LOG_ERROR, "%s: %s", msg ? msg : "",
+               esp_err_to_name(status));
   return fail(type, msg);
 }
 } // namespace err
