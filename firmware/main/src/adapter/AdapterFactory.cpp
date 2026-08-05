@@ -2,6 +2,7 @@
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/persistence/EepromManager.h"
+#include <cstdio>
 // Include all adapter headers
 #include "src/adapter/pir/PirAdapter.h"
 #include "src/adapter/serial/SerialAdapter.h"
@@ -16,8 +17,7 @@ bool AdapterFactory::isDevMode_ = false;
 
 void AdapterFactory::setDevMode(bool isDev) {
   isDevMode_ = isDev;
-  LATTICE_LOGLN("Factory", String("Dev mode ") + (isDev ? "enabled" : "disabled"),
-                LogLevel::LOG_INFO);
+  LATTICE_LOGLN("Factory", isDev ? "Dev mode enabled" : "Dev mode disabled", LogLevel::LOG_INFO);
 }
 
 Adapter* AdapterFactory::createAdapter(adapter_types type, uint8_t pin) {

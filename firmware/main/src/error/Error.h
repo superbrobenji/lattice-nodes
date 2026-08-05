@@ -6,6 +6,7 @@
 #include "../logging/Logger.h"
 #include <esp_err.h>
 #include <cstdint>
+#include <cstdio>
 #ifdef UNIT_TEST
 #include <stdexcept>
 extern int lattice_test_errFailCount;
@@ -78,7 +79,9 @@ inline bool check(bool condition, utils::ErrorType type, const char* msg) {
 inline bool checkEsp(esp_err_t status, utils::ErrorType type, const char* msg) {
   if (status == ESP_OK)
     return true;
-  LATTICE_LOGLN("ESP", String(msg) + ": " + esp_err_to_name(status), utils::LogLevel::LOG_ERROR);
+  char buf[96];
+  snprintf(buf, sizeof(buf), "%s: %s", msg ? msg : "", esp_err_to_name(status));
+  LATTICE_LOGLN("ESP", buf, utils::LogLevel::LOG_ERROR);
   return fail(type, msg);
 }
 } // namespace err

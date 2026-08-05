@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <cstdio>
 #include "src/hardware/input/Button.h"
 #include "src/hardware/output/Led.h"
 #include "src/mesh/Mesh.h"
@@ -37,18 +38,23 @@ private:
           bool newMaster = !mesh.getIsMaster();
           mesh.setIsMaster(newMaster);
           devMasterFlag = newMaster;
-          LATTICE_LOGLN("MAIN",
-                        String("DEV MODE: Role toggled. Now ") + (newMaster ? "MASTER" : "NODE"),
-                        lattice::utils::LogLevel::LOG_INFO);
+          {
+            char buf[48];
+            snprintf(buf, sizeof(buf), "DEV MODE: Role toggled. Now %s",
+                     newMaster ? "MASTER" : "NODE");
+            LATTICE_LOGLN("MAIN", buf, lattice::utils::LogLevel::LOG_INFO);
+          }
           greenLed.blink(newMaster ? 3 : 2, 150, 150);
         } else {
           bool wasMaster = em.loadMasterFlag();
           bool newMaster = !wasMaster;
           em.saveMasterFlag(newMaster);
-          LATTICE_LOGLN("MAIN",
-                        String("Button held 5s: CONFIG TOGGLED. Now ") +
-                            (newMaster ? "MASTER" : "NODE"),
-                        lattice::utils::LogLevel::LOG_INFO);
+          {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "Button held 5s: CONFIG TOGGLED. Now %s",
+                     newMaster ? "MASTER" : "NODE");
+            LATTICE_LOGLN("MAIN", buf, lattice::utils::LogLevel::LOG_INFO);
+          }
           LATTICE_LOGLN("MAIN", "Restarting in 2 seconds for new role...",
                         lattice::utils::LogLevel::LOG_INFO);
           greenLed.blink(newMaster ? 3 : 2, 200, 200);

@@ -2,6 +2,7 @@
 #include "src/mesh/Mesh.h" // for full definition of mesh_message
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
+#include <cstdio>
 #include "src/adapter/AdapterFactory.h"
 #include "src/adapter/serial/SerialAdapter.h"
 #include "src/persistence/EepromManager.h"
@@ -83,7 +84,9 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
       if (isTarget) {
         uint8_t nodeId = message.data[7];
         lattice::utils::EepromManager::getInstance().saveNodeId(nodeId);
-        LATTICE_LOGLN("ADAPTER", "Node ID assigned: " + String(nodeId), LogLevel::LOG_INFO);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Node ID assigned: %u", (unsigned)nodeId);
+        LATTICE_LOGLN("ADAPTER", buf, LogLevel::LOG_INFO);
       }
     }
     // Other SERIAL_ADAPTER opcodes (e.g. OP_HEALTH_REQ) are Serial-node-specific;
