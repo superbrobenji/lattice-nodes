@@ -571,9 +571,8 @@ void Mesh::broadcastMasterBeacon() {
   // Broadcast-only: send to the registered FF:FF:… broadcast peer so the frame
   // reaches all nodes — including those not yet individually registered.
   // esp_now_send(nullptr, …) only delivers to already-registered unicast peers.
-  esp_err_t br =
-      esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&beacon), sizeof(beacon));
-  LATTICE_LOGLN("MESH", br == ESP_OK ? "Beacon broadcast OK" : "Beacon broadcast FAIL",
+  bool sent = sendBroadcast(beacon);
+  LATTICE_LOGLN("MESH", sent ? "Beacon broadcast OK" : "Beacon broadcast FAIL",
                 LogLevel::LOG_DEBUG);
 }
 
@@ -690,6 +689,18 @@ void Mesh::sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
     instance->sendDownlinkToNode(destMac, type, data);
 }
 
+bool Mesh::sendBroadcast(const mesh_message& msg) {
+  esp_err_t err =
+      esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
+  if (err != ESP_OK) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Broadcast send failed: %s", esp_err_to_name(err));
+    LATTICE_LOGLN("MESH", buf, LogLevel::LOG_WARN);
+    return false;
+  }
+  return true;
+}
+
 void Mesh::debugDumpRadio() {
   if (!EepromManager::getInstance().getDevMode())
     return;
@@ -803,14 +814,16 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   // is msg.hop_count, not +1: a direct beacon straight from the master
   // (hop_count == 0, last_hop == master) must record the master itself as a
   // distance-0 neighbor. Learned here, not from enrollment — routing only.
-  neighbors.observe(msg.last_hop_mac_address, msg.hop_count, millis());
-
-  // Derive currentMaster.distance from live NeighborTable state (issue #45).
+  //
+  // Derive currentMaster.distance from live NeighborTable state (issue #45) in
+  // the SAME pass as the observe (post-Phase-G audit item X) — this used to be
+  // neighbors.observe(...) followed by a separate neighbors.minFreshDistance(...)
+  // call, two full linear scans of the neighbor table per beacon RX.
   // Sticky-min replaced by a pure function of neighbor state: rises monotonically
   // as shorter-path neighbors age out; no oscillation because state can only
   // flap if NeighborTable itself flaps.
   memcpy(currentMaster.mac, msg.origin_mac_address, 6);
-  uint8_t min_d = neighbors.minFreshDistance(millis());
+  uint8_t min_d = neighbors.observeAndMinDistance(msg.last_hop_mac_address, msg.hop_count, millis());
   uint8_t derived = (min_d == 0xFF) ? 0xFF : static_cast<uint8_t>(min_d + 1);
   if (derived != currentMaster.distance) {
     currentMaster.distance = derived;
@@ -1029,7 +1042,7 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     mesh_message relay = msg;
     relay.hop_count++;
     memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-    esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&relay), sizeof(relay));
+    sendBroadcast(relay);
     return;
   }
   // Masters issue JOIN_ACKs; they never enroll via one. Without this guard a
@@ -1145,7 +1158,7 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint
   }
   // Broadcast via the registered FF:FF:… peer so the new node receives the ACK
   // even before it is individually registered as a unicast peer.
-  esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&ack), sizeof(ack));
+  sendBroadcast(ack);
   LATTICE_LOGLN("MESH", "JOIN_ACK sent to newly enrolled node", LogLevel::LOG_INFO);
 }
 // --------------------------------------------------------
@@ -1307,13 +1320,7 @@ void Mesh::loop() {
   // err::fail every beacon interval on any node without a route (e.g. pre-enrollment).
   if (relayPending && millis() >= relayPendingAt) {
     relayPending = false;
-    esp_err_t res = esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&relayPendingMsg),
-                                 sizeof(relayPendingMsg));
-    if (res != ESP_OK) {
-      char buf[64];
-      snprintf(buf, sizeof(buf), "Beacon relay broadcast failed: %s", esp_err_to_name(res));
-      LATTICE_LOGLN("MESH", buf, LogLevel::LOG_WARN);
-    }
+    sendBroadcast(relayPendingMsg);
   }
 
   // Master beacon — broadcastMasterBeacon() guards timing internally via lastBeaconMillis

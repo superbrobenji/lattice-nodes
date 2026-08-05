@@ -370,6 +370,19 @@ public:
   static void sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
                                        const uint8_t* data);
 
+  // Single choke point for esp_now_send(BROADCAST_MAC, ...) (post-Phase-G
+  // audit item U): every broadcast site (master beacon, JOIN_ACK broadcast,
+  // beacon relay, enrollment request) now funnels through here instead of
+  // hand-rolling the reinterpret_cast<>/sizeof() call + its own error
+  // handling. Returns true on ESP_OK; on failure, logs (LOG_WARN) and returns
+  // false — callers that previously ignored the esp_now_send() result may
+  // keep doing so (this still logs internally), and callers that previously
+  // added their own success/fail message keep that message, now driven off
+  // this return value instead of a raw esp_err_t. Static (no instance state
+  // needed) so Enrollment::sendRequest() — which does not hold a Mesh* — can
+  // call it directly.
+  static bool sendBroadcast(const mesh_message& msg);
+
   // Debug helper
   void debugDumpRadio();
 

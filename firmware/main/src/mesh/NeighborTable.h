@@ -41,6 +41,78 @@ public:
     slot->valid = true;
   }
 
+  // Insert-and-fold variant of observe() + minFreshDistance() (post-Phase-G
+  // audit item X): Mesh::processMasterBeacon used to call the two back to
+  // back, walking the whole table twice per beacon RX. This does both in one
+  // pass over `entries` — it locates (or picks) the slot for `mac` AND
+  // accumulates the min masterDistance across the OTHER fresh entries in the
+  // same loop, then folds the just-written entry's distance in afterwards (it
+  // is always "fresh" relative to nowMillis — age 0 — so it always
+  // participates in the min, mirroring minFreshDistance()'s semantics).
+  // Returns the new min fresh masterDistance across the whole table (0xFF if
+  // none are fresh), exactly what
+  // `observe(mac, masterDistance, nowMillis); return
+  // minFreshDistance(nowMillis);` would have returned. observe()/
+  // minFreshDistance() are kept as-is for other callers (e.g. unit tests
+  // exercising them independently).
+  uint8_t observeAndMinDistance(const uint8_t* mac, uint8_t masterDistance, uint32_t nowMillis) {
+    size_t matchIdx = config::LATTICE_NEIGHBOR_MAX;
+    size_t firstInvalidIdx = config::LATTICE_NEIGHBOR_MAX;
+    size_t firstStaleIdx = config::LATTICE_NEIGHBOR_MAX;
+    size_t farthestIdx = config::LATTICE_NEIGHBOR_MAX;
+    uint8_t farthestDistance = 0;
+    uint8_t bestOther = 0xFF;
+
+    for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i) {
+      Entry& e = entries[i];
+      if (!e.valid) {
+        if (firstInvalidIdx == config::LATTICE_NEIGHBOR_MAX)
+          firstInvalidIdx = i;
+        continue;
+      }
+      if (lattice::mac::eq(e.mac, mac)) {
+        // Existing slot for this neighbor — will be overwritten below, so it
+        // is excluded from bestOther/allocation bookkeeping (its stale
+        // pre-update distance must not leak into the new min).
+        matchIdx = i;
+        continue;
+      }
+      bool stale = (nowMillis - e.lastSeenMillis) >= config::STALE_PEER_THRESHOLD_MS;
+      if (stale) {
+        if (firstStaleIdx == config::LATTICE_NEIGHBOR_MAX)
+          firstStaleIdx = i;
+      } else if (e.masterDistance < bestOther) {
+        bestOther = e.masterDistance;
+      }
+      // Farthest-by-distance fallback (mirrors allocateSlot()'s third pass,
+      // including its tie-break: strictly-greater only, so on a tie the
+      // lowest-index entry wins — same as that loop's `> farthest->distance`
+      // starting from entries[0]).
+      if (farthestIdx == config::LATTICE_NEIGHBOR_MAX || e.masterDistance > farthestDistance) {
+        farthestDistance = e.masterDistance;
+        farthestIdx = i;
+      }
+    }
+
+    size_t slotIdx;
+    if (matchIdx != config::LATTICE_NEIGHBOR_MAX)
+      slotIdx = matchIdx;
+    else if (firstInvalidIdx != config::LATTICE_NEIGHBOR_MAX)
+      slotIdx = firstInvalidIdx;
+    else if (firstStaleIdx != config::LATTICE_NEIGHBOR_MAX)
+      slotIdx = firstStaleIdx;
+    else
+      slotIdx = farthestIdx;
+
+    Entry& slot = entries[slotIdx];
+    memcpy(slot.mac, mac, 6);
+    slot.masterDistance = masterDistance;
+    slot.lastSeenMillis = nowMillis;
+    slot.valid = true;
+
+    return masterDistance < bestOther ? masterDistance : bestOther;
+  }
+
   // Freshest in-range neighbor with masterDistance strictly less than ownDistance.
   bool selectNextHop(uint8_t ownDistance, uint32_t nowMillis, uint8_t* outMac) const {
     const Entry* best = nullptr;
