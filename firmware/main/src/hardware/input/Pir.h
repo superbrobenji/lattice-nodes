@@ -11,7 +11,7 @@ public:
   explicit Pir(uint8_t pin);
   ~Pir() = default;
 
-  bool init() override;
+  bool init();
   bool isMotionDetected() const;
   void clearMotion();
 

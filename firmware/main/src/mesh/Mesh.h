@@ -122,6 +122,12 @@ private:
   // peer could not be added.
   bool registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, bool allowRekey);
 
+  // Static trampoline binding registerPeerWithKey(allowRekey=false) to
+  // Enrollment::RegisterPeerFn's plain-function-pointer signature (item H) —
+  // routes through the singleton `instance` the same way dataRecvTrampoline
+  // does for esp_now_register_recv_cb. Used only by processJoinAck().
+  static bool registerPeerWithKeyTrampoline(const uint8_t* mac, const uint8_t* publicKey32);
+
   // Replay protection (composed)
   ReplayCache replay;
 

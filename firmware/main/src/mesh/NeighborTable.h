@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstring>
 #include "../../project_config.h"
+#include "src/network/MacEq.h"
 
 namespace lattice {
 namespace mesh {
@@ -82,7 +83,7 @@ public:
 
   bool contains(const uint8_t* mac) const {
     for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i)
-      if (entries[i].valid && memcmp(entries[i].mac, mac, 6) == 0)
+      if (entries[i].valid && lattice::mac::eq(entries[i].mac, mac))
         return true;
     return false;
   }
@@ -100,7 +101,7 @@ private:
 
   Entry* findSlot(const uint8_t* mac) {
     for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i)
-      if (entries[i].valid && memcmp(entries[i].mac, mac, 6) == 0)
+      if (entries[i].valid && lattice::mac::eq(entries[i].mac, mac))
         return &entries[i];
     return nullptr;
   }

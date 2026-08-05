@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <cstring>
+#include "MacEq.h"
 
 namespace lattice {
 namespace utils {
@@ -14,7 +15,7 @@ struct MacAddress {
   explicit MacAddress(const uint8_t* mac) { memcpy(bytes, mac, 6); }
 
   // Comparison operators
-  bool operator==(const MacAddress& other) const { return memcmp(bytes, other.bytes, 6) == 0; }
+  bool operator==(const MacAddress& other) const { return lattice::mac::eq(bytes, other.bytes); }
   bool operator!=(const MacAddress& other) const { return !(*this == other); }
 
   // Utility

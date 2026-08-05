@@ -132,14 +132,12 @@ inline bool sealPayload(const uint8_t* key32, mesh_message& msg) {
   uint8_t nonce[E2E_NONCE_LEN], aad[E2E_AAD_LEN];
   buildNonce(msg, nonce);
   buildAad(msg, aad);
-  mbedtls_chachapoly_context ctx;
-  mbedtls_chachapoly_init(&ctx);
-  int ret = mbedtls_chachapoly_setkey(&ctx, key32);
+  lattice::mesh::mbedtls_guard::ChaChaPolyCtx ctx; // item P
+  int ret = mbedtls_chachapoly_setkey(ctx, key32);
   if (ret == 0) {
-    ret = mbedtls_chachapoly_encrypt_and_tag(&ctx, sizeof(msg.data), nonce, aad, E2E_AAD_LEN,
+    ret = mbedtls_chachapoly_encrypt_and_tag(ctx, sizeof(msg.data), nonce, aad, E2E_AAD_LEN,
                                              msg.data, msg.data, msg.auth_tag);
   }
-  mbedtls_chachapoly_free(&ctx);
   return ret == 0;
 }
 
@@ -149,14 +147,12 @@ inline bool openPayload(const uint8_t* key32, mesh_message& msg) {
   uint8_t nonce[E2E_NONCE_LEN], aad[E2E_AAD_LEN];
   buildNonce(msg, nonce);
   buildAad(msg, aad);
-  mbedtls_chachapoly_context ctx;
-  mbedtls_chachapoly_init(&ctx);
-  int ret = mbedtls_chachapoly_setkey(&ctx, key32);
+  lattice::mesh::mbedtls_guard::ChaChaPolyCtx ctx; // item P
+  int ret = mbedtls_chachapoly_setkey(ctx, key32);
   if (ret == 0) {
-    ret = mbedtls_chachapoly_auth_decrypt(&ctx, sizeof(msg.data), nonce, aad, E2E_AAD_LEN,
+    ret = mbedtls_chachapoly_auth_decrypt(ctx, sizeof(msg.data), nonce, aad, E2E_AAD_LEN,
                                           msg.auth_tag, msg.data, msg.data);
   }
-  mbedtls_chachapoly_free(&ctx);
   return ret == 0;
 }
 

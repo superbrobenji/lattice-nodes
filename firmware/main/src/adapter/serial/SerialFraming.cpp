@@ -6,7 +6,6 @@
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/network/hw_mac.h"
-#include <esp_wifi.h>
 #include <cstring>
 
 namespace lattice {

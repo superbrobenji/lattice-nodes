@@ -1,5 +1,7 @@
 #include "Mesh.h"
 #include "src/network/MacAddress.h"
+#include "src/network/MacEq.h"
+#include "src/network/hw_mac.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
 #include "src/persistence/EepromManager.h"
@@ -67,6 +69,9 @@ void Mesh::readMacAddress() {
         lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::MESH, 1,
         (String("MESH: Failed to read MAC address: ") + esp_err_to_name(ret)).c_str());
   } else {
+    // Prime the boot-time cache (item F) so every adapter's readOwnMac() call
+    // is a memcpy instead of a repeat esp_wifi_get_mac() syscall.
+    lattice::hw::cacheDeviceMac(deviceMacAddress);
     LATTICE_LOG("MESH", "Device MAC: ", LogLevel::LOG_DEBUG);
     LATTICE_LOGLN("MESH", lattice::utils::MacAddress(deviceMacAddress).toString(),
                   LogLevel::LOG_DEBUG);
@@ -81,7 +86,7 @@ PeerInfo* Mesh::findNextHopToMaster() {
   // the common single-hop case) — keeps the existing behavior and E2E peering.
   PeerInfo* direct = peers.find(currentMaster.mac);
   if (direct && currentMaster.distance == 1 && peers.isPeerInRange(direct->mac) &&
-      lattice::utils::MacAddress(direct->mac) != lattice::utils::MacAddress(deviceMacAddress))
+      !lattice::mac::eq(direct->mac, deviceMacAddress))
     return direct;
 
   // Multi-hop (spec §3): pick the freshest neighbor strictly closer to the
@@ -89,7 +94,7 @@ PeerInfo* Mesh::findNextHopToMaster() {
   uint8_t hopMac[6];
   if (!neighbors.selectNextHop(currentMaster.distance, millis(), hopMac))
     return nullptr;
-  if (lattice::utils::MacAddress(hopMac) == lattice::utils::MacAddress(deviceMacAddress))
+  if (lattice::mac::eq(hopMac, deviceMacAddress))
     return nullptr;
 
   // Bound the auto-registered forwarding peer to exactly one (spec §2:
@@ -101,11 +106,10 @@ PeerInfo* Mesh::findNextHopToMaster() {
   // evict an enrolled peer (master or sensor) — those live in `peers` and
   // are managed exclusively by the enrollment path.
   static const uint8_t kZeroMac[6] = {0, 0, 0, 0, 0, 0};
-  bool isNewRelay =
-      lattice::utils::MacAddress(forwardingPeer) != lattice::utils::MacAddress(hopMac);
-  bool forwardingPeerSet = memcmp(forwardingPeer, kZeroMac, 6) != 0;
+  bool isNewRelay = !lattice::mac::eq(forwardingPeer, hopMac);
+  bool forwardingPeerSet = !lattice::mac::eq(forwardingPeer, kZeroMac);
   if (forwardingPeerSet && isNewRelay && !peers.find(forwardingPeer) &&
-      lattice::utils::MacAddress(forwardingPeer) != lattice::utils::MacAddress(currentMaster.mac)) {
+      !lattice::mac::eq(forwardingPeer, currentMaster.mac)) {
     if (esp_now_is_peer_exist(forwardingPeer))
       esp_now_del_peer(forwardingPeer);
   }
@@ -123,9 +127,7 @@ void Mesh::registerDownlinkPeer(const uint8_t* mac) {
   // Enrolled peers and the current master are managed exclusively by their
   // own paths (PeerRegistry / enrollment) — just register (idempotent) and
   // never track or evict them via this LRU.
-  bool isCurrentMaster =
-      currentMaster.distance != 0xFF &&
-      lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(currentMaster.mac);
+  bool isCurrentMaster = currentMaster.distance != 0xFF && lattice::mac::eq(mac, currentMaster.mac);
   if (peers.find(mac) || isCurrentMaster) {
     // Defense-in-depth (issue #47 item 5): if this MAC was already parked in
     // the downlink forwarding-peer LRU from earlier churn (before it became
@@ -135,7 +137,7 @@ void Mesh::registerDownlinkPeer(const uint8_t* mac) {
     // the LRU-touch loop below), so without this eviction a stale entry
     // would sit in downlinkPeerLru indefinitely instead of freeing its slot.
     for (size_t i = 0; i < downlinkPeerLruCount; ++i) {
-      if (lattice::utils::MacAddress(downlinkPeerLru[i]) == lattice::utils::MacAddress(mac)) {
+      if (lattice::mac::eq(downlinkPeerLru[i], mac)) {
         for (size_t j = i; j + 1 < downlinkPeerLruCount; ++j)
           memcpy(downlinkPeerLru[j], downlinkPeerLru[j + 1], 6);
         downlinkPeerLruCount--;
@@ -148,7 +150,7 @@ void Mesh::registerDownlinkPeer(const uint8_t* mac) {
 
   // Already tracked: touch (move to front) and ensure still registered.
   for (size_t i = 0; i < downlinkPeerLruCount; ++i) {
-    if (lattice::utils::MacAddress(downlinkPeerLru[i]) == lattice::utils::MacAddress(mac)) {
+    if (lattice::mac::eq(downlinkPeerLru[i], mac)) {
       uint8_t touched[6];
       memcpy(touched, downlinkPeerLru[i], 6);
       for (size_t j = i; j > 0; --j)
@@ -405,7 +407,7 @@ void IRAM_ATTR Mesh::dataRecvTrampoline(const esp_now_recv_info* mac_addr, const
 }
 
 void Mesh::sendMessage(const uint8_t* target, const mesh_message& msg) {
-  if (lattice::utils::MacAddress(target) == lattice::utils::MacAddress(deviceMacAddress)) {
+  if (lattice::mac::eq(target, deviceMacAddress)) {
     LATTICE_LOGLN("MESH", "Not sending to self. Skipped.", LogLevel::LOG_DEBUG);
     return;
   }
@@ -424,7 +426,7 @@ void Mesh::broadcastToAllPeers(const mesh_message& msg) {
     return;
   }
   for (size_t i = 0; i < peers.peerCount; ++i) {
-    if (memcmp(peers.peerMacs[i].mac, deviceMacAddress, 6) == 0)
+    if (lattice::mac::eq(peers.peerMacs[i].mac, deviceMacAddress))
       continue; // Skip self
     sendMessage(peers.peerMacs[i].mac, msg);
   }
@@ -459,7 +461,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
     msg = buildMessage(type, data, msgType);
   }
 
-  bool selfOriginated = (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0);
+  bool selfOriginated = (lattice::mac::eq(msg.origin_mac_address, deviceMacAddress));
 
   // Only a self-originated uplink sets its own target to the master. A relayed
   // frame (msgOverride, foreign origin) is already sealed against the origin's
@@ -500,8 +502,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
 
   // Routing: always use next hop if possible
   PeerInfo* nextHop = findNextHopToMaster();
-  if (nextHop &&
-      lattice::utils::MacAddress(nextHop->mac) != lattice::utils::MacAddress(deviceMacAddress)) {
+  if (nextHop && !lattice::mac::eq(nextHop->mac, deviceMacAddress)) {
     sendMessage(nextHop->mac, msg);
   } else {
     // No route to master is a routine, self-healing transient: a node that has
@@ -713,7 +714,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   // Guard: ignore echoes of our own beacon relayed back by neighbours (relays are
   // broadcast, so the originating master hears them too). Without this the master
   // would TOFU-learn itself as knownMasterMac and record a bogus route to itself.
-  if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
+  if (lattice::mac::eq(msg.origin_mac_address, deviceMacAddress))
     return;
 
   // Master MAC pin (Phase D, #42): the beacon's origin_mac_address must match
@@ -738,10 +739,10 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   }
 
   // --- TOFU master MAC enforcement ---
-  bool fromPrimary =
-      enrollment.hasMasterMac && memcmp(msg.origin_mac_address, enrollment.knownMasterMac, 6) == 0;
+  bool fromPrimary = enrollment.hasMasterMac &&
+                     lattice::mac::eq(msg.origin_mac_address, enrollment.knownMasterMac);
   bool fromSecondary = _dualMasterMode && enrollment.hasMasterMacSecondary &&
-                       memcmp(msg.origin_mac_address, enrollment.knownMasterMacSecondary, 6) == 0;
+                       lattice::mac::eq(msg.origin_mac_address, enrollment.knownMasterMacSecondary);
 
   if (!enrollment.hasMasterMac) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
@@ -772,9 +773,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     }
   }
 
-  if (lattice::utils::MacAddress(lastSeenMasterMac) !=
-          lattice::utils::MacAddress(msg.origin_mac_address) &&
-      lastSeenMasterMac[0] != 0) {
+  if (!lattice::mac::eq(lastSeenMasterMac, msg.origin_mac_address) && lastSeenMasterMac[0] != 0) {
     if (_dualMasterMode) {
       LATTICE_LOGLN("MESH", "Two masters active (dual master mode)", LogLevel::LOG_DEBUG);
     } else {
@@ -839,10 +838,10 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 
 void Mesh::processAdapterData(const mesh_message& msg) {
   // OP_CONFIG_SET = 0xC1 (from lib/lattice-protocol/opcodes.h)
-  bool addressedToSelf = (memcmp(msg.target_mac_address, deviceMacAddress, 6) == 0);
-  bool isBroadcastTarget = (memcmp(msg.target_mac_address, BROADCAST_MAC, 6) == 0);
+  bool addressedToSelf = (lattice::mac::eq(msg.target_mac_address, deviceMacAddress));
+  bool isBroadcastTarget = (lattice::mac::eq(msg.target_mac_address, BROADCAST_MAC));
   bool addressedToMaster =
-      enrollment.hasMasterMac && (memcmp(msg.target_mac_address, currentMaster.mac, 6) == 0);
+      enrollment.hasMasterMac && (lattice::mac::eq(msg.target_mac_address, currentMaster.mac));
 
   if (!isMaster && !addressedToSelf && !isBroadcastTarget) {
     if (addressedToMaster) {
@@ -861,7 +860,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     // fall back to the flood.
     if (msg.route_len > 0 && msg.route_len <= lattice::config::MAX_HOPS) {
       for (uint8_t i = 0; i < msg.route_len; ++i) {
-        if (memcmp(&msg.route_path[static_cast<size_t>(i) * 6], deviceMacAddress, 6) == 0) {
+        if (lattice::mac::eq(&msg.route_path[static_cast<size_t>(i) * 6], deviceMacAddress)) {
           if (msg.hop_count >= lattice::config::MAX_HOPS)
             return;
           mesh_message fwd = msg;
@@ -946,10 +945,10 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     return;
   }
   if (isConfigOpcode && enrollment.hasMasterMac) {
-    bool fromPrimary = memcmp(opened.origin_mac_address, enrollment.knownMasterMac, 6) == 0;
+    bool fromPrimary = lattice::mac::eq(opened.origin_mac_address, enrollment.knownMasterMac);
     bool fromSecondary =
         enrollment.hasMasterMacSecondary &&
-        memcmp(opened.origin_mac_address, enrollment.knownMasterMacSecondary, 6) == 0;
+        lattice::mac::eq(opened.origin_mac_address, enrollment.knownMasterMacSecondary);
     if (!fromPrimary && !fromSecondary) {
       LATTICE_LOGLN("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
       return;
@@ -974,7 +973,7 @@ void Mesh::relayDownlink(const mesh_message& msg) {
   relay.hop_count++;
   memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
   for (size_t i = 0; i < peers.peerCount; ++i) {
-    if (memcmp(peers.peerMacs[i].mac, deviceMacAddress, 6) == 0)
+    if (lattice::mac::eq(peers.peerMacs[i].mac, deviceMacAddress))
       continue;
     sendMessage(peers.peerMacs[i].mac, relay);
   }
@@ -982,7 +981,7 @@ void Mesh::relayDownlink(const mesh_message& msg) {
 
 void Mesh::relayEnrollmentUplink(const mesh_message& msg) {
   // Never relay our own outbound request echoed back to us over the air.
-  if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
+  if (lattice::mac::eq(msg.origin_mac_address, deviceMacAddress))
     return;
   // Bound relay depth (mirrors the ADAPTER_DATA uplink guard).
   if (msg.hop_count >= lattice::config::MAX_HOPS)
@@ -1010,8 +1009,8 @@ void Mesh::processJoinAck(const mesh_message& msg) {
   // safety: never re-broadcast a JOIN_ACK we originated (only masters originate
   // them, so this stops the master looping on its own echo), and bound depth by
   // MAX_HOPS as a backstop for cyclic topologies.
-  if (memcmp(msg.target_mac_address, deviceMacAddress, 6) != 0) {
-    if (memcmp(msg.origin_mac_address, deviceMacAddress, 6) == 0)
+  if (!lattice::mac::eq(msg.target_mac_address, deviceMacAddress)) {
+    if (lattice::mac::eq(msg.origin_mac_address, deviceMacAddress))
       return;
     if (msg.hop_count >= lattice::config::MAX_HOPS)
       return;
@@ -1028,10 +1027,11 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     LATTICE_LOGLN("MESH", "JOIN_ACK addressed to master — ignoring", LogLevel::LOG_WARN);
     return;
   }
-  enrollment.processJoinAck(msg, deviceMacAddress,
-                            [this](const uint8_t* mac, const uint8_t* pubKey32) {
-                              return registerPeerWithKey(mac, pubKey32, /*allowRekey=*/false);
-                            });
+  enrollment.processJoinAck(msg, deviceMacAddress, &Mesh::registerPeerWithKeyTrampoline);
+}
+
+bool Mesh::registerPeerWithKeyTrampoline(const uint8_t* mac, const uint8_t* publicKey32) {
+  return instance->registerPeerWithKey(mac, publicKey32, /*allowRekey=*/false);
 }
 
 void Mesh::addPeer(const uint8_t* mac) {

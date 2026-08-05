@@ -33,15 +33,14 @@ inline void registerPeerWithEspNow(const uint8_t mac[6]) {
 inline void generateKeypair(uint8_t* priv32Out, uint8_t* pub32Out) {
   // Use the low-level ECP API directly to avoid the opaque ecdh context internals
   // that are private in the mbedTLS 3.x non-legacy context.
-  mbedtls_ecp_group grp;
-  mbedtls_mpi d;
-  mbedtls_ecp_point Q;
+  // RAII guards (item P): every err::fatal() below throws under UNIT_TEST
+  // instead of halting the device, unwinding past whatever manual _free()
+  // calls would otherwise sit at the end of this function.
+  lattice::mesh::mbedtls_guard::EcpGroupCtx grp;
+  lattice::mesh::mbedtls_guard::MpiCtx d;
+  lattice::mesh::mbedtls_guard::EcpPointCtx Q;
   lattice::mesh::mbedtls_guard::EntropyCtx entropy;
   lattice::mesh::mbedtls_guard::CtrDrbgCtx ctr_drbg;
-
-  mbedtls_ecp_group_init(&grp);
-  mbedtls_mpi_init(&d);
-  mbedtls_ecp_point_init(&Q);
 
   const char* pers = "lattice_keygen";
   int ret;
@@ -52,26 +51,22 @@ inline void generateKeypair(uint8_t* priv32Out, uint8_t* pub32Out) {
                         "MESH: keypair gen — entropy seed failed");
   }
 
-  ret = mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_CURVE25519);
+  ret = mbedtls_ecp_group_load(grp, MBEDTLS_ECP_DP_CURVE25519);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 2,
                         "MESH: keypair gen — ecp_group_load failed");
   }
 
-  ret = mbedtls_ecdh_gen_public(&grp, &d, &Q, mbedtls_ctr_drbg_random, ctr_drbg);
+  ret = mbedtls_ecdh_gen_public(grp, d, Q, mbedtls_ctr_drbg_random, ctr_drbg);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 3,
                         "MESH: keypair gen — ecdh_gen_public failed");
   }
 
   // Export private scalar (d) — 32 bytes big-endian (NEVER printed to serial)
-  mbedtls_mpi_write_binary(&d, priv32Out, 32);
+  mbedtls_mpi_write_binary(d, priv32Out, 32);
   // Export public key X coordinate — 32 bytes (Curve25519 public key is X only)
-  mbedtls_mpi_write_binary(&Q.MBEDTLS_PRIVATE(X), pub32Out, 32);
-
-  mbedtls_ecp_group_free(&grp);
-  mbedtls_mpi_free(&d);
-  mbedtls_ecp_point_free(&Q);
+  mbedtls_mpi_write_binary(&Q.ctx.MBEDTLS_PRIVATE(X), pub32Out, 32);
 }
 
 } // namespace crypto

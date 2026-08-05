@@ -11,7 +11,9 @@ public:
   explicit GpioOutput(uint8_t pin);
   virtual ~GpioOutput() = default;
 
-  virtual bool init();
+  // Not virtual (post-Phase-G audit item I) — see GpioInput::init()'s comment;
+  // same reasoning: never dispatched through a GpioOutput* base pointer.
+  bool init();
   static bool isValidOutputPin(uint8_t pin);
   bool isInitialized() const;
 

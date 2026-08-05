@@ -2,6 +2,9 @@
 #include <mbedtls/ecdh.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
+#include <mbedtls/ecp.h>
+#include <mbedtls/bignum.h>
+#include <mbedtls/chachapoly.h>
 
 // RAII guards for mbedtls contexts used across E2ECrypto.h / MeshCrypto.h.
 //
@@ -44,6 +47,48 @@ struct CtrDrbgCtx {
   CtrDrbgCtx(const CtrDrbgCtx&) = delete;
   CtrDrbgCtx& operator=(const CtrDrbgCtx&) = delete;
   operator mbedtls_ctr_drbg_context*() { return &ctx; }
+};
+
+// Post-Phase-G audit item P: MeshCrypto.h::generateKeypair and
+// E2ECrypto.h::sealPayload/openPayload were left hand-managed when this file
+// was introduced (Phase E) — same UNIT_TEST-unwind leak class: an
+// err::fatal() between init and free throws under UNIT_TEST instead of
+// halting the device, skipping the free. These four close that gap.
+
+struct EcpGroupCtx {
+  mbedtls_ecp_group ctx;
+  EcpGroupCtx() { mbedtls_ecp_group_init(&ctx); }
+  ~EcpGroupCtx() { mbedtls_ecp_group_free(&ctx); }
+  EcpGroupCtx(const EcpGroupCtx&) = delete;
+  EcpGroupCtx& operator=(const EcpGroupCtx&) = delete;
+  operator mbedtls_ecp_group*() { return &ctx; }
+};
+
+struct MpiCtx {
+  mbedtls_mpi ctx;
+  MpiCtx() { mbedtls_mpi_init(&ctx); }
+  ~MpiCtx() { mbedtls_mpi_free(&ctx); }
+  MpiCtx(const MpiCtx&) = delete;
+  MpiCtx& operator=(const MpiCtx&) = delete;
+  operator mbedtls_mpi*() { return &ctx; }
+};
+
+struct EcpPointCtx {
+  mbedtls_ecp_point ctx;
+  EcpPointCtx() { mbedtls_ecp_point_init(&ctx); }
+  ~EcpPointCtx() { mbedtls_ecp_point_free(&ctx); }
+  EcpPointCtx(const EcpPointCtx&) = delete;
+  EcpPointCtx& operator=(const EcpPointCtx&) = delete;
+  operator mbedtls_ecp_point*() { return &ctx; }
+};
+
+struct ChaChaPolyCtx {
+  mbedtls_chachapoly_context ctx;
+  ChaChaPolyCtx() { mbedtls_chachapoly_init(&ctx); }
+  ~ChaChaPolyCtx() { mbedtls_chachapoly_free(&ctx); }
+  ChaChaPolyCtx(const ChaChaPolyCtx&) = delete;
+  ChaChaPolyCtx& operator=(const ChaChaPolyCtx&) = delete;
+  operator mbedtls_chachapoly_context*() { return &ctx; }
 };
 
 // Note: no MdCtx here. mbedtls_md_* usage in E2ECrypto.h (mbedtls_md_info_from_type)

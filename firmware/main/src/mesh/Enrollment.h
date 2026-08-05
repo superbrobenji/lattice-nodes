@@ -1,7 +1,6 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 
 namespace lattice {
@@ -9,7 +8,11 @@ namespace mesh {
 
 using EnrollmentRelayFn = void (*)(const uint8_t* mac, const uint8_t* pubKey);
 // Returns false if the peer could not be registered (e.g. registry full).
-using RegisterPeerFn = std::function<bool(const uint8_t* mac, const uint8_t* pubKey32)>;
+// Plain function pointer (post-Phase-G audit item H): the only production
+// binding (Mesh::processJoinAck) goes through a static trampoline
+// (Mesh::registerPeerWithKeyTrampoline) instead of a `[this]`-capturing
+// lambda, since a capturing lambda cannot convert to a function pointer.
+using RegisterPeerFn = bool (*)(const uint8_t* mac, const uint8_t* pubKey32);
 
 class Enrollment {
 public:
@@ -44,6 +47,14 @@ private:
 #endif
   uint8_t devicePrivateKey[32]{};
   uint8_t devicePublicKey[32]{};
+
+  // Cached mirror of the NVS "enrolled" flag (post-Phase-G audit item G).
+  // isEnrolled() used to call EepromManager::loadEnrolledFlag() -> NVS read
+  // on every call — main.cpp's loop() calls it 2-3x per iteration. Loaded
+  // once from NVS in init(), flipped true the moment processJoinAck()
+  // persists the flag; never cleared once set (matches loadEnrolledFlag()'s
+  // one-way semantics — nothing in this codebase un-enrolls a node).
+  bool _enrolled{false};
 
   // Bounded, heap-free FIFO of enrollment requests awaiting relay to the server.
   // Sized to RECV_QUEUE_SIZE (Phase G §4: 4): the master drains this queue once per
