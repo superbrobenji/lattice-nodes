@@ -6,7 +6,7 @@
 #include "src/adapter/serial/SerialAdapter.h"
 #include "src/persistence/EepromManager.h"
 #include "lib/lattice-protocol/c/opcodes.h"
-#include <esp_wifi.h>
+#include "src/network/hw_mac.h"
 #include <cstring>
 
 namespace lattice {
@@ -47,7 +47,7 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
     const uint8_t op = message.data[0];
     if (op == OP_CONFIG_SET) {
       uint8_t ownMac[6];
-      esp_wifi_get_mac(WIFI_IF_STA, ownMac);
+      lattice::hw::readOwnMac(ownMac);
       // Accept broadcast (FF:FF:FF:FF:FF:FF) or unicast to our MAC
       bool allFF = true;
       for (int i = 0; i < 6; ++i) {
@@ -71,7 +71,7 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
     }
     if (op == OP_NODE_ID_SET) {
       uint8_t ownMac[6];
-      esp_wifi_get_mac(WIFI_IF_STA, ownMac);
+      lattice::hw::readOwnMac(ownMac);
       bool allFF = true;
       for (int i = 0; i < 6; ++i) {
         if (message.data[1 + i] != 0xFF) {

@@ -7,7 +7,6 @@
 #include "src/mesh/Mesh.h"
 #include "src/adapter/AdapterFactory.h"
 #include "src/network/hw_mac.h"
-#include <esp_wifi.h>
 
 namespace lattice {
 namespace adapter {

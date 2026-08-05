@@ -1,5 +1,6 @@
 #include "Mesh.h"
 #include "src/network/MacAddress.h"
+#include "src/network/hw_mac.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
 #include "src/persistence/EepromManager.h"
@@ -67,6 +68,9 @@ void Mesh::readMacAddress() {
         lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::MESH, 1,
         (String("MESH: Failed to read MAC address: ") + esp_err_to_name(ret)).c_str());
   } else {
+    // Prime the boot-time cache (item F) so every adapter's readOwnMac() call
+    // is a memcpy instead of a repeat esp_wifi_get_mac() syscall.
+    lattice::hw::cacheDeviceMac(deviceMacAddress);
     LATTICE_LOG("MESH", "Device MAC: ", LogLevel::LOG_DEBUG);
     LATTICE_LOGLN("MESH", lattice::utils::MacAddress(deviceMacAddress).toString(),
                   LogLevel::LOG_DEBUG);
