@@ -7,7 +7,7 @@
 #include "src/persistence/EepromManager.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "src/network/hw_mac.h"
-#include <cstring>
+#include "src/network/MacEq.h"
 
 namespace lattice {
 namespace adapter {
@@ -56,7 +56,7 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
           break;
         }
       }
-      bool isTarget = allFF || (memcmp(&message.data[1], ownMac, 6) == 0);
+      bool isTarget = allFF || lattice::mac::eq(&message.data[1], ownMac);
       if (isTarget) {
         adapter_types newType =
             lattice::adapter::AdapterFactory::adapterTypeFromEEPROM(message.data[7]);
@@ -79,7 +79,7 @@ void Adapter::onMeshData(const lattice::mesh::mesh_message& message) {
           break;
         }
       }
-      bool isTarget = allFF || (memcmp(&message.data[1], ownMac, 6) == 0);
+      bool isTarget = allFF || lattice::mac::eq(&message.data[1], ownMac);
       if (isTarget) {
         uint8_t nodeId = message.data[7];
         lattice::utils::EepromManager::getInstance().saveNodeId(nodeId);

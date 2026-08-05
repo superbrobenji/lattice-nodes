@@ -5,6 +5,7 @@
 #include <esp_wifi.h>
 #include "src/mesh/Mesh.h"
 #include "src/network/hw_mac.h"
+#include "src/network/MacEq.h"
 #include <cstring>
 #include <cstdio>
 #if SIMULATE_MODE
@@ -281,7 +282,7 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
     }
   } else if (msg.message_type == MESH_TYPE_SERIAL_CMD_BROADCAST) {
     static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    bool isGenuineBroadcast = (memcmp(msg.target_mac_address, kBroadcastMac, 6) == 0);
+    bool isGenuineBroadcast = lattice::mac::eq(msg.target_mac_address, kBroadcastMac);
     if (isGenuineBroadcast) {
       LATTICE_LOGLN("Serial_Adapter", "Broadcasting adapter data to all peers",
                     LogLevel::LOG_DEBUG);
@@ -330,7 +331,7 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
           allFF = false;
           break;
         }
-      bool isTarget = allFF || (memcmp(msg.target_mac_address, myMac, 6) == 0);
+      bool isTarget = allFF || lattice::mac::eq(msg.target_mac_address, myMac);
 
       if (isTarget) {
         adapter_types newType = AdapterFactory::adapterTypeFromEEPROM(msg.data[7]);
@@ -390,7 +391,7 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
           allFF = false;
           break;
         }
-      bool isTarget = allFF || (memcmp(&msg.data[1], myMac, 6) == 0);
+      bool isTarget = allFF || lattice::mac::eq(&msg.data[1], myMac);
       if (isTarget) {
         uint8_t nodeId = msg.data[7];
         lattice::utils::EepromManager::getInstance().saveNodeId(nodeId);

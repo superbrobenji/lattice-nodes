@@ -3,6 +3,7 @@
 #include <cstring>
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 #include "../../project_config.h"
+#include "src/network/MacEq.h"
 
 namespace lattice {
 namespace mesh {
@@ -46,7 +47,7 @@ struct ReplayCache {
   inline bool isReplay(const mesh_message& msg, uint32_t nowMs) {
     // 1. Find slot for this origin.
     for (size_t i = 0; i < config::LATTICE_REPLAY_MAX_ORIGINS; ++i) {
-      if (cache[i].used && memcmp(cache[i].mac, msg.origin_mac_address, 6) == 0) {
+      if (cache[i].used && lattice::mac::eq(cache[i].mac, msg.origin_mac_address)) {
         bool newer = (msg.epoch_num > cache[i].epoch) ||
                      (msg.epoch_num == cache[i].epoch && msg.seq_num > cache[i].seq);
         if (!newer)

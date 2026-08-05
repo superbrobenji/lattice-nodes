@@ -6,6 +6,7 @@
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 #include "broadcast_mac.h"
 #include "src/adapter/Adapter.h"
+#include "src/network/MacEq.h"
 #include "config/master_pubkey_pin_wrapper.h"
 #include "project_config.h"
 #include <esp_now.h>
@@ -121,7 +122,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   // MAC is known (from enrollment or the beacon TOFU fallback), only that origin
   // may deliver a JOIN_ACK; anything else is a forgery and must not enroll us,
   // TOFU-learn, or touch peer key material.
-  if (hasMasterMac && memcmp(msg.origin_mac_address, knownMasterMac, 6) != 0) {
+  if (hasMasterMac && !lattice::mac::eq(msg.origin_mac_address, knownMasterMac)) {
     LATTICE_LOGLN("MESH", "JOIN_ACK from unexpected origin — ignoring", LogLevel::LOG_WARN);
     return;
   }

@@ -1,6 +1,7 @@
 #include "PeerRegistry.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
+#include "src/network/MacEq.h"
 #include <esp_now.h>
 #include <cstring>
 
@@ -20,7 +21,7 @@ void PeerRegistry::setDeviceMac(const uint8_t* mac) {
 
 PeerInfo* PeerRegistry::find(const uint8_t* mac) {
   for (size_t i = 0; i < peerCount; ++i) {
-    if (memcmp(peerMacs[i].mac, mac, 6) == 0) {
+    if (lattice::mac::eq(peerMacs[i].mac, mac)) {
       return &peerMacs[i];
     }
   }
@@ -29,7 +30,7 @@ PeerInfo* PeerRegistry::find(const uint8_t* mac) {
 
 const PeerInfo* PeerRegistry::find(const uint8_t* mac) const {
   for (size_t i = 0; i < peerCount; ++i) {
-    if (memcmp(peerMacs[i].mac, mac, 6) == 0) {
+    if (lattice::mac::eq(peerMacs[i].mac, mac)) {
       return &peerMacs[i];
     }
   }
@@ -45,7 +46,7 @@ bool PeerRegistry::append(const PeerInfo& peer) {
 
 void PeerRegistry::remove(const uint8_t* mac) {
   for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::utils::MacAddress(peerMacs[i].mac) == lattice::utils::MacAddress(mac)) {
+    if (lattice::mac::eq(peerMacs[i].mac, mac)) {
       peerMacs[i] = peerMacs[--peerCount];
       break;
     }
@@ -62,7 +63,7 @@ bool PeerRegistry::isPeerInRange(const uint8_t* mac) const {
 void PeerRegistry::updateLastSeen(const uint8_t* mac) {
   if (!mac)
     return;
-  if (lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(deviceMac))
+  if (lattice::mac::eq(mac, deviceMac))
     return;
   // Enrollment is the only path for new peers — do not auto-add unknown senders here.
   PeerInfo* p = find(mac);
@@ -128,7 +129,7 @@ void PeerRegistry::saveToEEPROM() {
 }
 
 void PeerRegistry::addAndPersist(const uint8_t* mac) {
-  if (find(mac) || lattice::utils::MacAddress(mac) == lattice::utils::MacAddress(deviceMac))
+  if (find(mac) || lattice::mac::eq(mac, deviceMac))
     return;
 
   if (peerCount >= MAX_PEERS) {
@@ -150,7 +151,7 @@ void PeerRegistry::addAndPersist(const uint8_t* mac) {
 
 void PeerRegistry::removeAndPersist(const uint8_t* mac) {
   for (size_t i = 0; i < peerCount; ++i) {
-    if (lattice::utils::MacAddress(peerMacs[i].mac) == lattice::utils::MacAddress(mac)) {
+    if (lattice::mac::eq(peerMacs[i].mac, mac)) {
       peerMacs[i] = peerMacs[--peerCount]; // swap with last, shrink count
       break;
     }

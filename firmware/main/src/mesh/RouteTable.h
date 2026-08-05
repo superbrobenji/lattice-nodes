@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstring>
 #include "../../project_config.h"
+#include "src/network/MacEq.h"
 
 namespace lattice {
 namespace mesh {
@@ -39,7 +40,7 @@ public:
   bool lookup(const uint8_t* nodeMac, uint8_t* pathOut, uint8_t* pathLenOut) const {
     for (size_t i = 0; i < config::LATTICE_ROUTE_TABLE_MAX; ++i) {
       const Entry& e = entries[i];
-      if (e.valid && memcmp(e.nodeMac, nodeMac, 6) == 0) {
+      if (e.valid && lattice::mac::eq(e.nodeMac, nodeMac)) {
         *pathLenOut = e.pathLen;
         if (e.pathLen)
           memcpy(pathOut, e.path, static_cast<size_t>(e.pathLen) * 6);
@@ -63,7 +64,7 @@ private:
 
   Entry* findSlot(const uint8_t* nodeMac) {
     for (size_t i = 0; i < config::LATTICE_ROUTE_TABLE_MAX; ++i)
-      if (entries[i].valid && memcmp(entries[i].nodeMac, nodeMac, 6) == 0)
+      if (entries[i].valid && lattice::mac::eq(entries[i].nodeMac, nodeMac))
         return &entries[i];
     return nullptr;
   }

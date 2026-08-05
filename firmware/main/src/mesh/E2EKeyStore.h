@@ -4,6 +4,7 @@
 #include <memory>
 #include "E2ECrypto.h"
 #include "../../project_config.h"
+#include "src/network/MacEq.h"
 
 namespace lattice {
 namespace mesh {
@@ -55,7 +56,7 @@ public:
     if (capacity_ == 0)
       return false;
     for (size_t i = 0; i < capacity_; ++i) {
-      if (entries[i].valid && memcmp(entries[i].mac, mac, 6) == 0) {
+      if (entries[i].valid && lattice::mac::eq(entries[i].mac, mac)) {
         *kUpOut = entries[i].kUp;
         *kDownOut = entries[i].kDown;
         return true;
