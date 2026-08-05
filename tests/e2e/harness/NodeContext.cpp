@@ -71,7 +71,6 @@ void swapIn(NodeContext& ctx) {
   ESP._restartRequested = ctx.espRestartRequested;
   lattice::mesh::Mesh::instance = ctx.meshInstance;
   lattice::adapter::PirAdapter::instance = ctx.pirInstance;
-  lattice::adapter::SerialAdapter::lastHealthMillis = ctx.serialAdapterLastHealthMillis;
   loadImage(lattice::utils::EepromManager::getInstance(), ctx.eepromManagerImage);
   loadImage(lattice::utils::ErrorCore::getInstance(), ctx.errorCoreImage);
 }
@@ -90,7 +89,6 @@ void swapOut(NodeContext& ctx) {
   ctx.espRestartRequested = ESP._restartRequested;
   ctx.meshInstance = lattice::mesh::Mesh::instance;
   ctx.pirInstance = lattice::adapter::PirAdapter::instance;
-  ctx.serialAdapterLastHealthMillis = lattice::adapter::SerialAdapter::lastHealthMillis;
   saveImage(lattice::utils::EepromManager::getInstance(), ctx.eepromManagerImage);
   saveImage(lattice::utils::ErrorCore::getInstance(), ctx.errorCoreImage);
 }

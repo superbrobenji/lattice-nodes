@@ -1,24 +1,20 @@
 #include "PirAdapter.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include <cstdint>
-#include <cstring>
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/mesh/Mesh.h"
-#include "src/adapter/AdapterFactory.h"
-#include "src/network/hw_mac.h"
 
 namespace lattice {
 namespace adapter {
 
 using namespace lattice::utils;
-using lattice::hw::readOwnMac;
 
 PirAdapter* PirAdapter::instance = nullptr;
 
 PirAdapter::PirAdapter(uint8_t pin)
     : Adapter(pin), _pir(pin), _lastTrigger(0), _state(PirState::IDLE), _interruptEnabled(false),
-      _initialized(false), _lastHealthMillis(0) {
+      _initialized(false) {
   _adapterType = adapter_types::PIR_ADAPTER;
 }
 
@@ -66,20 +62,17 @@ void PirAdapter::detectMotion() {
   _pir.detachInterrupt();
 }
 
+// Phase H2 item W: byte layout now built once, in the shared base
+// Adapter::buildHealthFrame(). PIR keeps its own send path (routes through
+// the mesh via sendDataThroughMesh to reach the master) since — unlike
+// SerialAdapter, which has a direct serial link — it has no self-originated
+// transmit path.
 void PirAdapter::sendNodeHealth() {
+  if (!instance)
+    return;
   uint8_t data[64] = {0};
-  data[0] = OP_NODE_HEALTH;
-  data[1] = AdapterFactory::adapterTypeToEEPROM(adapter_types::PIR_ADAPTER);
-  uint8_t mac[6];
-  readOwnMac(mac);
-  memcpy(&data[2], mac, 6);
-  uint32_t uptimeSec = millis() / 1000;
-  data[8] = static_cast<uint8_t>(uptimeSec & 0xFF);
-  data[9] = static_cast<uint8_t>((uptimeSec >> 8) & 0xFF);
-  data[10] = static_cast<uint8_t>((uptimeSec >> 16) & 0xFF);
-  data[11] = static_cast<uint8_t>((uptimeSec >> 24) & 0xFF);
-  if (instance)
-    instance->sendDataThroughMesh(adapter_types::SERIAL_ADAPTER, data);
+  instance->buildHealthFrame(OP_NODE_HEALTH, data, sizeof(data));
+  instance->sendDataThroughMesh(adapter_types::SERIAL_ADAPTER, data);
 }
 
 void PirAdapter::loop() {
@@ -114,8 +107,8 @@ void PirAdapter::loop() {
     _interruptEnabled = true;
   }
 
-  if (now - _lastHealthMillis >= lattice::config::HEALTH_REPORT_INTERVAL_MS) {
-    _lastHealthMillis = now;
+  // Phase H2 item W: interval tick lives in the shared Adapter base.
+  if (healthTickDue(now)) {
     sendNodeHealth();
   }
 }
