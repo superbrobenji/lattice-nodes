@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include <mbedtls/md.h>
+#include <sodium.h>
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 
 // Route-report chain MAC (Phase C, spec §4 / issue #44, header-only, mirrors
@@ -50,6 +50,10 @@ inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
 // mac_i = HMAC-SHA256(secret, hop_context_i || mac_{i-1})[:8]
 // For the originating hop, prev_mac must be zeroed 8B.
 // Tiger-Style: stack-only, fixed-size buffers, no heap, no dynamic length.
+//
+// Phase I Task 2: libsodium — was mbedtls_md_hmac(MBEDTLS_MD_SHA256, ...).
+// crypto_auth_hmacsha256() takes a fixed 32-byte key (matches `secret`'s width
+// exactly), so the one-shot call maps directly with no state-variant needed.
 inline void chainStep(const uint8_t secret[32], const uint8_t hop_ctx[HOP_CTX_LEN],
                       const uint8_t prev_mac[AUTH_PATH_LEN], uint8_t out_mac[AUTH_PATH_LEN]) {
   uint8_t input[HOP_CTX_LEN + AUTH_PATH_LEN];
@@ -57,8 +61,7 @@ inline void chainStep(const uint8_t secret[32], const uint8_t hop_ctx[HOP_CTX_LE
   memcpy(input + HOP_CTX_LEN, prev_mac, AUTH_PATH_LEN);
 
   uint8_t full[32]; // SHA-256 output
-  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-  mbedtls_md_hmac(info, secret, 32, input, sizeof(input), full);
+  crypto_auth_hmacsha256(full, input, sizeof(input), secret);
   memcpy(out_mac, full, AUTH_PATH_LEN); // truncate to first 8 bytes
 }
 

@@ -30,8 +30,10 @@ Enrollment::Enrollment() {
   memset(knownMasterMacSecondary, 0xFF, 6);
 }
 
-// NOTE: Enrollment::init() and Enrollment::enrollPeer() are mbedtls-heavy.
-// Host test builds compile them for real against a host-built mbedtls (see tests/CMakeLists.txt).
+// NOTE: Enrollment::init() and Enrollment::enrollPeer() are crypto-heavy (X25519
+// keygen via MeshCrypto.h::generateKeypair). Host test builds compile them for real
+// against a host-installed libsodium (Phase I Task 2 — was host-built mbedtls; see
+// tests/CMakeLists.txt).
 
 void Enrollment::init() {
   if (lattice::eeprom::loadKeypair(devicePrivateKey, devicePublicKey)) {
