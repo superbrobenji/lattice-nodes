@@ -110,6 +110,17 @@ CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
 CONFIG_ESP_WIFI_MBEDTLS_CRYPTO=n
 ```
 
+Additionally (attempt-3 amendment), replace the line `CONFIG_MBEDTLS_AES_C=n` with:
+
+```
+# AES_C must stay =y: ESP-IDF's mbedtls port hardcodes MBEDTLS_CTR_DRBG_C
+# (not Kconfig-toggleable), and CTR_DRBG requires AES_C — the old =n here
+# was always a dead letter (force-selected =y by esp_wifi chains until this
+# follow-up; consistency-error in check_config.h if actually applied).
+# GCM/CCM/HARDWARE_AES below remain real, effective trims.
+CONFIG_MBEDTLS_AES_C=y
+```
+
 - [ ] **Step 2: Clean build** (same sequence as Task 1 Step 2). Expected: `Project build complete.` If it fails inside `wpa_supplicant` (internal-crypto fallback never built here): report BLOCKED with the exact first error — containment is dropping this flag, controller decides.
 
 - [ ] **Step 3: Verify resolved config.**
