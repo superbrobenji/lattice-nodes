@@ -66,3 +66,11 @@ CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
 # re-enable them at Task 3 (which replaces WiFi.mode with raw esp_netif_new).
 CONFIG_LWIP_TCP_ENABLED=n
 CONFIG_LWIP_UDP_ENABLED=n
+
+# Phase I Task 2 follow-up: disable WiFi Enterprise to break the
+# esp_wifi -> MBEDTLS_TLS_ENABLED force-select chain (no AP association in
+# this firmware; pure ESP-NOW). LIBSODIUM_USE_MBEDTLS_SHA=y kept at default
+# — measured: routing libsodium SHA through mbedtls's HW-accelerated SHA256
+# is ~3KB smaller than libsodium's portable SHA256 impl (mbedtls is linked
+# anyway for esp_wifi's WPA/PMK path).
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
