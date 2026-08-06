@@ -55,7 +55,7 @@
 ### Task 6 (esp_timer + JJ + II + NN)
 - **Modify:** all files under `firmware/main/src/` calling `millis()` — ~100 sites, replace with `esp_timer_get_time() / 1000ULL` (or direct microseconds where precision helps).
 - **Modify:** field type migrations `uint32_t lastSeenMillis` → `uint64_t lastSeenMs` across `mesh/NeighborTable.h`, `mesh/PeerRegistry.h`, `mesh/Enrollment.h`, `mesh/RouteTable.h`, `mesh/ReplayCache.h`, `mesh/Mesh.h`, `adapter/Adapter.h`, `app/DisplayManager.h`, `hardware/input/Button.h`.
-- **Modify:** `firmware/main/src/mesh/PeerRegistry.cpp` — `loadFromEEPROM`/`saveToEEPROM` stream-per-record via `nvs_get_blob` offset arg.
+- **Modify:** `firmware/main/src/mesh/PeerRegistry.cpp` — `loadFromEEPROM`/`saveToEEPROM` migrated to per-key blob naming (`peer0`, `peer1`, ...). NOTE: real `nvs_get_blob` has NO offset/partial-read mode (verified against IDF v5.5.1 `nvs.h` by Task 4 reviewer); the per-key approach is the only path to removing the 380 B stack alloc. **Changes on-flash NVS layout — requires device reflash** (accepted per project posture).
 - **Modify:** `firmware/main/main.cpp` — add `uxTaskGetStackHighWaterMark` diagnostic block for II sizing.
 - **Modify:** `firmware/sdkconfig.defaults` — flip `CONFIG_ARDUINO_LOOP_STACK_SIZE=4096` + `CONFIG_LIBC_NEWLIB_NANO_FORMAT=y` after specifier sweep.
 
@@ -616,7 +616,9 @@ Any that reference migrated 64-bit fields → change specifier to `%llu` / `%lld
 
 Host tests must still pass — mock `esp_timer_get_time()` in `tests/mocks/time_mock.cpp` if not already. Should be similar to existing `millis` mock.
 
-- [ ] **Step 5: JJ stream-per-record PeerRegistry**
+- [ ] **Step 5: JJ per-key PeerRegistry (drop stream-into-single-blob path)**
+
+**Constraint (verified by Task 4 reviewer against real `nvs.h` v5.5.1):** `nvs_get_blob` has no offset/partial-read mode — it is whole-blob only. The plan's earlier "stream via offset" phrasing was incorrect. Only viable path is per-key naming.
 
 In `PeerRegistry::loadFromEEPROM`:
 ```cpp
@@ -625,7 +627,7 @@ uint8_t blob[PEER_LIST_SIZE];
 _prefs.getBytes("peers", blob, sizeof(blob));
 for (int i = 0; i < NUM_PEERS; i++) memcpy(&peers[i], blob + i*sizeof(PeerInfo), sizeof(PeerInfo));
 
-// AFTER: per-record via nvs_get_blob offset OR per-key naming
+// AFTER: per-key blob naming — no stack alloc for the aggregate
 char key[16];
 for (int i = 0; i < NUM_PEERS; i++) {
   snprintf(key, sizeof(key), "peer%d", i);
@@ -635,7 +637,11 @@ for (int i = 0; i < NUM_PEERS; i++) {
 }
 ```
 
-Same for save. Note: this migrates on-flash key layout ("peers" blob → "peer0"..."peer9" keys). REQUIRES device reflash — no backcompat per project posture.
+Same for save via `nvs_set_blob(h, "peerN", &peers[i], sizeof(PeerInfo))`.
+
+**Cross-cutting cost:** this changes NVS on-flash layout (`"peers"` single blob → `"peer0".."peerN-1"` keys). Task 4's contract was "preserve on-flash NVS layout, no reflash". Task 6 breaks that contract for the PeerRegistry key only. **Requires device reflash on Phase I close** (accepted per project posture — reflash-on-major-release). Document in Phase I release notes.
+
+Alternative if reflash is unacceptable: skip JJ, keep the 380 B stack blob. 380 B is transient (only during load/save, not persistent). Weigh against on-flash schema churn.
 
 - [ ] **Step 6: II stack high-water measure**
 
