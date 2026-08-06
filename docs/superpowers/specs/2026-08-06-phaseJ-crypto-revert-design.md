@@ -35,16 +35,19 @@ namespace lattice { namespace crypto {
   void secure_zero(void* buf, size_t len);
 
   // X25519. BE in/out per storage/wire convention; conversion internal.
-  void x25519_keygen(uint8_t priv32[32], uint8_t pub32[32]);
+  bool x25519_keygen(uint8_t priv32[32], uint8_t pub32[32]);
   bool x25519_shared(const uint8_t priv32[32], const uint8_t peerPub32[32],
                      uint8_t secret32[32]);
 
-  // HKDF-SHA256, one-shot per label (mbedtls_hkdf; salt NULL/0, matches old shape).
-  bool hkdf_sha256(const uint8_t secret32[32], const char* label, size_t labelLen,
-                   uint8_t out32[32]);
+  // HKDF-SHA256 (RFC 5869), one-shot. Generalized passthrough signature so the
+  // RFC test vectors exercise the wrapper directly; deriveE2EKeys() calls it
+  // in the old narrow shape (salt NULL/0, ikm=secret32, one call per label).
+  bool hkdf_sha256(const uint8_t* ikm, size_t ikmLen, const uint8_t* salt, size_t saltLen,
+                   const uint8_t* info, size_t infoLen, uint8_t* out, size_t outLen);
 
-  // HMAC-SHA256, fixed 32-byte key.
-  void hmac_sha256(const uint8_t key32[32], const uint8_t* data, size_t len,
+  // HMAC-SHA256, one-shot. Generalized key length for the same reason;
+  // RouteMac::chainStep always passes 32.
+  bool hmac_sha256(const uint8_t* key, size_t keyLen, const uint8_t* data, size_t len,
                    uint8_t out32[32]);
 
   // ChaCha20-Poly1305 (IETF), detached tag, in-place buf. mbedtls_chachapoly_*.
@@ -80,20 +83,20 @@ Wrapper returns `bool` (or `void` where the primitive cannot fail meaningfully) 
 
 ## Test changes
 
-- `tests/unit/test_libsodium_kat.cpp` → `tests/unit/test_mbedtls_kat.cpp`. Same three RFC vectors (RFC 8439 §2.8.2 ChaCha20-Poly1305, full 114-byte ciphertext + tag; RFC 7748 §5.2 Test 1 X25519; RFC 5869 Appendix A.1 HKDF-SHA256), exercised **through the `lattice::crypto` wrapper**, not raw mbedtls. The RFC 7748 vectors are LE and the wrapper API is BE, so the test feeds byte-reversed vectors — the conversion itself is under test.
+- `tests/unit/test_libsodium_kat.cpp` → `tests/unit/test_mbedtls_kat.cpp`. Five KATs, exercised **through the `lattice::crypto` wrapper**, not raw mbedtls: the same three RFC vectors as before (RFC 8439 §2.8.2 ChaCha20-Poly1305, full 114-byte ciphertext + tag; RFC 7748 §5.2 Test 1 X25519; RFC 5869 Appendix A.1 HKDF-SHA256) plus HMAC-SHA256 RFC 4231 Test Case 2 (the wrapper's generalized signature makes it directly testable) and a keygen↔shared round-trip in the BE convention. The RFC 7748 vectors are LE and the wrapper API is BE, so the test feeds byte-reversed vectors — the conversion itself is under test.
 - `MasterKeypairFixture.h` e2e scenarios unchanged — a real pre-generated BE keypair; the trap that caught Task 2's byte-order bug remains the compatibility gate for this revert.
 - `tests/unit/test_e2e_crypto.cpp` `E2EAead.Rfc8439KnownAnswer`: direct libsodium call → `crypto::aead_seal`.
 - `firmware/main/main.cpp`: delete the `sodium_init()` block and `<sodium.h>` include (mbedtls needs no global init). `tests/e2e/harness/NodeContext.cpp`: same.
 - `tests/CMakeLists.txt`: replace the libsodium detect/FetchContent block with an mbedtls FetchContent pinned to the 3.6.x line ESP-IDF 5.5.1 bundles (pre-Task-2 block at `a6f8070` is the reference). Link targets `sodium` → `mbedcrypto`.
 - Host mocks: add `esp_fill_random` to the existing esp_system mock if absent (`std::random_device`-backed).
 - Note: `tests/mocks/libsodium.h` (named in the planning memory) never existed — host tests link real libsodium today and will link real mbedtls after.
-- Gate: full suite green, 296/296 (3 KAT tests renamed, count unchanged).
+- Gate: full suite green, 298/298 (293 pre-existing + 5 wrapper KATs; the 3 libsodium KATs retire).
 
 ## Measurement + success criteria
 
 1. Clean `idf.py build` + `idf.py size` before/after, baseline = `main` tip `42df61d`. Build with bounded parallelism (`-j2`; full-parallel OOMs this machine).
 2. **Net flash reduction ≥ 15 KB** (expected ~22 KB from dead libsodium, ± mbedtls ECP/chachapoly re-add, KK trim offsetting).
-3. 296/296 host tests green; e2e fixture scenarios prove key-compat.
+3. 298/298 host tests green; e2e fixture scenarios prove key-compat.
 4. `grep -rin "sodium" firmware/ tests/ --exclude-dir=build --exclude-dir=managed_components` returns nothing (comments included).
 5. Single PR `feat/phaseJ-crypto-revert` → `main`, CI green.
 
