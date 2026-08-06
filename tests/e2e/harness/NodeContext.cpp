@@ -1,6 +1,7 @@
 #include "NodeContext.h"
 #include <cstring>
 #include <stdexcept>
+#include <sodium.h>
 #include "Arduino.h"
 #include "esp_wifi_mock.h"
 #include "src/mesh/Mesh.h"
@@ -11,8 +12,7 @@
 
 namespace sim {
 
-template <typename T>
-static void loadImage(T& obj, std::vector<uint8_t>& image) {
+template <typename T> static void loadImage(T& obj, std::vector<uint8_t>& image) {
   // A fresh NodeContext's image fields are seeded from the pristine snapshot in
   // its constructor (see initPristineImages below), so by the time swapIn() runs
   // the size should always match sizeof(T) exactly. Any mismatch — including an
@@ -26,8 +26,7 @@ static void loadImage(T& obj, std::vector<uint8_t>& image) {
   }
   memcpy(reinterpret_cast<void*>(&obj), image.data(), sizeof(T));
 }
-template <typename T>
-static void saveImage(T& obj, std::vector<uint8_t>& image) {
+template <typename T> static void saveImage(T& obj, std::vector<uint8_t>& image) {
   image.resize(sizeof(T));
   memcpy(image.data(), reinterpret_cast<void*>(&obj), sizeof(T));
 }
@@ -53,6 +52,14 @@ static void initPristineImages(std::vector<uint8_t>& em, std::vector<uint8_t>& e
 }
 
 NodeContext::NodeContext() {
+  // Phase I Task 2: libsodium — the SIMULATE_MODE binary never runs
+  // firmware/main/main.cpp's setup() (where real firmware calls sodium_init()
+  // before mesh.init()), so the harness needs its own equivalent boot hook.
+  // sodium_init() is safe to call repeatedly (one context per simulated
+  // node) — it's a documented no-op after the first successful call.
+  if (sodium_init() < 0) {
+    throw std::runtime_error("NodeContext: sodium_init failed");
+  }
   eepromData.fill(0xFF);
   initPristineImages(eepromManagerImage, errorCoreImage);
 }

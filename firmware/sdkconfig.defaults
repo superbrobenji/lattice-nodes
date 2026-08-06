@@ -18,26 +18,24 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Bluetooth: disabled — unused, saves ~10KB flash + heap
 CONFIG_BT_ENABLED=n
 
-# mbedtls: enable ChaCha20-Poly1305 (E2E AEAD, spec §1)
-# All three required — CHACHAPOLY depends on the other two
-CONFIG_MBEDTLS_CHACHA20_C=y
-CONFIG_MBEDTLS_POLY1305_C=y
-CONFIG_MBEDTLS_CHACHAPOLY_C=y
-CONFIG_MBEDTLS_HARDWARE_SHA=y
-
-# mbedtls: trim AES/GCM/CCM — E2E AEAD is ChaCha20-Poly1305 only (Phase A), TLS is off
-# (CONFIG_MBEDTLS_TLS_ENABLED=n below), so no RSA/TLS session code needs AES. (Phase G §3,
-# issue #52 lever 3.) CONFIG_MBEDTLS_HARDWARE_AES depends on MBEDTLS_AES_C, so it must go
-# off with it — leaving it =y here would be a dangling/inconsistent default.
+# Phase I Task 2 (item GG): mbedtls fully dropped from E2E crypto — E2ECrypto.h,
+# MeshCrypto.h, and RouteMac.h now call libsodium exclusively (see
+# firmware/main/idf_component.yml's espressif/libsodium dependency), so the
+# CHACHA20/POLY1305/CHACHAPOLY/HKDF/HARDWARE_SHA tuning that only existed for
+# those call sites is gone. CONFIG_MBEDTLS_AES_C/GCM_C/CCM_C/HARDWARE_AES/
+# TLS_ENABLED below are a SEPARATE, pre-existing Phase G/Phase A size trim
+# (this node has no TLS/HTTPS use at all, independent of which library E2E
+# crypto happens to call) — those stay =n. Measured: dropping them too (i.e.
+# deleting this whole block, matching the Task 2 brief's Step 13 literally)
+# silently re-enables mbedTLS's TLS stack + AES/GCM/CCM by falling back to
+# ESP-IDF's default (=y for all five), a +82KB regression relative to the
+# pre-Task-2 baseline (measured via a real mbedtls-linked build of this exact
+# tree) that has nothing to do with this task's E2E-crypto swap — see task
+# report.
 CONFIG_MBEDTLS_AES_C=n
 CONFIG_MBEDTLS_GCM_C=n
 CONFIG_MBEDTLS_CCM_C=n
 CONFIG_MBEDTLS_HARDWARE_AES=n
-
-# mbedtls: HKDF used by E2ECrypto::deriveE2EKeys to expand ECDH secret
-CONFIG_MBEDTLS_HKDF_C=y
-
-# mbedtls: trim unused suites (node has no TLS — keep X25519 + chachapoly + SHA-256)
 CONFIG_MBEDTLS_TLS_ENABLED=n
 
 # ESP-NOW and WiFi

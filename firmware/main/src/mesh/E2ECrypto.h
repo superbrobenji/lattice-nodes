@@ -1,73 +1,73 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include <mbedtls/ecdh.h>
-#include <mbedtls/entropy.h>
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/hkdf.h>
-#include <mbedtls/md.h>
-#include <mbedtls/chachapoly.h>
+#include <sodium.h>
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
-#include "MbedtlsGuard.h"
 
 namespace lattice {
 namespace mesh {
 namespace crypto {
 
-// X25519 ECDH shared secret. Same mbedtls flow as derivePeerLMK (MeshCrypto.h),
+// Byte-order shim between this codebase's established Curve25519 key
+// storage/wire convention and libsodium's native one.
+//
+// Pre-Task-2, generateKeypair() (MeshCrypto.h) and computeSharedSecret()
+// (below) moved scalars and point coordinates in and out of mbedtls's
+// generic bignum type via mbedtls_mpi_write_binary()/mbedtls_mpi_read_binary()
+// directly (bypassing mbedtls's curve-aware helpers) — both serialize as
+// BIG-ENDIAN. libsodium's crypto_scalarmult_curve25519{,_base}() take/return
+// the RFC 7748-native LITTLE-ENDIAN 32-byte encoding. Both compute the same
+// curve, but every already-generated key — device keypairs already persisted
+// in EEPROM/NVS on shipped nodes, the e2e master pin fixture
+// (MasterKeypairFixture.h), any operator-pinned master_pubkey_pin.h — is
+// stored, AND transmitted on the wire in mesh_message.enrollment_public_key /
+// secondary_public_key, in that big-endian order. Reversing at the libsodium
+// call boundary keeps that wire/storage convention byte-for-byte unchanged.
+//
+// Verified against a real mbedtls 3.6 build (see task report): for a real,
+// previously mbedtls-generated keypair, reverse(mbedtls_priv) fed to
+// crypto_scalarmult_curve25519_base reproduces exactly reverse(mbedtls_pub);
+// and reverse(mbedtls_priv) + reverse(peer_mbedtls_pub) fed to
+// crypto_scalarmult_curve25519 reproduces mbedtls_ecdh_calc_secret's shared
+// secret bytes directly, with NO reversal needed on that output — mbedtls's
+// Montgomery-curve-aware calc_secret already emits the RFC 7748-native
+// little-endian form, unlike the generic-MPI-based key read/write it doesn't
+// go through.
+inline void reverse32(const uint8_t* in, uint8_t* out) {
+  for (int i = 0; i < 32; ++i) {
+    out[i] = in[31 - i];
+  }
+}
+
+// X25519 ECDH shared secret (Phase I Task 2: libsodium — was mbedtls ECDH,
+// see MeshCrypto.h). Same raw-Curve25519 flow as derivePeerLMK used to be,
 // without the LMK KDF step. err::fatal digits 20-25 (LMK path uses 10-19).
+//
+// ownPrivateKey32/peerPublicKey32 arrive in this codebase's big-endian
+// storage/wire convention (see reverse32() above) — reversed into libsodium's
+// native little-endian form before the scalarmult call. The output secret is
+// used verbatim (no reversal) — see reverse32()'s comment for why.
+//
+// crypto_scalarmult_curve25519() internally applies the standard X25519
+// clamp before the ladder — idempotent whether the (now-reversed) key came
+// from a freshly generated keypair (Task 2) or a reversed already-clamped
+// mbedtls-era key (see MeshCrypto.h::generateKeypair). It also rejects
+// (returns non-zero, all-zero output) small-order/degenerate peer public
+// keys — a safety property mbedtls's raw ECDH path did not enforce, but one
+// that never triggers for legitimate peer keys, so it does not change
+// on-wire behavior.
 inline void computeSharedSecret(const uint8_t* ownPrivateKey32, const uint8_t* peerPublicKey32,
                                 uint8_t* secret32Out) {
-  lattice::mesh::mbedtls_guard::EcdhCtx ecdh;
-  lattice::mesh::mbedtls_guard::EntropyCtx entropy;
-  lattice::mesh::mbedtls_guard::CtrDrbgCtx ctr_drbg;
-
-  const char* pers = "lattice_ecdh_e2e";
-  int ret = mbedtls_ctr_drbg_seed(ctr_drbg, mbedtls_entropy_func, entropy,
-                                  reinterpret_cast<const uint8_t*>(pers), strlen(pers));
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 20,
-                        "MESH: computeSharedSecret — ctr_drbg_seed failed");
-  }
-  ret = mbedtls_ecdh_setup(ecdh, MBEDTLS_ECP_DP_CURVE25519);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 21,
-                        "MESH: computeSharedSecret — ecdh_setup failed");
-  }
-  ret = mbedtls_mpi_read_binary(
-      &ecdh.ctx.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(d), ownPrivateKey32,
-      32);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 22,
-                        "MESH: computeSharedSecret — mpi_read_binary (private key) failed");
-  }
-  ret = mbedtls_mpi_read_binary(
-      &ecdh.ctx.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(
-          X),
-      peerPublicKey32, 32);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 23,
-                        "MESH: computeSharedSecret — mpi_read_binary (peer public key) failed");
-  }
-  ret = mbedtls_mpi_lset(
-      &ecdh.ctx.MBEDTLS_PRIVATE(ctx).MBEDTLS_PRIVATE(mbed_ecdh).MBEDTLS_PRIVATE(Qp).MBEDTLS_PRIVATE(
-          Z),
-      1);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 24,
-                        "MESH: computeSharedSecret — mpi_lset (Qp.Z) failed");
-  }
-  size_t outLen = 0;
-  ret = mbedtls_ecdh_calc_secret(ecdh, &outLen, secret32Out, 32, mbedtls_ctr_drbg_random, ctr_drbg);
+  uint8_t privLE[32], peerPubLE[32];
+  reverse32(ownPrivateKey32, privLE);
+  reverse32(peerPublicKey32, peerPubLE);
+  int ret = crypto_scalarmult_curve25519(secret32Out, privLE, peerPubLE);
+  sodium_memzero(privLE, sizeof(privLE));
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 25,
-                        "MESH: computeSharedSecret — ecdh_calc_secret failed");
-  }
-  if (outLen != 32) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 27,
-                        "MESH: computeSharedSecret — unexpected shared-secret length");
+                        "MESH: computeSharedSecret — scalarmult failed");
   }
 }
 
@@ -77,15 +77,25 @@ inline void deriveE2EKeys(const uint8_t* ownPrivateKey32, const uint8_t* peerPub
                           uint8_t* kUp32Out, uint8_t* kDown32Out) {
   uint8_t secret[32];
   computeSharedSecret(ownPrivateKey32, peerPublicKey32, secret);
-  const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-  static const uint8_t upLabel[] = "lattice-e2e-up-v3";
-  static const uint8_t downLabel[] = "lattice-e2e-down-v3";
-  int ret = mbedtls_hkdf(md, nullptr, 0, secret, 32, upLabel, sizeof(upLabel) - 1, kUp32Out, 32);
+
+  static const char upLabel[] = "lattice-e2e-up-v3";
+  static const char downLabel[] = "lattice-e2e-down-v3";
+
+  // HKDF-Extract-then-Expand (RFC 5869), same as the mbedtls_hkdf() call this
+  // replaces: salt = NULL/0 both times, so the PRK is identical whether
+  // extracted once (here) or twice (old code called mbedtls_hkdf() — which
+  // extracts internally — once per label). Expanding the same PRK against
+  // each label byte-for-byte reproduces the old per-label output.
+  uint8_t prk[crypto_kdf_hkdf_sha256_KEYBYTES];
+  int ret = crypto_kdf_hkdf_sha256_extract(prk, nullptr, 0, secret, sizeof(secret));
   if (ret == 0) {
-    ret =
-        mbedtls_hkdf(md, nullptr, 0, secret, 32, downLabel, sizeof(downLabel) - 1, kDown32Out, 32);
+    ret = crypto_kdf_hkdf_sha256_expand(kUp32Out, 32, upLabel, sizeof(upLabel) - 1, prk);
   }
-  memset(secret, 0, sizeof(secret));
+  if (ret == 0) {
+    ret = crypto_kdf_hkdf_sha256_expand(kDown32Out, 32, downLabel, sizeof(downLabel) - 1, prk);
+  }
+  sodium_memzero(secret, sizeof(secret));
+  sodium_memzero(prk, sizeof(prk));
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 26,
                         "MESH: deriveE2EKeys — hkdf failed");
@@ -127,32 +137,29 @@ inline void buildAad(const mesh_message& msg, uint8_t aad[E2E_AAD_LEN]) {
   aad[23] = static_cast<uint8_t>(msg.seq_num >> 8);
 }
 
-// Encrypts msg.data in place and writes msg.auth_tag. Returns false on mbedtls error.
+// Encrypts msg.data in place and writes msg.auth_tag. Returns false on libsodium error.
+// msg.data and msg.auth_tag are not adjacent in mesh_message (route_len/route_path sit
+// between them), so the _detached variant is used — it writes ciphertext and tag to
+// independently-addressed buffers, matching mbedtls_chachapoly_encrypt_and_tag's shape.
 inline bool sealPayload(const uint8_t* key32, mesh_message& msg) {
   uint8_t nonce[E2E_NONCE_LEN], aad[E2E_AAD_LEN];
   buildNonce(msg, nonce);
   buildAad(msg, aad);
-  lattice::mesh::mbedtls_guard::ChaChaPolyCtx ctx; // item P
-  int ret = mbedtls_chachapoly_setkey(ctx, key32);
-  if (ret == 0) {
-    ret = mbedtls_chachapoly_encrypt_and_tag(ctx, sizeof(msg.data), nonce, aad, E2E_AAD_LEN,
-                                             msg.data, msg.data, msg.auth_tag);
-  }
-  return ret == 0;
+  unsigned long long tagLen = 0;
+  int ret = crypto_aead_chacha20poly1305_ietf_encrypt_detached(msg.data, msg.auth_tag, &tagLen,
+                                                               msg.data, sizeof(msg.data), aad,
+                                                               E2E_AAD_LEN, nullptr, nonce, key32);
+  return ret == 0 && tagLen == sizeof(msg.auth_tag);
 }
 
 // Decrypts msg.data in place, verifying msg.auth_tag. Returns false on tag mismatch
-// or mbedtls error — callers drop the frame quietly (finding-#9 pattern).
+// or libsodium error — callers drop the frame quietly (finding-#9 pattern).
 inline bool openPayload(const uint8_t* key32, mesh_message& msg) {
   uint8_t nonce[E2E_NONCE_LEN], aad[E2E_AAD_LEN];
   buildNonce(msg, nonce);
   buildAad(msg, aad);
-  lattice::mesh::mbedtls_guard::ChaChaPolyCtx ctx; // item P
-  int ret = mbedtls_chachapoly_setkey(ctx, key32);
-  if (ret == 0) {
-    ret = mbedtls_chachapoly_auth_decrypt(ctx, sizeof(msg.data), nonce, aad, E2E_AAD_LEN,
-                                          msg.auth_tag, msg.data, msg.data);
-  }
+  int ret = crypto_aead_chacha20poly1305_ietf_decrypt_detached(
+      msg.data, nullptr, msg.data, sizeof(msg.data), msg.auth_tag, aad, E2E_AAD_LEN, nonce, key32);
   return ret == 0;
 }
 

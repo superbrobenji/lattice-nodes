@@ -1,14 +1,11 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include <mbedtls/ecdh.h>
-#include <mbedtls/entropy.h>
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/ecp.h>
+#include <sodium.h>
 #include <esp_now.h>
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
-#include "MbedtlsGuard.h"
+#include "E2ECrypto.h" // for crypto::reverse32() — see its definition for why
 
 namespace lattice {
 namespace mesh {
@@ -30,43 +27,28 @@ inline void registerPeerWithEspNow(const uint8_t mac[6]) {
 
 // Extract ONLY the key generation branch from Mesh::loadOrGenerateKeypair().
 // The load-from-EEPROM branch and EEPROM save remain in loadOrGenerateKeypair().
+//
+// Phase I Task 2: libsodium — was mbedtls low-level ECP keygen. randombytes_buf()
+// draws the raw 32-byte scalar (seeded via sodium_init(), see main.cpp) in
+// libsodium's native little-endian convention; the X25519 clamp mbedtls used to
+// bake into the stored private key is instead applied internally by
+// crypto_scalarmult_curve25519{,_base}() on every use (E2ECrypto.h). Both priv
+// and pub are then byte-reversed into the legacy big-endian storage/wire
+// convention (see E2ECrypto.h::reverse32()'s comment) before being written
+// out, so on-device keys generated before this swap — and this device's own
+// future reloads of what it just generated — keep interpreting the same
+// bytes the same way.
 inline void generateKeypair(uint8_t* priv32Out, uint8_t* pub32Out) {
-  // Use the low-level ECP API directly to avoid the opaque ecdh context internals
-  // that are private in the mbedTLS 3.x non-legacy context.
-  // RAII guards (item P): every err::fatal() below throws under UNIT_TEST
-  // instead of halting the device, unwinding past whatever manual _free()
-  // calls would otherwise sit at the end of this function.
-  lattice::mesh::mbedtls_guard::EcpGroupCtx grp;
-  lattice::mesh::mbedtls_guard::MpiCtx d;
-  lattice::mesh::mbedtls_guard::EcpPointCtx Q;
-  lattice::mesh::mbedtls_guard::EntropyCtx entropy;
-  lattice::mesh::mbedtls_guard::CtrDrbgCtx ctr_drbg;
-
-  const char* pers = "lattice_keygen";
-  int ret;
-  ret = mbedtls_ctr_drbg_seed(ctr_drbg, mbedtls_entropy_func, entropy,
-                              reinterpret_cast<const uint8_t*>(pers), strlen(pers));
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 1,
-                        "MESH: keypair gen — entropy seed failed");
-  }
-
-  ret = mbedtls_ecp_group_load(grp, MBEDTLS_ECP_DP_CURVE25519);
-  if (ret != 0) {
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 2,
-                        "MESH: keypair gen — ecp_group_load failed");
-  }
-
-  ret = mbedtls_ecdh_gen_public(grp, d, Q, mbedtls_ctr_drbg_random, ctr_drbg);
+  uint8_t privLE[32], pubLE[32];
+  randombytes_buf(privLE, 32);
+  int ret = crypto_scalarmult_curve25519_base(pubLE, privLE);
   if (ret != 0) {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::MESH, 3,
-                        "MESH: keypair gen — ecdh_gen_public failed");
+                        "MESH: keypair gen — scalarmult_base failed");
   }
-
-  // Export private scalar (d) — 32 bytes big-endian (NEVER printed to serial)
-  mbedtls_mpi_write_binary(d, priv32Out, 32);
-  // Export public key X coordinate — 32 bytes (Curve25519 public key is X only)
-  mbedtls_mpi_write_binary(&Q.ctx.MBEDTLS_PRIVATE(X), pub32Out, 32);
+  reverse32(privLE, priv32Out);
+  reverse32(pubLE, pub32Out);
+  sodium_memzero(privLE, sizeof(privLE));
 }
 
 } // namespace crypto

@@ -15,6 +15,7 @@
 #include <esp_wifi.h>
 #include <memory>
 #include <esp_task_wdt.h>
+#include <sodium.h>
 
 // Forward declarations (Arduino .ino auto-generates these)
 void setup();
@@ -153,6 +154,18 @@ void setup() {
                           lattice::core::ModuleDigit::CORE,
                           2,
                           "EEPROM Manager init failed!");
+  }
+
+  // Phase I Task 2: libsodium — must run before any crypto:: call (E2ECrypto.h,
+  // MeshCrypto.h, RouteMac.h). mesh.init() below reaches keypair generation via
+  // Enrollment::init() on an unenrolled device, so this has to land before that
+  // call, not merely "somewhere in setup()".
+  if (sodium_init() < 0) {
+    Logger::logln("MAIN", "FATAL: libsodium init failed!", LogLevel::LOG_ERROR);
+    lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE,
+                          lattice::core::ModuleDigit::CORE,
+                          5,
+                          "MAIN: sodium_init failed");
   }
 
   // Bluetooth disabled via CONFIG_BT_ENABLED=n in sdkconfig
