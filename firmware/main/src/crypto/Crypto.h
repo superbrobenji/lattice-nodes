@@ -138,9 +138,9 @@ inline bool aead_seal(const uint8_t key32[32], const uint8_t nonce12[12], const 
                       size_t aadLen, uint8_t* buf, size_t len, uint8_t tag16[16]) {
   mbedtls_chachapoly_context ctx;
   mbedtls_chachapoly_init(&ctx);
-  bool ok = mbedtls_chachapoly_setkey(&ctx, key32) == 0 &&
-            mbedtls_chachapoly_encrypt_and_tag(&ctx, len, nonce12, aad, aadLen, buf, buf,
-                                               tag16) == 0;
+  bool ok =
+      mbedtls_chachapoly_setkey(&ctx, key32) == 0 &&
+      mbedtls_chachapoly_encrypt_and_tag(&ctx, len, nonce12, aad, aadLen, buf, buf, tag16) == 0;
   mbedtls_chachapoly_free(&ctx);
   return ok;
 }

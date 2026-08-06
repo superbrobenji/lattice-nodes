@@ -98,8 +98,8 @@ TEST(MbedtlsKat, HkdfSha256Rfc5869TestCase1) {
                                    0x00, 0x72, 0x08, 0xd5, 0xb8, 0x87, 0x18, 0x58, 0x65};
 
   uint8_t okm[42];
-  ASSERT_TRUE(lattice::crypto::hkdf_sha256(ikm, sizeof(ikm), salt, sizeof(salt), info,
-                                           sizeof(info), okm, sizeof(okm)));
+  ASSERT_TRUE(lattice::crypto::hkdf_sha256(ikm, sizeof(ikm), salt, sizeof(salt), info, sizeof(info),
+                                           okm, sizeof(okm)));
   EXPECT_EQ(0, memcmp(okm, expectedOkm, sizeof(expectedOkm)));
 }
 
@@ -108,14 +108,12 @@ TEST(MbedtlsKat, HkdfSha256Rfc5869TestCase1) {
 TEST(MbedtlsKat, HmacSha256Rfc4231TestCase2) {
   const uint8_t key[4] = {'J', 'e', 'f', 'e'};
   const char* data = "what do ya want for nothing?";
-  const uint8_t expected[32] = {0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e,
-                                0x6a, 0x04, 0x24, 0x26, 0x08, 0x95, 0x75, 0xc7,
-                                0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27, 0x39, 0x83,
-                                0x9d, 0xec, 0x58, 0xb9, 0x64, 0xec, 0x38, 0x43};
+  const uint8_t expected[32] = {0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e, 0x6a, 0x04, 0x24,
+                                0x26, 0x08, 0x95, 0x75, 0xc7, 0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27,
+                                0x39, 0x83, 0x9d, 0xec, 0x58, 0xb9, 0x64, 0xec, 0x38, 0x43};
   uint8_t out[32];
-  ASSERT_TRUE(lattice::crypto::hmac_sha256(key, sizeof(key),
-                                           reinterpret_cast<const uint8_t*>(data), strlen(data),
-                                           out));
+  ASSERT_TRUE(lattice::crypto::hmac_sha256(key, sizeof(key), reinterpret_cast<const uint8_t*>(data),
+                                           strlen(data), out));
   EXPECT_EQ(0, memcmp(out, expected, sizeof(expected)));
 }
 
