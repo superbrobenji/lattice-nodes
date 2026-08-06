@@ -10,6 +10,7 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/ringbuf.h>
+#include <freertos/task.h>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -216,6 +217,16 @@ private:
   StaticRingbuffer_t _recvQueueStruct;
   uint8_t _recvQueueStorage[RECV_QUEUE_SIZE * sizeof(RecvQueueEntry) + 128];
 
+  // Phase I Task 9 (item EE): handle of the dedicated mesh-drain task (owned by
+  // main.cpp — see mesh_task_fn / setDrainNotifyHandle()). The RX-ISR
+  // trampoline (onDataRecvCallback) notifies this task via
+  // vTaskNotifyGiveFromISR immediately after enqueueing into recvQueue, so the
+  // task wakes to drain instead of a polling loop discovering the item on its
+  // next tick. Null (never set) is a valid state — the host unit-test /
+  // SimNode harness has no real FreeRTOS task and calls drain() directly, and
+  // onDataRecvCallback null-checks before notifying.
+  TaskHandle_t drainNotifyHandle_ = nullptr;
+
   void drainRecvQueue();
   bool sendRouteReport();
   void processRouteReport(const mesh_message& msg);
@@ -348,6 +359,27 @@ public:
 
   // Drain pending work queued from ISR/callback contexts (call from main loop())
   void loop();
+
+  // Phase I Task 9 (item EE): drain the ESP-NOW receive ring buffer
+  // (recvQueue) until empty, dispatching each entry the same way
+  // drainRecvQueue() always has. Previously drainRecvQueue() ran inline as
+  // the first statement of loop(); it now runs from a dedicated FreeRTOS task
+  // (main.cpp's mesh_task_fn) woken by xTaskNotifyWait() when
+  // onDataRecvCallback's ISR trampoline signals drainNotifyHandle_ — see
+  // setDrainNotifyHandle() below. loop() no longer drains recvQueue itself.
+  // Public (unlike drainRecvQueue) so main.cpp's task body and the host
+  // unit-test / SimNode harness — which has no real FreeRTOS task — can both
+  // call it directly.
+  void drain() { drainRecvQueue(); }
+
+  // Registers the dedicated mesh task's handle so onDataRecvCallback's ISR
+  // trampoline can wake it via vTaskNotifyGiveFromISR after enqueueing into
+  // recvQueue. Call once from main.cpp's setup(), after the task is created.
+  // A null handle (the default, and the state throughout host/SimNode tests)
+  // is valid — onDataRecvCallback null-checks before notifying, so the ISR
+  // path simply skips the notify and drain() must instead be driven directly
+  // (as it is by SimNode::tick() and the unit tests).
+  void setDrainNotifyHandle(TaskHandle_t handle) { drainNotifyHandle_ = handle; }
 
   // Node role config
   // Re-evaluates the RouteTable allocation (issue #51) on every role change,

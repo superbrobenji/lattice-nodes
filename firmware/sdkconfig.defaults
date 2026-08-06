@@ -101,3 +101,14 @@ CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 # combined with nano-format, that one debug line will render lastSeenMs
 # incorrectly (cosmetic only -- not wire, not safety-relevant).
 CONFIG_LIBC_NEWLIB_NANO_FORMAT=y
+
+# Phase I Task 9 (item EE): tickless idle + automatic dynamic frequency
+# scaling. CONFIG_FREERTOS_HZ=1000 already set above (Task 6) — verified, not
+# re-added. Paired with the esp_pm_configure(&pm_cfg) call added in
+# main.cpp's setup() (max 240MHz / min 80MHz / light sleep enabled): with
+# tickless idle, the FreeRTOS idle task extends the tick period across idle
+# stretches so the CPU can drop into light sleep between wake sources rather
+# than waking every 1ms tick just to re-check "nothing to do".
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_PM_DFS_INIT_AUTO=y

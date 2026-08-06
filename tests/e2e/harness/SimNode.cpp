@@ -116,6 +116,12 @@ void SimNode::tick() {
   swapIn(ctx_);
   try {
     lattice::err_core::drainPendingBlink();
+    // Phase I Task 9 (item EE): recvQueue drain moved off Mesh::loop() onto a
+    // dedicated FreeRTOS task on real hardware (woken via task-notify from the
+    // RX-ISR trampoline). This harness has no real FreeRTOS task, so mirror
+    // main.cpp's effective per-tick behavior by calling drain() explicitly,
+    // same as loop() used to do internally.
+    mesh_->drain();
     mesh_->loop();
     mesh_->checkMasterTimeout();
 
