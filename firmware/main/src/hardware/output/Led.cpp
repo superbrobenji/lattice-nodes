@@ -19,7 +19,7 @@ Led::Led(uint8_t pin) : GpioOutput(pin), _isOn(false) {}
 Led::~Led() {
   if (_initialized) {
     gpio_set_level(static_cast<gpio_num_t>(_pin), 0);
-    gpio_set_direction(static_cast<gpio_num_t>(_pin), GPIO_MODE_INPUT);
+    (void)gpio_set_direction(static_cast<gpio_num_t>(_pin), GPIO_MODE_INPUT);
   }
 }
 

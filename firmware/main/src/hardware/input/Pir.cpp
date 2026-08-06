@@ -40,21 +40,21 @@ bool Pir::attachInterrupt(void (*isr)(), int mode) {
   else if (mode == kEdgeFalling)
     intrType = GPIO_INTR_NEGEDGE;
   _isrCallback = isr;
-  gpio_set_intr_type(static_cast<gpio_num_t>(_pin), intrType);
+  (void)gpio_set_intr_type(static_cast<gpio_num_t>(_pin), intrType);
   esp_err_t err = gpio_isr_handler_add(static_cast<gpio_num_t>(_pin), &Pir::isrTrampoline, this);
   if (err != ESP_OK) {
     _isrCallback = nullptr;
     return false;
   }
-  gpio_intr_enable(static_cast<gpio_num_t>(_pin));
+  (void)gpio_intr_enable(static_cast<gpio_num_t>(_pin));
   return true;
 }
 
 void Pir::detachInterrupt() {
   if (!_initialized)
     return;
-  gpio_intr_disable(static_cast<gpio_num_t>(_pin));
-  gpio_isr_handler_remove(static_cast<gpio_num_t>(_pin));
+  (void)gpio_intr_disable(static_cast<gpio_num_t>(_pin));
+  (void)gpio_isr_handler_remove(static_cast<gpio_num_t>(_pin));
   _isrCallback = nullptr;
 }
 

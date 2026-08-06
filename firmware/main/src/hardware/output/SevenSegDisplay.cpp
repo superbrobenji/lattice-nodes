@@ -106,8 +106,8 @@ bool SevenSegDisplay::writeByte(uint8_t b) {
   // per-init pinMode()), so it stays as an explicit native call here rather
   // than folding into main.cpp's bundled output-group gpio_config_t.
   gpio_set_level(static_cast<gpio_num_t>(_clkPin), 0);
-  gpio_set_direction(static_cast<gpio_num_t>(_dioPin), GPIO_MODE_INPUT);
-  gpio_set_pull_mode(static_cast<gpio_num_t>(_dioPin), GPIO_PULLUP_ONLY);
+  (void)gpio_set_direction(static_cast<gpio_num_t>(_dioPin), GPIO_MODE_INPUT);
+  (void)gpio_set_pull_mode(static_cast<gpio_num_t>(_dioPin), GPIO_PULLUP_ONLY);
   tmDelay();
   gpio_set_level(static_cast<gpio_num_t>(_clkPin), 1);
   tmDelay();
@@ -120,7 +120,7 @@ bool SevenSegDisplay::writeByte(uint8_t b) {
       break;
     }
   }
-  gpio_set_direction(static_cast<gpio_num_t>(_dioPin), GPIO_MODE_OUTPUT);
+  (void)gpio_set_direction(static_cast<gpio_num_t>(_dioPin), GPIO_MODE_OUTPUT);
   gpio_set_level(static_cast<gpio_num_t>(_clkPin), 0);
   if (!ack) {
     LATTICE_LOGLN("7SEG", "ACK timeout", lattice::utils::LogLevel::LOG_WARN);
