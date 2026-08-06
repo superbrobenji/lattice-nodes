@@ -5,7 +5,7 @@
 
 ## Branch / Commit
 - Branch: `feat/phaseI-task7-gpio-natives` (base: `origin/docs/phaseI-native-idf` @ `ed5c948`, umbrella tip with Tasks 1+2+3+4+5+6+8 merged)
-- Commit: `<see git log>` — `feat(phaseI/task7): GPIO natives + LE memcpy + String elim + Led non-blocking (items MM+PP+QQ+RR+SS+TT+XX+WW)`
+- Commit: `5001415` — `feat(phaseI/task7): GPIO natives + LE memcpy + String elim + Led non-blocking (items MM+PP+QQ+RR+SS+TT+XX+WW)`
 - Pushed to `origin/feat/phaseI-task7-gpio-natives`. No PR opened (per instructions).
 
 ## Test results
