@@ -8,7 +8,9 @@
 #include "src/persistence/EepromManager.h"
 // Error.h already provides ERROR_CHECK macros
 #include <esp_now.h>
-#include <WiFi.h>
+#include <esp_netif.h>
+#include <esp_event.h>
+#include <esp_timer.h>
 #include <cstring>
 #include <cstdio>
 #include "../../project_config.h"
@@ -30,15 +32,20 @@ Mesh* Mesh::instance = nullptr;
 
 Mesh::Mesh()
     : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0), relayPendingAt(0),
-      relayPending(false), _dualMasterMode(lattice::config::DUAL_MASTER_MODE), recvQueueHead(0),
-      recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0) {
+      relayPending(false), _dualMasterMode(lattice::config::DUAL_MASTER_MODE), lastBeaconMs(0),
+      lastRouteReportMs(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
   memset(lastSeenMasterMac, 0, 6);
   memset(deviceMacAddress, 0, 6);
-  memset(recvQueue, 0, sizeof(recvQueue));
   memset(&relayPendingMsg, 0, sizeof(relayPendingMsg));
+  // Phase I Task 8 (item OO): static ring buffer over _recvQueueStorage —
+  // heap-free, matching the array it replaces. Storage is a Mesh member so
+  // its lifetime matches the instance; safe to create unconditionally here
+  // (doesn't depend on WiFi/ESP-NOW being up yet).
+  recvQueue = xRingbufferCreateStatic(sizeof(_recvQueueStorage), RINGBUF_TYPE_NOSPLIT,
+                                      _recvQueueStorage, &_recvQueueStruct);
 }
 
 // Seal-time AEAD nonce-reuse guard — see declaration comment in Mesh.h. Must
@@ -67,9 +74,12 @@ void Mesh::_checkEpochRollback(uint32_t epoch, uint16_t seq) {
 void Mesh::readMacAddress() {
   esp_err_t ret = esp_wifi_get_mac(WIFI_IF_STA, deviceMacAddress);
   if (ret != ESP_OK) {
-    lattice::err::fail(
-        lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::MESH, 1,
-        (String("MESH: Failed to read MAC address: ") + esp_err_to_name(ret)).c_str());
+    // Phase I Task 7 (TT): String() temporary eliminated — stack buffer +
+    // snprintf feeds err::fail's const char* directly.
+    char errBuf[80];
+    snprintf(errBuf, sizeof(errBuf), "MESH: Failed to read MAC address: %s", esp_err_to_name(ret));
+    lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::MESH, 1,
+                       errBuf);
   } else {
     // Prime the boot-time cache (item F) so every adapter's readOwnMac() call
     // is a memcpy instead of a repeat esp_wifi_get_mac() syscall.
@@ -95,7 +105,8 @@ PeerInfo* Mesh::findNextHopToMaster() {
   // Multi-hop (spec §3): pick the freshest neighbor strictly closer to the
   // master from the NeighborTable. The relay need not be an enrolled peer.
   uint8_t hopMac[6];
-  if (!neighbors.selectNextHop(currentMaster.distance, millis(), hopMac))
+  if (!neighbors.selectNextHop(currentMaster.distance,
+                               static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL, hopMac))
     return nullptr;
   if (lattice::mac::eq(hopMac, deviceMacAddress))
     return nullptr;
@@ -266,11 +277,18 @@ bool Mesh::init() {
 }
 
 bool Mesh::setupWiFi() {
-  if (!WiFi.mode(WIFI_STA)) {
-    lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 6,
-                       "MESH: Failed to set WiFi mode STA");
-    return false;
-  }
+  // Phase I Task 3 (BB + ZZ): raw ESP-IDF WiFi bring-up, replacing the
+  // arduino-esp32 WiFi.mode(WIFI_STA) wrapper. ESP-NOW is our only WiFi use
+  // (no AP association, no persisted creds) so STA mode + WIFI_STORAGE_RAM
+  // (making CONFIG_ESP_WIFI_NVS_ENABLED=n fully effective) is sufficient.
+  ESP_ERROR_CHECK(esp_netif_init());
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+  ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+  ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+  ESP_ERROR_CHECK(esp_wifi_start());
+
   lattice::err::checkEsp(esp_wifi_set_channel(lattice::config::WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE),
                          lattice::utils::ErrorType::HARDWARE_FAILURE, "Failed to set WiFi channel");
 
@@ -294,8 +312,11 @@ void Mesh::loadPersistentState() {
 bool Mesh::setupEspNow() {
   esp_err_t res = esp_now_init();
   if (res != ESP_OK) {
+    // Phase I Task 7 (TT): String() temporary eliminated.
+    char errBuf[80];
+    snprintf(errBuf, sizeof(errBuf), "MESH: esp_now_init failed: %s", esp_err_to_name(res));
     lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 3,
-                       (String("MESH: esp_now_init failed: ") + esp_err_to_name(res)).c_str());
+                       errBuf);
     return false;
   }
   lattice::err::checkEsp(esp_now_set_pmk(meshKey), lattice::utils::ErrorType::HARDWARE_FAILURE,
@@ -338,22 +359,47 @@ void IRAM_ATTR Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uin
   if (static_cast<size_t>(len) < sizeof(mesh_message))
     return;
 
-  uint8_t nextHead = (instance->recvQueueHead + 1) % RECV_QUEUE_SIZE;
-  if (nextHead == instance->recvQueueTail) {
-    // Queue full — drop packet
-    return;
-  }
+  RecvQueueEntry entry;
+  memcpy(entry.srcMac, info->src_addr, 6);
+  memcpy(&entry.msg, incomingData, sizeof(mesh_message));
 
-  RecvQueueEntry& slot = instance->recvQueue[instance->recvQueueHead];
-  memcpy(slot.srcMac, info->src_addr, 6);
-  memcpy(&slot.msg, incomingData, sizeof(mesh_message));
-  instance->recvQueueHead = nextHead;
+  BaseType_t woken = pdFALSE;
+  // Queue full — xRingbufferSendFromISR returns pdFALSE and the packet is
+  // silently dropped, matching the old array's "Queue full — drop" behavior
+  // (no logging here: this runs in WiFi task/ISR context, and Serial writes
+  // are not safe from that context — see loop()'s comment on
+  // drainPendingRelay).
+  xRingbufferSendFromISR(instance->recvQueue, &entry, sizeof(entry), &woken);
+
+  // Phase I Task 9 (item EE): wake the dedicated mesh-drain task instead of
+  // leaving drain() to be discovered by a polling loop() iteration — this is
+  // what lets loop() (and therefore the FreeRTOS idle task) go idle between
+  // real work instead of busy-checking recvQueue every tick, which is a
+  // prerequisite for tickless idle / light sleep to pay off. Null handle
+  // (host/SimNode builds, or a real boot before setDrainNotifyHandle() has
+  // run yet) is a no-op here — the item just waits in recvQueue for the next
+  // explicit drain() call.
+  BaseType_t woken2 = pdFALSE;
+  if (instance->drainNotifyHandle_ != nullptr) {
+    vTaskNotifyGiveFromISR(instance->drainNotifyHandle_, &woken2);
+  }
+  if (woken || woken2)
+    portYIELD_FROM_ISR();
 }
 
 void Mesh::drainRecvQueue() {
-  while (recvQueueTail != recvQueueHead) {
-    RecvQueueEntry& entry = recvQueue[recvQueueTail];
-    recvQueueTail = (recvQueueTail + 1) % RECV_QUEUE_SIZE;
+  size_t itemSize = 0;
+  RecvQueueEntry* entryPtr;
+  while ((entryPtr = static_cast<RecvQueueEntry*>(xRingbufferReceive(recvQueue, &itemSize, 0))) !=
+         nullptr) {
+    if (itemSize != sizeof(RecvQueueEntry)) {
+      // Should never happen (NOSPLIT items are always sent whole) — guard
+      // against a corrupt/short item rather than reading past it.
+      vRingbufferReturnItem(recvQueue, entryPtr);
+      continue;
+    }
+    RecvQueueEntry entry = *entryPtr;
+    vRingbufferReturnItem(recvQueue, entryPtr);
 
     const mesh_message& msg = entry.msg;
 
@@ -370,7 +416,7 @@ void Mesh::drainRecvQueue() {
 
     // Replay check
     if (msg.proto_version == PROTO_VERSION && msg.epoch_num > 0) {
-      if (replay.isReplay(msg, millis())) {
+      if (replay.isReplay(msg, static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL)) {
         LATTICE_LOGLN("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
         continue;
       }
@@ -420,8 +466,11 @@ void Mesh::sendMessage(const uint8_t* target, const mesh_message& msg) {
   if (result == ESP_OK) {
     LATTICE_LOGLN("MESH", "Message sent to peer", LogLevel::LOG_DEBUG);
   } else {
+    // Phase I Task 7 (TT): String() temporary eliminated.
+    char errBuf[80];
+    snprintf(errBuf, sizeof(errBuf), "MESH: Error sending message: %s", esp_err_to_name(result));
     lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 5,
-                       (String("MESH: Error sending message: ") + esp_err_to_name(result)).c_str());
+                       errBuf);
   }
 }
 
@@ -552,7 +601,7 @@ void Mesh::linkDataRecvCallback(std::function<void(const mesh_message&)> recvCal
 
 // --- Periodically called in main loop if this node is master ---
 void Mesh::broadcastMasterBeacon() {
-  unsigned long now = millis();
+  uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   if (now - lastBeaconMillis < lattice::config::MASTER_BEACON_INTERVAL_MS)
     return;
   lastBeaconMillis = now;
@@ -716,7 +765,8 @@ void Mesh::checkMasterTimeout() {
     return;
   if (currentMaster.distance == 0xFF)
     return; // No master known yet
-  if (millis() - lastMasterBeaconReceivedMs > STALE_MASTER_THRESHOLD_MS) {
+  if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - lastMasterBeaconReceivedMs >
+      STALE_MASTER_THRESHOLD_MS) {
     LATTICE_LOGLN("MESH", "Master beacon timeout — clearing route, treating as offline",
                   LogLevel::LOG_WARN);
     memset(currentMaster.mac, 0, 6);
@@ -778,7 +828,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       lattice::eeprom::saveKnownMasterMacSecondary(enrollment.knownMasterMacSecondary);
       LATTICE_LOGLN("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
       // fall through to process this beacon as valid
-    } else if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
+    } else if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - lastMasterBeaconReceivedMs <
+               STALE_MASTER_THRESHOLD_MS) {
       // Known master(s) still fresh — reject unknown MAC
       LATTICE_LOGLN("MESH", "Beacon from unexpected MAC rejected (master still alive)",
                     LogLevel::LOG_WARN);
@@ -802,7 +853,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     }
   }
   memcpy(lastSeenMasterMac, msg.origin_mac_address, 6);
-  lastMasterBeaconReceivedMs = millis();
+  lastMasterBeaconReceivedMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
 
   // Multi-hop routing (spec §3): the node we heard this beacon THROUGH
   // (last_hop) is a forwarding candidate. msg.hop_count is last_hop's OWN
@@ -821,7 +872,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   // flap if NeighborTable itself flaps.
   memcpy(currentMaster.mac, msg.origin_mac_address, 6);
   uint8_t min_d =
-      neighbors.observeAndMinDistance(msg.last_hop_mac_address, msg.hop_count, millis());
+      neighbors.observeAndMinDistance(msg.last_hop_mac_address, msg.hop_count,
+                                      static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL);
   uint8_t derived = (min_d == 0xFF) ? 0xFF : static_cast<uint8_t>(min_d + 1);
   if (derived != currentMaster.distance) {
     currentMaster.distance = derived;
@@ -852,7 +904,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     // this node's true (possibly smaller) distance, not an inflated one.
     relayPendingMsg.hop_count = derived;
     memcpy(relayPendingMsg.last_hop_mac_address, deviceMacAddress, 6);
-    relayPendingAt = millis() + 10 + jitterMs;
+    relayPendingAt = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL + 10 + jitterMs;
     relayPending = true;
   }
 }
@@ -1077,13 +1129,13 @@ bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, b
       if (keyEstablished) {
         LATTICE_LOGLN("MESH", "Peer already registered — keeping established key",
                       LogLevel::LOG_DEBUG);
-        p->lastSeenMillis = millis();
+        p->lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
         return true; // already routable; nothing to change
       }
     }
     // Update existing peer's public key
     memcpy(p->publicKey, publicKey32, 32);
-    p->lastSeenMillis = millis();
+    p->lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   } else {
     if (peers.peerCount >= MAX_PEERS) {
       LATTICE_LOGLN("MESH", "Peer list full, cannot enroll", LogLevel::LOG_WARN);
@@ -1092,7 +1144,7 @@ bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, b
     PeerInfo newPeer;
     memcpy(newPeer.mac, mac, 6);
     memcpy(newPeer.publicKey, publicKey32, 32);
-    newPeer.lastSeenMillis = millis();
+    newPeer.lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
     peers.append(newPeer);
   }
   peers.saveToEEPROM();
@@ -1227,7 +1279,8 @@ void Mesh::processRouteReport(const mesh_message& msg) {
     // route_path/route_len are plaintext header fields (accumulated by relays);
     // bounds-checked by RouteTable::record. Only recorded on MAC-verify pass.
     if (routes) {
-      routes->record(msg.origin_mac_address, msg.route_path, msg.route_len, millis());
+      routes->record(msg.origin_mac_address, msg.route_path, msg.route_len,
+                     static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL);
     }
     // Terminal endpoint — deliver to server via external callback
     if (externalRecvCallback)
@@ -1288,7 +1341,12 @@ void Mesh::processRouteReport(const mesh_message& msg) {
 }
 
 void Mesh::loop() {
-  drainRecvQueue();
+  // Phase I Task 9 (item EE): recvQueue draining moved off loop() and onto
+  // the dedicated mesh task (main.cpp's mesh_task_fn), woken via
+  // xTaskNotifyWait() when onDataRecvCallback's ISR trampoline signals
+  // drainNotifyHandle_ — see drain()/setDrainNotifyHandle() in Mesh.h. Host
+  // unit tests and the SimNode e2e harness (no real FreeRTOS task) call
+  // drain() directly instead.
   lattice::eeprom::flushIfDirty();
 
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
@@ -1296,7 +1354,7 @@ void Mesh::loop() {
   enrollment.drainPendingRelay();
 
   {
-    uint32_t now = millis();
+    uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
     if (!isMaster && now - lastRouteReportMs >= lattice::config::ROUTE_REPORT_INTERVAL_MS) {
       if (sendRouteReport())
         lastRouteReportMs = now;
@@ -1309,7 +1367,7 @@ void Mesh::loop() {
   // broadcast: routing it through transmitCore()/findNextHopToMaster() sent it back toward
   // the master (backwards — nodes 2+ hops out never heard it) and raised a spurious
   // err::fail every beacon interval on any node without a route (e.g. pre-enrollment).
-  if (relayPending && millis() >= relayPendingAt) {
+  if (relayPending && static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL >= relayPendingAt) {
     relayPending = false;
     sendBroadcast(relayPendingMsg);
   }

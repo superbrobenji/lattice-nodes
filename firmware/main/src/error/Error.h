@@ -7,6 +7,10 @@
 #include <esp_err.h>
 #include <cstdint>
 #include <cstdio>
+#ifndef UNIT_TEST
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
 #ifdef UNIT_TEST
 #include <stdexcept>
 extern int lattice_test_errFailCount;
@@ -65,7 +69,13 @@ inline bool fail(utils::ErrorType type, const char* msg) {
 #ifdef UNIT_TEST
   throw FatalError(msg ? msg : "fatal");
 #else
+  // Phase I Task 7 (WW): signalError() above now only ARMS the error LED's
+  // blink pattern via Led::pulse() (non-blocking) — err_core::tick() must be
+  // pumped here or the halted device would just show a solid-ON LED instead
+  // of the intended blink pattern.
   while (true) {
+    err_core::tick();
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
 #endif
 }

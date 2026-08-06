@@ -1,6 +1,7 @@
 #include "PirAdapter.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include <cstdint>
+#include <esp_timer.h>
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/mesh/Mesh.h"
@@ -31,7 +32,7 @@ bool PirAdapter::init() {
   }
 
   instance = this;
-  if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING)) {
+  if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, hardware::Pir::kEdgeRising)) {
     lattice::err::fail(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::ADAPTER,
                        2, "PIR_Adapter: Failed to attach interrupt.");
     return false;
@@ -44,7 +45,7 @@ bool PirAdapter::init() {
   return true;
 }
 
-void PirAdapter::detectMotionTrampoline() {
+void IRAM_ATTR PirAdapter::detectMotionTrampoline() {
   if (instance)
     instance->detectMotion();
 }
@@ -79,7 +80,7 @@ void PirAdapter::loop() {
   if (!_initialized)
     return;
 
-  uint32_t now = millis();
+  uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
 
   if (_pir.isMotionDetected()) {
     _lastTrigger = now;
@@ -98,7 +99,7 @@ void PirAdapter::loop() {
     LATTICE_LOGLN("PIR_Adapter", "Cooldown ended. Re-arming sensor.", LogLevel::LOG_DEBUG);
     _state = PirState::IDLE;
 
-    if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING)) {
+    if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, hardware::Pir::kEdgeRising)) {
       lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE,
                          lattice::core::ModuleDigit::ADAPTER, 2,
                          "PIR_Adapter: Could not re-attach interrupt (possible hardware error)");

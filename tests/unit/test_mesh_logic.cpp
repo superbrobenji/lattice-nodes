@@ -345,11 +345,11 @@ TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
   memcpy(mesh.deviceMacAddress, kMyMac, 6);
   PeerInfo p1{};
   memcpy(p1.mac, kPeer1Mac, 6);
-  p1.lastSeenMillis = 0;
+  p1.lastSeenMs = 0;
   mesh.peers.append(p1);
   PeerInfo p2{};
   memcpy(p2.mac, kPeer2Mac, 6);
-  p2.lastSeenMillis = 0;
+  p2.lastSeenMs = 0;
   mesh.peers.append(p2);
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1, /*hopCount=*/1);
@@ -371,7 +371,7 @@ TEST_F(RelayDownlinkTest, DropsAtMaxHops) {
   memcpy(mesh.deviceMacAddress, kMyMac, 6);
   PeerInfo p1{};
   memcpy(p1.mac, kPeer1Mac, 6);
-  p1.lastSeenMillis = 0;
+  p1.lastSeenMs = 0;
   mesh.peers.append(p1);
 
   auto msg = makeDataMsg(kOriginMac, kPeer1Mac, 1, 1,
@@ -387,12 +387,12 @@ TEST_F(RelayDownlinkTest, SkipsSelf_WhenSelfInPeerList) {
   memcpy(mesh.deviceMacAddress, kMyMac, 6);
   PeerInfo p1{};
   memcpy(p1.mac, kPeer1Mac, 6);
-  p1.lastSeenMillis = 0;
+  p1.lastSeenMs = 0;
   mesh.peers.append(p1);
   // Add self to peer list (shouldn't happen in production but guard against it)
   PeerInfo self{};
   memcpy(self.mac, kMyMac, 6);
-  self.lastSeenMillis = 0;
+  self.lastSeenMs = 0;
   mesh.peers.append(self);
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1);
@@ -430,7 +430,7 @@ protected:
     // Register master as enrolled peer (required for sendMessage + isPeerInRange)
     PeerInfo p{};
     memcpy(p.mac, kMasterMac, 6);
-    p.lastSeenMillis = 0;
+    p.lastSeenMs = 0;
     mesh.peers.append(p);
     return mesh;
   }
@@ -485,7 +485,7 @@ TEST_F(AdapterDataRelayTest, Master_DoesNotRelayUplink_DeliversLocally) {
   PeerInfo sensorPeer{};
   memcpy(sensorPeer.mac, kSensorMac, 6);
   memcpy(sensorPeer.publicKey, sensorPub, 32);
-  sensorPeer.lastSeenMillis = 0;
+  sensorPeer.lastSeenMs = 0;
   mesh.peers.append(sensorPeer);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(sensorPriv, masterPub, kUp, kDown);
@@ -512,7 +512,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysDownlinkToOtherTarget) {
   // Add a second peer (different from master) to relay toward
   PeerInfo extra{};
   memcpy(extra.mac, kPeerMac, 6);
-  extra.lastSeenMillis = 0;
+  extra.lastSeenMs = 0;
   mesh.peers.append(extra);
 
   mesh_message msg{};
@@ -542,7 +542,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_BroadcastTarget_DeliveredAndRelaye
   Mesh mesh = makeIntermediateNode();
   PeerInfo extra{};
   memcpy(extra.mac, kPeerMac, 6);
-  extra.lastSeenMillis = 0;
+  extra.lastSeenMs = 0;
   mesh.peers.append(extra);
 
   bool callbackFired = false;
@@ -573,7 +573,7 @@ TEST_F(AdapterDataRelayTest, BroadcastAdapterData_UsesBroadcastTargetMAC) {
   // Add a peer so broadcastToAllPeers has someone to send to
   PeerInfo extra{};
   memcpy(extra.mac, kPeerMac, 6);
-  extra.lastSeenMillis = 0;
+  extra.lastSeenMs = 0;
   mesh.peers.append(extra);
 
   static constexpr uint8_t kPayload[64] = {0x01, 0x02, 0x03};
@@ -653,7 +653,7 @@ protected:
     mesh.isMaster = false; // explicit defensive guard
     PeerInfo p{};
     memcpy(p.mac, kPeerMac, 6);
-    p.lastSeenMillis = 0;
+    p.lastSeenMs = 0;
     mesh.peers.append(p);
     return mesh;
   }
@@ -674,7 +674,7 @@ protected:
     PeerInfo leaf{};
     memcpy(leaf.mac, kLeafMac, 6);
     memcpy(leaf.publicKey, leafPub, 32);
-    leaf.lastSeenMillis = 0;
+    leaf.lastSeenMs = 0;
     mesh.peers.append(leaf);
     // isMaster is set directly above (not via setIsMaster()+init()), so the
     // RouteTable allocation Mesh::init() would normally trigger never runs —
@@ -878,7 +878,7 @@ TEST_F(JoinAckRelayTest, NextHopThroughRelayIsRegisteredAsEspNowPeer) {
 // must not blackhole its uplink — the NeighborTable fallback branch of
 // findNextHopToMaster() must still find a route if the master is also known
 // as a fresh distance-0 neighbor (e.g. its own beacon was still heard even
-// though the direct PeerRegistry entry's lastSeenMillis is stale).
+// though the direct PeerRegistry entry's lastSeenMs is stale).
 TEST_F(JoinAckRelayTest, DirectMasterStaleFallsBackToNeighborTable) {
   Mesh node = makeIntermediateNode();
   const uint8_t masterMac[6] = {0x02, 0, 0, 0, 0, 0x01};
@@ -890,7 +890,7 @@ TEST_F(JoinAckRelayTest, DirectMasterStaleFallsBackToNeighborTable) {
   // PeerRegistry::isPeerInRange() returns false for it.
   PeerInfo masterPeer{};
   memcpy(masterPeer.mac, masterMac, 6);
-  masterPeer.lastSeenMillis = 0;
+  masterPeer.lastSeenMs = 0;
   node.peers.append(masterPeer);
   advanceMillis(lattice::config::STALE_PEER_THRESHOLD_MS);
 
@@ -1021,7 +1021,7 @@ TEST_F(JoinAckRelayTest, RelayedAdapterDataKeepsOriginTarget) {
   // is actually sent.
   PeerInfo relayMasterPeer{};
   memcpy(relayMasterPeer.mac, relaysMaster, 6);
-  relayMasterPeer.lastSeenMillis = 0;
+  relayMasterPeer.lastSeenMs = 0;
   relay.peers.append(relayMasterPeer);
   memcpy(relay.currentMaster.mac, relaysMaster, 6);
   relay.currentMaster.distance = 1;
@@ -1182,7 +1182,7 @@ TEST(RegisterDownlinkPeer, LRUEntryBecomesEnrolled_EvictsOnTouch) {
   //    to seed peers directly (e.g. RelayedAdapterDataKeepsOriginTarget above).
   PeerInfo enrolled{};
   memcpy(enrolled.mac, mac, 6);
-  enrolled.lastSeenMillis = 0;
+  enrolled.lastSeenMs = 0;
   ASSERT_TRUE(m.peers.append(enrolled));
 
   // 3. Call registerDownlinkPeer(mac) again.
@@ -1304,7 +1304,7 @@ protected:
     PeerInfo master{};
     memcpy(master.mac, kMasterMac, 6);
     memcpy(master.publicKey, masterPub, 32);
-    master.lastSeenMillis = 0;
+    master.lastSeenMs = 0;
     mesh.peers.append(master);
     return mesh;
   }
@@ -1449,7 +1449,7 @@ protected:
     PeerInfo master{};
     memcpy(master.mac, kMasterMac, 6);
     memcpy(master.publicKey, masterKey, 32);
-    master.lastSeenMillis = 0;
+    master.lastSeenMs = 0;
     mesh.peers.append(master);
     return mesh;
   }
@@ -1543,10 +1543,10 @@ protected:
   static constexpr uint8_t kOriginMac[6] = {0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC};
 
   void injectAndDrain(Mesh& mesh, const mesh_message& msg) {
-    Mesh::RecvQueueEntry& slot = mesh.recvQueue[mesh.recvQueueHead];
-    memcpy(&slot.msg, &msg, sizeof(msg));
-    memcpy(slot.srcMac, msg.origin_mac_address, 6);
-    mesh.recvQueueHead = (mesh.recvQueueHead + 1) % Mesh::RECV_QUEUE_SIZE;
+    Mesh::RecvQueueEntry entry;
+    memcpy(&entry.msg, &msg, sizeof(msg));
+    memcpy(entry.srcMac, msg.origin_mac_address, 6);
+    xRingbufferSend(mesh.recvQueue, &entry, sizeof(entry), 0);
     mesh.drainRecvQueue();
   }
 };
@@ -1569,7 +1569,7 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   PeerInfo origin{};
   memcpy(origin.mac, kOriginMac, 6);
   memcpy(origin.publicKey, originPub, 32);
-  origin.lastSeenMillis = 0;
+  origin.lastSeenMs = 0;
   mesh.peers.append(origin);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
@@ -1612,7 +1612,7 @@ TEST_F(DrainRecvQueueTest, DropsProtoVersionZeroAdapterData) {
   PeerInfo origin{};
   memcpy(origin.mac, kOriginMac, 6);
   memcpy(origin.publicKey, originPub, 32);
-  origin.lastSeenMillis = 0;
+  origin.lastSeenMs = 0;
   mesh.peers.append(origin);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
@@ -1650,9 +1650,10 @@ TEST_F(DrainRecvQueueTest, DropsReplayedEnrollmentRequestBeforeRelay) {
   msg.seq_num = 7;
 
   injectAndDrain(mesh, msg); // first: enqueued for relay-to-server
-  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 1u);
+  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 1u);
   injectAndDrain(mesh, msg); // duplicate (same epoch/seq): dropped before processRequest
-  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 1u) << "duplicate must not enqueue a second relay";
+  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 1u)
+      << "duplicate must not enqueue a second relay";
 }
 
 // Task 9c R1 (retry preservation): a legitimate re-request in a LATER retry round
@@ -1672,7 +1673,7 @@ TEST_F(DrainRecvQueueTest, ForwardsEnrollmentRetryWithFreshSeq) {
   injectAndDrain(mesh, msg);
   msg.seq_num = 8; // next 10s retry round — distinct seq
   injectAndDrain(mesh, msg);
-  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 2u) << "retry must still be forwarded";
+  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 2u) << "retry must still be forwarded";
 }
 
 // Task 9c R2: a node re-broadcasts a given JOIN_ACK at most once. A reflected copy
@@ -1767,8 +1768,9 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
 
   mesh.enrollment.processRequest(msg);
 
-  ASSERT_EQ(mesh.enrollment._pendingRelayCount, 1u);
-  const auto& e = mesh.enrollment._pendingRelayQueue[mesh.enrollment._pendingRelayHead];
+  ASSERT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 1u);
+  const auto& e = *reinterpret_cast<const Enrollment::PendingRelay*>(
+      mesh.enrollment._pendingRelayQueue->items.front().data());
   EXPECT_EQ(memcmp(e.mac, kMac, 6), 0);
   EXPECT_EQ(memcmp(e.pubKey, kKey, 32), 0)
       << "Full 32-byte key must be copied without chunk reassembly";
@@ -1852,19 +1854,30 @@ TEST_F(EnrollmentPinTest, ProcessJoinAck_TestBypass_SkipsCheck) {
 
 // ---- EnrollmentRelayCallbackTest ----
 
-static const uint8_t* g_capturedMac = nullptr;
-static const uint8_t* g_capturedKey = nullptr;
+// Phase I Task 8 (item OO): the ring buffer's item memory is only valid for
+// the duration of the drainPendingRelay() callback — vRingbufferReturnItem()
+// (called right after the callback returns) frees/recycles it, unlike the
+// old array-backed queue where a drained slot's bytes stayed live
+// indefinitely. Production callbacks already only ever copy synchronously
+// (see SerialAdapter::relayEnrollmentToServer's memcpy) rather than retain
+// the pointer, so this test helper must do the same — copy into static
+// storage here rather than stash the raw pointer for post-drain inspection.
+static bool g_captured = false;
+static uint8_t g_capturedMac[6];
+static uint8_t g_capturedKey[32];
 
 static void captureRelayFn(const uint8_t mac[6], const uint8_t pubKey[32]) {
-  g_capturedMac = mac;
-  g_capturedKey = pubKey;
+  g_captured = true;
+  memcpy(g_capturedMac, mac, 6);
+  memcpy(g_capturedKey, pubKey, 32);
 }
 
 class EnrollmentRelayCallbackTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    g_capturedMac = nullptr;
-    g_capturedKey = nullptr;
+    g_captured = false;
+    memset(g_capturedMac, 0, sizeof(g_capturedMac));
+    memset(g_capturedKey, 0, sizeof(g_capturedKey));
     EEPROM.reset();
   }
 };
@@ -1884,8 +1897,8 @@ TEST_F(EnrollmentRelayCallbackTest, DrainCallsRegisteredCallback) {
 
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u) << "queue must be empty after drain";
-  ASSERT_NE(g_capturedMac, nullptr) << "callback was not called";
+  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 0u) << "queue must be empty after drain";
+  ASSERT_TRUE(g_captured) << "callback was not called";
   EXPECT_EQ(memcmp(g_capturedMac, kMac, 6), 0) << "wrong MAC passed to callback";
   EXPECT_EQ(memcmp(g_capturedKey, kKey, 32), 0) << "wrong pubKey passed to callback";
 }
@@ -1900,8 +1913,9 @@ TEST_F(EnrollmentRelayCallbackTest, DrainWithNoCallbackClearsFlag) {
   mesh.enrollment.setPendingRelay(kMac, kKey);
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u) << "queue must clear even with no callback";
-  EXPECT_EQ(g_capturedMac, nullptr) << "callback must not fire when unregistered";
+  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 0u)
+      << "queue must clear even with no callback";
+  EXPECT_FALSE(g_captured) << "callback must not fire when unregistered";
 }
 
 // Bug #6 regression: two enrollment requests queued before a single drain must
@@ -1933,14 +1947,14 @@ TEST_F(EnrollmentRelayCallbackTest, QueueHoldsAndDrainsMultipleConcurrentRelays)
 
   mesh.enrollment.processRequest(reqA);
   mesh.enrollment.processRequest(reqB); // second request must NOT overwrite the first
-  ASSERT_EQ(mesh.enrollment._pendingRelayCount, 2u);
+  ASSERT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 2u);
 
   mesh.enrollment.drainPendingRelay();
 
   ASSERT_EQ(drained.size(), 2u) << "both queued relays must fire (Bug #6 starvation)";
   EXPECT_EQ(memcmp(drained[0].data(), kMacA, 6), 0) << "FIFO order: A first";
   EXPECT_EQ(memcmp(drained[1].data(), kMacB, 6), 0) << "FIFO order: B second";
-  EXPECT_EQ(mesh.enrollment._pendingRelayCount, 0u);
+  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 0u);
 }
 
 // --- Seal-time AEAD epoch-rollback guard (Phase A Task 3) ---

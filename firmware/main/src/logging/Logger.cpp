@@ -57,7 +57,7 @@ void Logger::error(const char* fmt, ...) {
   va_end(args);
 }
 
-void Logger::logln(const char* tag, const String& message, LogLevel level) {
+void Logger::logln(const char* tag, const char* message, LogLevel level) {
   if (currentLevel > level)
     return;
   Serial.print("[");
@@ -66,7 +66,7 @@ void Logger::logln(const char* tag, const String& message, LogLevel level) {
   Serial.println(message);
 }
 
-void Logger::log(const char* tag, const String& message, LogLevel level) {
+void Logger::log(const char* tag, const char* message, LogLevel level) {
   if (currentLevel > level)
     return;
   Serial.print("[");

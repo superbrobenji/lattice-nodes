@@ -2,7 +2,7 @@
 #define ADAPTER_FACTORY_H
 
 #include "Adapter.h"
-#include <Arduino.h>
+#include <cstdint>
 
 namespace lattice {
 namespace adapter {

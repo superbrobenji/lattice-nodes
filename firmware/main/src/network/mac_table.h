@@ -45,10 +45,16 @@ inline size_t find(const void* entries, size_t n, size_t stride, size_t mac_offs
   return SIZE_MAX;
 }
 
-// Index of the entry with the smallest uint32_t timestamp (at byte offset
+// Index of the entry with the smallest uint64_t timestamp (at byte offset
 // ts_offset within each stride-byte entry) across all n entries. On a tie,
 // the lowest index wins — matches every current caller's hand-rolled
 // "start at index 0, replace only on strictly-less" loop.
+//
+// Phase I Task 6 (FF): widened from uint32_t to uint64_t — both callers
+// (RouteTable::Entry::lastSeenMs, ReplayCache::Entry::lastSeenMs) migrated
+// their timestamp field to uint64_t alongside the millis() -> esp_timer_get_time()
+// swap. No other caller of this helper exists (grep-verified), so the widen
+// is a clean cut, not a compatibility shim.
 //
 // Undefined (returns 0 without reading past entries[0]) for n == 0; every
 // current caller already guards this with a preceding "any free slot?"
@@ -58,11 +64,11 @@ inline size_t evict_oldest_by_ts(const void* entries, size_t n, size_t stride, s
   size_t oldestIdx = 0;
   if (n == 0)
     return oldestIdx;
-  uint32_t oldestTs;
-  memcpy(&oldestTs, base + ts_offset, sizeof(uint32_t));
+  uint64_t oldestTs;
+  memcpy(&oldestTs, base + ts_offset, sizeof(uint64_t));
   for (size_t i = 1; i < n; ++i) {
-    uint32_t ts;
-    memcpy(&ts, base + i * stride + ts_offset, sizeof(uint32_t));
+    uint64_t ts;
+    memcpy(&ts, base + i * stride + ts_offset, sizeof(uint64_t));
     if (ts < oldestTs) {
       oldestTs = ts;
       oldestIdx = i;

@@ -14,7 +14,11 @@ using lattice::utils::EEPROM_SIZES::MAX_PEERS;
 struct PeerInfo {
   uint8_t mac[6];
   uint8_t publicKey[32]; // Curve25519 public key (zero = not yet known)
-  uint32_t lastSeenMillis;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+  // millis() -> esp_timer_get_time()/1000ULL swap (esp_timer's epoch is
+  // microseconds-since-boot as an int64_t; a 32-bit ms field would wrap
+  // ~49 days after boot).
+  uint64_t lastSeenMs;
 };
 
 // Master routing info

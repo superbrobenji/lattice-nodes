@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include <mbedtls/md.h>
+#include <sodium.h>
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 
 // Route-report chain MAC (Phase C, spec §4 / issue #44, header-only, mirrors
@@ -27,6 +27,11 @@ namespace routemac {
 constexpr size_t HOP_CTX_LEN = 30;
 constexpr size_t AUTH_PATH_LEN = 8;
 
+// Phase I Task 7 (SS): byte-by-byte little-endian shift+mask+store replaced
+// with memcpy (see E2ECrypto.h::buildNonce for the alignment rationale —
+// mesh_message is packed, and memcpy is the alignment-safe way to copy a
+// multi-byte field out of it on Xtensa). ESP32 is little-endian, so this
+// reproduces the prior output bit-for-bit.
 inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
                             const uint8_t this_hop[6], uint8_t out_ctx[HOP_CTX_LEN]) {
   uint8_t* p = out_ctx;
@@ -34,14 +39,10 @@ inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
   p += 6;
   memcpy(p, msg.target_mac_address, 6);
   p += 6;
-  p[0] = static_cast<uint8_t>(msg.epoch_num);
-  p[1] = static_cast<uint8_t>(msg.epoch_num >> 8);
-  p[2] = static_cast<uint8_t>(msg.epoch_num >> 16);
-  p[3] = static_cast<uint8_t>(msg.epoch_num >> 24);
-  p += 4;
-  p[0] = static_cast<uint8_t>(msg.seq_num);
-  p[1] = static_cast<uint8_t>(msg.seq_num >> 8);
-  p += 2;
+  memcpy(p, &msg.epoch_num, sizeof(msg.epoch_num));
+  p += sizeof(msg.epoch_num);
+  memcpy(p, &msg.seq_num, sizeof(msg.seq_num));
+  p += sizeof(msg.seq_num);
   memcpy(p, prev_hop, 6);
   p += 6;
   memcpy(p, this_hop, 6);
@@ -50,6 +51,10 @@ inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
 // mac_i = HMAC-SHA256(secret, hop_context_i || mac_{i-1})[:8]
 // For the originating hop, prev_mac must be zeroed 8B.
 // Tiger-Style: stack-only, fixed-size buffers, no heap, no dynamic length.
+//
+// Phase I Task 2: libsodium — was mbedtls_md_hmac(MBEDTLS_MD_SHA256, ...).
+// crypto_auth_hmacsha256() takes a fixed 32-byte key (matches `secret`'s width
+// exactly), so the one-shot call maps directly with no state-variant needed.
 inline void chainStep(const uint8_t secret[32], const uint8_t hop_ctx[HOP_CTX_LEN],
                       const uint8_t prev_mac[AUTH_PATH_LEN], uint8_t out_mac[AUTH_PATH_LEN]) {
   uint8_t input[HOP_CTX_LEN + AUTH_PATH_LEN];
@@ -57,8 +62,7 @@ inline void chainStep(const uint8_t secret[32], const uint8_t hop_ctx[HOP_CTX_LE
   memcpy(input + HOP_CTX_LEN, prev_mac, AUTH_PATH_LEN);
 
   uint8_t full[32]; // SHA-256 output
-  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-  mbedtls_md_hmac(info, secret, 32, input, sizeof(input), full);
+  crypto_auth_hmacsha256(full, input, sizeof(input), secret);
   memcpy(out_mac, full, AUTH_PATH_LEN); // truncate to first 8 bytes
 }
 

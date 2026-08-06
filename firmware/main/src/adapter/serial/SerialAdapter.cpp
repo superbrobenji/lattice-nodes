@@ -5,6 +5,7 @@
 #include "src/network/MacEq.h"
 #include <cstring>
 #include <cstdio>
+#include <esp_timer.h>
 #if SIMULATE_MODE
 #include "src/adapter/pir/PirAdapter.h"
 #endif
@@ -44,7 +45,7 @@ void SerialAdapter::loop() {
   uint32_t currentHopCount = meshPtr ? meshPtr->getHopCount() : 0;
   bool stateChanged = (currentHopCount != lastReportedHopCount);
 
-  uint32_t now = static_cast<uint32_t>(millis());
+  uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   bool intervalDue = healthTickDue(now);
   if (stateChanged || intervalDue) {
     // Interval didn't fire on its own but the hop-count change triggers a
@@ -65,10 +66,19 @@ void SerialAdapter::loop() {
     lastReportedHopCount = currentHopCount;
   }
 
-  while (Serial.available() > 0) {
-    uint8_t byteIn = static_cast<uint8_t>(Serial.read());
-    if (_framing.injectByte(byteIn)) {
-      handleCompleteFrame(_framing.frameBuffer(), _framing.frameLen());
+  // Phase I Task 5: native uart_driver read, non-blocking (ticks_to_wait=0).
+  // Driver already installed once at boot (main.cpp) — see UART_NUM_0 comment
+  // in SerialAdapter.h. Loop until the RX FIFO is drained (rather than one
+  // bounded read) to preserve the old Serial.available()-loop's behavior:
+  // a single loop() call fully drains whatever arrived since the last call,
+  // however many chunks of 64 that takes.
+  uint8_t rxBuf[64];
+  int rxLen;
+  while ((rxLen = uart_read_bytes(_uartNum, rxBuf, sizeof(rxBuf), 0)) > 0) {
+    for (int i = 0; i < rxLen; ++i) {
+      if (_framing.injectByte(rxBuf[i])) {
+        handleCompleteFrame(_framing.frameBuffer(), _framing.frameLen());
+      }
     }
   }
 }
@@ -101,8 +111,8 @@ void SerialAdapter::onMeshDataImpl(const lattice::mesh::mesh_message& message) {
 
   // 2-byte little-endian length prefix
   uint8_t lenLE[2] = {static_cast<uint8_t>(n & 0xFF), static_cast<uint8_t>((n >> 8) & 0xFF)};
-  Serial.write(lenLE, 2);
-  Serial.write(encoded, n);
+  uart_write_bytes(_uartNum, lenLE, 2);
+  uart_write_bytes(_uartNum, encoded, n);
 
   LATTICE_LOGLN("Serial_Adapter", "Mesh message sent to serial successfully", LogLevel::LOG_DEBUG);
 }
@@ -123,8 +133,10 @@ void SerialAdapter::relayEnrollmentToServer(const uint8_t* mac, const uint8_t* p
   }
 
   uint8_t lenLE[2] = {static_cast<uint8_t>(n & 0xFF), static_cast<uint8_t>((n >> 8) & 0xFF)};
-  Serial.write(lenLE, 2);
-  Serial.write(encoded, n);
+  // Static method — no adapter instance, so use UART_NUM_0 directly (the
+  // only UART port this firmware ever installs; see SerialAdapter.h).
+  uart_write_bytes(UART_NUM_0, lenLE, 2);
+  uart_write_bytes(UART_NUM_0, encoded, n);
   LATTICE_LOGLN("Serial_Adapter", "Enrollment request relayed to server", LogLevel::LOG_INFO);
 }
 
@@ -162,9 +174,13 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
         meshRef->debugDumpRadio();
         for (size_t i = 0; i < meshRef->getPeerCount(); ++i) {
           const lattice::mesh::PeerInfo& p = meshRef->getPeerList()[i];
-          Serial.printf("  Peer[%d]: %02X:%02X:%02X:%02X:%02X:%02X last=%lums\n", (int)i, p.mac[0],
-                        p.mac[1], p.mac[2], p.mac[3], p.mac[4], p.mac[5],
-                        (unsigned long)p.lastSeenMillis);
+          // Phase I Task 6 (NN): %lu -> %llu — lastSeenMs widened uint32_t ->
+          // uint64_t (FF); nano-format (CONFIG_LIBC_NEWLIB_NANO_FORMAT=y)
+          // requires an exact-width specifier match.
+          LATTICE_LOGF("SIM", LogLevel::LOG_WARN,
+                       "  Peer[%d]: %02X:%02X:%02X:%02X:%02X:%02X last=%llums", (int)i, p.mac[0],
+                       p.mac[1], p.mac[2], p.mac[3], p.mac[4], p.mac[5],
+                       (unsigned long long)p.lastSeenMs);
         }
       }
       return;

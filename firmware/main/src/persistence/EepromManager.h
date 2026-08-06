@@ -1,8 +1,12 @@
 #ifndef EEPROM_MANAGER_H
 #define EEPROM_MANAGER_H
 
-#include <Arduino.h>
-#include <Preferences.h>
+#include <cstdint>
+#include <cstddef>
+// Phase I Task 4: nvs_flash direct — replaces the Preferences wrapper with
+// straight ESP-IDF nvs_flash calls (nvs_open/nvs_get_*/nvs_set_*/nvs_commit).
+#include <nvs.h>
+#include <nvs_flash.h>
 #include "src/logging/Logger.h"
 #include "../../project_config.h"
 
@@ -15,6 +19,11 @@ constexpr const char* MASTER_FLAG = "master";
 constexpr const char* DEV_FLAG = "dev";
 constexpr const char* ADAPTER_TYPE = "adapter";
 constexpr const char* MESH_KEY = "meshkey";
+// Phase I Task 6 (JJ): retired — the peer list moved from this single combined
+// blob to per-record "peer0".."peer9" keys (built at runtime by
+// EepromManager.cpp's peerKey() helper) so PeerRegistry can load/save one
+// record at a time instead of a 380-byte stack buffer. Kept (unused) as a
+// migration/rollback reference, not read or written anywhere anymore.
 constexpr const char* PEER_LIST = "peers";
 constexpr const char* REBOOT_REASON = "rbt_reason";
 constexpr const char* REBOOT_COUNT = "rbt_count";
@@ -54,10 +63,14 @@ namespace detail {
 // (tests/e2e/harness/NodeContext.cpp) can still snapshot/restore it as a flat
 // byte image per simulated node -- the same technique it used against the
 // old singleton object.
+//
+// Phase I Task 4: no persistent Preferences/nvs_handle_t member anymore --
+// each operation opens/commits/closes its own short-lived nvs_handle_t (see
+// EepromManager.cpp), so this struct is a plain POD (safe for the harness's
+// memcpy-based image copy).
 struct State {
   bool isInitialized = false;
   bool isDevMode = false;
-  Preferences prefs;
   uint32_t devEpoch = 0; // DEV_MODE RAM-only monotonic boot-epoch seed (issue #43)
 };
 } // namespace detail
@@ -79,6 +92,20 @@ bool loadPeerList(uint8_t* peerRecords, size_t maxPeers);
 void savePeerList(const uint8_t* peerRecords, size_t numPeers);
 bool hasPeers();
 void clearPeerList();
+
+// Phase I Task 6 (JJ): per-key peer-record accessors — each record lives at
+// its own "peer0".."peer9" NVS key instead of one combined "peers" blob
+// (real nvs_get_blob has no offset/partial-read mode, so per-key naming is
+// the only way for a caller to stream records one at a time without holding
+// the whole MAX_PEERS*PEER_RECORD_SIZE array on the stack). loadPeerList/
+// savePeerList above are now thin loops over these three, kept for their
+// existing callers (main.cpp's default-peer bootstrap, host tests) — the
+// per-record functions exist so PeerRegistry can avoid the combined buffer
+// entirely. `record` must point to EEPROM_SIZES::PEER_RECORD_SIZE bytes.
+// index must be < EEPROM_SIZES::MAX_PEERS.
+bool loadPeerRecord(uint8_t index, uint8_t* record);
+void savePeerRecord(uint8_t index, const uint8_t* record);
+void erasePeerRecord(uint8_t index);
 
 uint8_t loadAdapterType();
 void saveAdapterType(uint8_t adapterType);

@@ -1,10 +1,21 @@
 # ESP-IDF default configuration for lattice-nodes firmware
 # Approach: arduino-esp32 as IDF component (spec §Phase 0)
 
-# Arduino-as-component: provides app_main() that calls setup()/loop()
-CONFIG_AUTOSTART_ARDUINO=y
+# Phase I Task 10 (item AAA): CONFIG_AUTOSTART_ARDUINO removed. This firmware
+# now owns app_main() directly (firmware/main/main.cpp) instead of letting
+# arduino-esp32's own app_main() call setup()/loop() on our behalf via its
+# Arduino loop task. Per arduino-esp32's own Kconfig help text for
+# AUTOSTART_ARDUINO ("If disabled, you can call initArduino() to run any
+# preparations required by the framework"), app_main() calls initArduino()
+# explicitly before anything that needs it (Logger.cpp's Serial-based
+# logging, the sole remaining Arduino API user — see non-goals).
+#
+# CONFIG_ARDUINO_LOOP_STACK_SIZE (previously 4096, sized per Task 6's
+# analysis for the old Arduino loop task) is gone with that task — the two
+# FreeRTOS tasks that replace it (the Task 9 mesh-drain task and this task's
+# housekeeping task) each size their own static stack directly in main.cpp
+# (4096 B each, same budget as before).
 CONFIG_FREERTOS_HZ=1000
-CONFIG_ARDUINO_LOOP_STACK_SIZE=8192
 
 # Flash: optimize for size + link-time optimization (Phase G §2, issue #52 lever 2).
 # gc-sections + function-sections are ESP-IDF defaults already.
@@ -18,26 +29,24 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Bluetooth: disabled — unused, saves ~10KB flash + heap
 CONFIG_BT_ENABLED=n
 
-# mbedtls: enable ChaCha20-Poly1305 (E2E AEAD, spec §1)
-# All three required — CHACHAPOLY depends on the other two
-CONFIG_MBEDTLS_CHACHA20_C=y
-CONFIG_MBEDTLS_POLY1305_C=y
-CONFIG_MBEDTLS_CHACHAPOLY_C=y
-CONFIG_MBEDTLS_HARDWARE_SHA=y
-
-# mbedtls: trim AES/GCM/CCM — E2E AEAD is ChaCha20-Poly1305 only (Phase A), TLS is off
-# (CONFIG_MBEDTLS_TLS_ENABLED=n below), so no RSA/TLS session code needs AES. (Phase G §3,
-# issue #52 lever 3.) CONFIG_MBEDTLS_HARDWARE_AES depends on MBEDTLS_AES_C, so it must go
-# off with it — leaving it =y here would be a dangling/inconsistent default.
+# Phase I Task 2 (item GG): mbedtls fully dropped from E2E crypto — E2ECrypto.h,
+# MeshCrypto.h, and RouteMac.h now call libsodium exclusively (see
+# firmware/main/idf_component.yml's espressif/libsodium dependency), so the
+# CHACHA20/POLY1305/CHACHAPOLY/HKDF/HARDWARE_SHA tuning that only existed for
+# those call sites is gone. CONFIG_MBEDTLS_AES_C/GCM_C/CCM_C/HARDWARE_AES/
+# TLS_ENABLED below are a SEPARATE, pre-existing Phase G/Phase A size trim
+# (this node has no TLS/HTTPS use at all, independent of which library E2E
+# crypto happens to call) — those stay =n. Measured: dropping them too (i.e.
+# deleting this whole block, matching the Task 2 brief's Step 13 literally)
+# silently re-enables mbedTLS's TLS stack + AES/GCM/CCM by falling back to
+# ESP-IDF's default (=y for all five), a +82KB regression relative to the
+# pre-Task-2 baseline (measured via a real mbedtls-linked build of this exact
+# tree) that has nothing to do with this task's E2E-crypto swap — see task
+# report.
 CONFIG_MBEDTLS_AES_C=n
 CONFIG_MBEDTLS_GCM_C=n
 CONFIG_MBEDTLS_CCM_C=n
 CONFIG_MBEDTLS_HARDWARE_AES=n
-
-# mbedtls: HKDF used by E2ECrypto::deriveE2EKeys to expand ECDH secret
-CONFIG_MBEDTLS_HKDF_C=y
-
-# mbedtls: trim unused suites (node has no TLS — keep X25519 + chachapoly + SHA-256)
 CONFIG_MBEDTLS_TLS_ENABLED=n
 
 # ESP-NOW and WiFi
@@ -52,3 +61,53 @@ CONFIG_NVS_ENCRYPTION=n
 CONFIG_ESP_TASK_WDT=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_ESP_TASK_WDT_PANIC=y
+
+# Phase I Task 1: log + WiFi trim (item LL + audit XX-AAA)
+CONFIG_LOG_DEFAULT_LEVEL_NONE=y
+
+# ESP-NOW is our only WiFi use: no AP association, no aggregation, no persisted creds
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+CONFIG_ESP_WIFI_ENABLE_WPA3_SAE=n
+CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
+
+# LWIP: no sockets used; disable TCP + UDP if arduino-esp32 WiFi.mode allows it.
+# NOTE: If Task 1 build fails with these, comment them out and leave a TODO to
+# re-enable them at Task 3 (which replaces WiFi.mode with raw esp_netif_new).
+CONFIG_LWIP_TCP_ENABLED=n
+CONFIG_LWIP_UDP_ENABLED=n
+
+# Phase I Task 2 follow-up: disable WiFi Enterprise to break the
+# esp_wifi -> MBEDTLS_TLS_ENABLED force-select chain (no AP association in
+# this firmware; pure ESP-NOW). LIBSODIUM_USE_MBEDTLS_SHA=y kept at default
+# — measured: routing libsodium SHA through mbedtls's HW-accelerated SHA256
+# is ~3KB smaller than libsodium's portable SHA256 impl (mbedtls is linked
+# anyway for esp_wifi's WPA/PMK path).
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
+
+# Phase I Task 6 (item NN): newlib-nano printf/scanf. Per ESP-IDF's own Kconfig
+# help text (components/newlib/Kconfig), this option "doesn't support 64-bit
+# integer formats" (%llu/%lld) at all -- not just "needs the right specifier",
+# contradicting the plan's original assumption. Verified (grep -rn "%ll"
+# firmware/main/) that the only %llu specifier in the firmware
+# (SerialAdapter.cpp's SIMULATE_MODE peer-dump line, printing the
+# now-uint64_t PeerInfo::lastSeenMs) is compiled out entirely under the
+# default SIMULATE_MODE=0 (project_config.h) -- so nano-format is safe for
+# the default/production build. If a SIMULATE_MODE=1 debug build is ever
+# combined with nano-format, that one debug line will render lastSeenMs
+# incorrectly (cosmetic only -- not wire, not safety-relevant).
+CONFIG_LIBC_NEWLIB_NANO_FORMAT=y
+
+# Phase I Task 9 (item EE): tickless idle + automatic dynamic frequency
+# scaling. CONFIG_FREERTOS_HZ=1000 already set above (Task 6) — verified, not
+# re-added. Paired with the esp_pm_configure(&pm_cfg) call in main.cpp's
+# app_main() (Task 10 moved this to be the last call in app_main(), after
+# both tasks are spawned; max 240MHz for master / pinned 80MHz for leaf nodes,
+# min 80MHz, light sleep enabled): with tickless idle, the FreeRTOS idle task
+# extends the tick period across idle stretches so the CPU can drop into
+# light sleep between wake sources rather than waking every 1ms tick just to
+# re-check "nothing to do".
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_PM_DFS_INIT_AUTO=y

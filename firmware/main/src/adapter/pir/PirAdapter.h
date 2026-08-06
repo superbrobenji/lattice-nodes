@@ -4,6 +4,7 @@
 #include "src/adapter/Adapter.h"
 #include "src/hardware/input/Pir.h"
 #include <cstdint>
+#include <esp_attr.h>
 
 namespace lattice {
 namespace adapter {
@@ -15,8 +16,8 @@ public:
   void loop() override;
   void onMeshDataImpl(const lattice::mesh::mesh_message& message) override;
 
-  // Trampoline for interrupt (must be static):
-  static void detectMotionTrampoline();
+  // Trampoline for interrupt (must be static + IRAM_ATTR):
+  static void IRAM_ATTR detectMotionTrampoline();
   static void sendDataTrampoline(adapter_types adapterType, uint8_t* data);
 
   // Singleton accessor (used by SerialAdapter in SIMULATE_MODE)
@@ -40,7 +41,9 @@ private:
   // Never configured differently at runtime — was a per-instance member,
   // now a compile-time constant (Phase G audit item K).
   static constexpr uint16_t _cooldownSeconds = 3;
-  uint32_t _lastTrigger;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+  // millis() -> esp_timer_get_time()/1000ULL swap.
+  uint64_t _lastTrigger;
   PirState _state{PirState::IDLE};
   bool _interruptEnabled;
   bool _initialized;

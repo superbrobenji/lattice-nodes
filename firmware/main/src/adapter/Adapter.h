@@ -1,7 +1,7 @@
 #ifndef ADAPTER_H
 #define ADAPTER_H
 
-#include <Arduino.h>
+#include <cstdint>
 #include <cstddef>
 
 // Include generated mesh message type — no circular dependency since lattice-protocol
@@ -85,8 +85,8 @@ protected:
   // the timer early for another reason (e.g. SerialAdapter firing a report
   // immediately on hop-count change) should call resetHealthTick() themselves
   // once they've sent.
-  bool healthTickDue(uint32_t now);
-  void resetHealthTick(uint32_t now);
+  bool healthTickDue(uint64_t now);
+  void resetHealthTick(uint64_t now);
 
   // ------------------------------------------------------------------------
   // Phase H2 audit item V: shared control-op dispatch table.
@@ -130,7 +130,9 @@ private:
   // or the FF:FF:FF:FF:FF:FF broadcast placeholder.
   static bool isTargetedAtSelf(const uint8_t* candidateMac);
 
-  uint32_t _lastHealthMillis = 0;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+  // millis() -> esp_timer_get_time()/1000ULL swap.
+  uint64_t _lastHealthMillis = 0;
 };
 
 } // namespace adapter

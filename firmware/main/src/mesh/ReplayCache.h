@@ -17,7 +17,9 @@ struct ReplayCache {
   // pad after mac. Field semantics are unchanged.
   struct Entry {
     uint32_t epoch;
-    uint32_t lastSeenMs;
+    // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+    // millis() -> esp_timer_get_time()/1000ULL swap.
+    uint64_t lastSeenMs;
     uint16_t seq;
     uint8_t mac[6];
     bool used;
@@ -46,7 +48,7 @@ struct ReplayCache {
   // floods > LATTICE_REPLAY_MAX_ORIGINS distinct origins re-deliver a genuine
   // older frame — AEAD still authenticates content, so worst-case is genuine
   // old delivery, not forgery. Size the knob to expected origins × 1.5.
-  inline bool isReplay(const mesh_message& msg, uint32_t nowMs) {
+  inline bool isReplay(const mesh_message& msg, uint64_t nowMs) {
     // 1. Find slot for this origin. Thinned via lattice::mac_table::find
     // (Phase H2 audit item Y).
     size_t found =

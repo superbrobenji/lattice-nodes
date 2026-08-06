@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <freertos/FreeRTOS.h>
+#include <freertos/ringbuf.h>
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 
 namespace lattice {
@@ -67,9 +69,15 @@ private:
     uint8_t mac[6];
     uint8_t pubKey[32];
   };
-  PendingRelay _pendingRelayQueue[PENDING_RELAY_QUEUE_SIZE]{};
-  size_t _pendingRelayHead{0};  // index of oldest queued entry
-  size_t _pendingRelayCount{0}; // number of queued entries
+
+  // Phase I Task 8 (item OO): static FreeRTOS ring buffer replaces the old
+  // head/count array above — same heap-free storage, FreeRTOS-native
+  // primitive instead of hand-rolled wraparound bookkeeping. See Mesh.h's
+  // recvQueue comment for the general rationale; the +128 pad is the same
+  // per-item header-overhead margin.
+  RingbufHandle_t _pendingRelayQueue = nullptr;
+  StaticRingbuffer_t _pendingRelayQueueStruct;
+  uint8_t _pendingRelayQueueStorage[PENDING_RELAY_QUEUE_SIZE * sizeof(PendingRelay) + 128];
 
   EnrollmentRelayFn _enrollmentRelayFn{nullptr};
 

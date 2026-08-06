@@ -1,7 +1,7 @@
 #ifndef GPIO_IN
 #define GPIO_IN
 
-#include <Arduino.h>
+#include <cstdint>
 
 namespace lattice {
 namespace hardware {

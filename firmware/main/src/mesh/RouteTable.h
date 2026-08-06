@@ -25,7 +25,7 @@ public:
   RouteTable(RouteTable&&) = default;
   RouteTable& operator=(RouteTable&&) = default;
 
-  void record(const uint8_t* nodeMac, const uint8_t* path, uint8_t pathLen, uint32_t nowMillis) {
+  void record(const uint8_t* nodeMac, const uint8_t* path, uint8_t pathLen, uint64_t nowMs) {
     if (pathLen > config::MAX_HOPS)
       return; // parse-safety: never store an overlong path
     Entry* slot = findSlot(nodeMac);
@@ -35,7 +35,7 @@ public:
     slot->pathLen = pathLen;
     if (pathLen)
       memcpy(slot->path, path, static_cast<size_t>(pathLen) * 6);
-    slot->lastSeenMillis = nowMillis;
+    slot->lastSeenMs = nowMs;
     slot->valid = true;
   }
 
@@ -59,7 +59,7 @@ private:
     uint8_t nodeMac[6];
     uint8_t pathLen;
     bool valid;
-    uint32_t lastSeenMillis;
+    uint64_t lastSeenMs;
     uint8_t path[config::MAX_HOPS * 6]; // 48 bytes (MAX_HOPS=8), matches route_path[]
   };
   Entry entries[config::LATTICE_ROUTE_TABLE_MAX]{};
@@ -78,8 +78,8 @@ private:
     for (size_t i = 0; i < config::LATTICE_ROUTE_TABLE_MAX; ++i)
       if (!entries[i].valid)
         return &entries[i];
-    size_t idx = lattice::mac_table::evict_oldest_by_ts(
-        entries, config::LATTICE_ROUTE_TABLE_MAX, sizeof(Entry), offsetof(Entry, lastSeenMillis));
+    size_t idx = lattice::mac_table::evict_oldest_by_ts(entries, config::LATTICE_ROUTE_TABLE_MAX,
+                                                        sizeof(Entry), offsetof(Entry, lastSeenMs));
     return &entries[idx];
   }
 };

@@ -1,6 +1,7 @@
 #pragma once
 #include <esp_system.h>
-#include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "src/persistence/EepromManager.h"
 #include "src/logging/Logger.h"
 
@@ -15,11 +16,13 @@ struct BootManager {
       uint8_t count = lattice::eeprom::loadRebootCount();
       count++;
       lattice::eeprom::saveRebootCount(count);
-      Serial.printf("[BOOT] WDT reset #%d (reason: %d)\n", count, (int)reason);
+      LATTICE_LOGF("BOOT", lattice::utils::LogLevel::LOG_INFO, "WDT reset #%d (reason: %d)", count,
+                   (int)reason);
       if (count >= 5) {
-        Serial.println("[BOOT] WDT loop detected — halting. Manual reset required.");
+        LATTICE_LOGLN("BOOT", "WDT loop detected — halting. Manual reset required.",
+                      lattice::utils::LogLevel::LOG_WARN);
         while (true) {
-          delay(1000);
+          vTaskDelay(pdMS_TO_TICKS(1000));
         }
       }
     } else {

@@ -3,9 +3,14 @@
 
 #include <functional>
 #include <esp_now.h>
-#include <WiFi.h>
-#include <Arduino.h>
+#include <esp_attr.h>
 #include <esp_wifi.h>
+#include <esp_netif.h>
+#include <esp_event.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/ringbuf.h>
+#include <freertos/task.h>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -76,8 +81,12 @@ private:
 
   MasterInfo currentMaster;
   bool isMaster;
-  uint32_t lastBeaconMillis;
-  uint32_t lastMasterBeaconReceivedMs;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+  // millis() -> esp_timer_get_time()/1000ULL swap. lastBeaconMillis is NOT
+  // renamed to lastBeaconMs to avoid colliding with the (separate, unrelated)
+  // lastBeaconMs field further down this class.
+  uint64_t lastBeaconMillis;
+  uint64_t lastMasterBeaconReceivedMs;
   static constexpr uint32_t STALE_MASTER_THRESHOLD_MS = lattice::config::STALE_MASTER_THRESHOLD_MS;
 
   // Peer routing (uses currentMaster — stays in Mesh)
@@ -158,13 +167,16 @@ private:
   ReplayCache& testReplay() { return replay; }
   NeighborTable& testNeighbors() { return neighbors; }
   RouteTable* testRoutes() { return routes.get(); }
-  uint32_t testMillisNow() { return millis(); } // exposes the node's mocked clock to tests
+  // Exposes the node's mocked clock to tests. Phase I Task 6 (FF): return
+  // type widened uint32_t -> uint64_t to match esp_timer_get_time()/1000ULL.
+  uint64_t testMillisNow() { return static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL; }
   const uint8_t* testDeviceMac() const { return deviceMacAddress; }
 #endif
 
   // Relay jitter: deferred relay pending fields (Task 3)
   mesh_message relayPendingMsg;
-  uint32_t relayPendingAt;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t (absolute deadline in ms).
+  uint64_t relayPendingAt;
   bool relayPending;
 
   bool _dualMasterMode;
@@ -192,17 +204,40 @@ private:
     mesh_message msg;
   };
 
-  RecvQueueEntry recvQueue[RECV_QUEUE_SIZE];
-  volatile uint8_t recvQueueHead; // written by WiFi task (callback)
-  uint8_t recvQueueTail;          // read by main task (loop)
+  // Phase I Task 8 (item OO): static FreeRTOS ring buffer replaces the
+  // hand-rolled head/tail/count SPSC array above. RINGBUF_TYPE_NOSPLIT keeps
+  // each xRingbufferReceive() call returning a contiguous pointer to one
+  // whole RecvQueueEntry (never split across the wrap boundary), matching
+  // the old array's per-slot semantics. Storage is a static member array —
+  // xRingbufferCreateStatic() places the ring entirely inside it, so this
+  // stays heap-free like the array it replaces. The +128 pads for the ring's
+  // internal per-item header overhead (a few bytes/item); real usage is
+  // RECV_QUEUE_SIZE * (sizeof(RecvQueueEntry) + ~8).
+  RingbufHandle_t recvQueue = nullptr;
+  StaticRingbuffer_t _recvQueueStruct;
+  uint8_t _recvQueueStorage[RECV_QUEUE_SIZE * sizeof(RecvQueueEntry) + 128];
+
+  // Phase I Task 9 (item EE): handle of the dedicated mesh-drain task (owned by
+  // main.cpp — see mesh_task_fn / setDrainNotifyHandle()). The RX-ISR
+  // trampoline (onDataRecvCallback) notifies this task via
+  // vTaskNotifyGiveFromISR immediately after enqueueing into recvQueue, so the
+  // task wakes to drain instead of a polling loop discovering the item on its
+  // next tick. Null (never set) is a valid state — the host unit-test /
+  // SimNode harness has no real FreeRTOS task and calls drain() directly, and
+  // onDataRecvCallback null-checks before notifying.
+  TaskHandle_t drainNotifyHandle_ = nullptr;
 
   void drainRecvQueue();
   bool sendRouteReport();
   void processRouteReport(const mesh_message& msg);
 
-  // Beacon timer (moved from broadcastMasterBeacon for loop() integration)
-  uint32_t lastBeaconMs;
-  uint32_t lastRouteReportMs;
+  // Beacon timer (moved from broadcastMasterBeacon for loop() integration).
+  // lastBeaconMs is currently dead (unused outside its zero-init in the
+  // constructor) — pre-existing, out of Task 6's scope — retyped for
+  // consistency with the rest of this FF sweep rather than left a stale
+  // uint32_t.
+  uint64_t lastBeaconMs;
+  uint64_t lastRouteReportMs;
 
   // Enrollment state (composed — mbedtls-heavy methods stubbed in test builds)
   Enrollment enrollment;
@@ -325,6 +360,27 @@ public:
   // Drain pending work queued from ISR/callback contexts (call from main loop())
   void loop();
 
+  // Phase I Task 9 (item EE): drain the ESP-NOW receive ring buffer
+  // (recvQueue) until empty, dispatching each entry the same way
+  // drainRecvQueue() always has. Previously drainRecvQueue() ran inline as
+  // the first statement of loop(); it now runs from a dedicated FreeRTOS task
+  // (main.cpp's mesh_task_fn) woken by xTaskNotifyWait() when
+  // onDataRecvCallback's ISR trampoline signals drainNotifyHandle_ — see
+  // setDrainNotifyHandle() below. loop() no longer drains recvQueue itself.
+  // Public (unlike drainRecvQueue) so main.cpp's task body and the host
+  // unit-test / SimNode harness — which has no real FreeRTOS task — can both
+  // call it directly.
+  void drain() { drainRecvQueue(); }
+
+  // Registers the dedicated mesh task's handle so onDataRecvCallback's ISR
+  // trampoline can wake it via vTaskNotifyGiveFromISR after enqueueing into
+  // recvQueue. Call once from main.cpp's setup(), after the task is created.
+  // A null handle (the default, and the state throughout host/SimNode tests)
+  // is valid — onDataRecvCallback null-checks before notifying, so the ISR
+  // path simply skips the notify and drain() must instead be driven directly
+  // (as it is by SimNode::tick() and the unit tests).
+  void setDrainNotifyHandle(TaskHandle_t handle) { drainNotifyHandle_ = handle; }
+
   // Node role config
   // Re-evaluates the RouteTable allocation (issue #51) on every role change,
   // not just from init(): both main.cpp and the e2e SimNode harness call
@@ -423,13 +479,12 @@ public:
 #if SIMULATE_MODE
   // Inject a message directly into the receive queue (bypasses radio — for dev/test only)
   void injectReceivedMessage(const uint8_t* srcMac, const mesh_message& msg) {
-    uint8_t nextHead = (recvQueueHead + 1) % RECV_QUEUE_SIZE;
-    if (nextHead == recvQueueTail)
-      return; // Queue full — drop
-    RecvQueueEntry& slot = recvQueue[recvQueueHead];
-    memcpy(slot.srcMac, srcMac, 6);
-    slot.msg = msg;
-    recvQueueHead = nextHead;
+    RecvQueueEntry entry;
+    memcpy(entry.srcMac, srcMac, 6);
+    entry.msg = msg;
+    // Non-blocking send (0 ticks); silently dropped if full, matching the
+    // old array-based "Queue full — drop" behavior.
+    xRingbufferSend(recvQueue, &entry, sizeof(entry), 0);
   }
 #endif
 };
