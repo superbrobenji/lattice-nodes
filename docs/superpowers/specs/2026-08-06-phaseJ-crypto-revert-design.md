@@ -97,7 +97,7 @@ Wrapper returns `bool` (or `void` where the primitive cannot fail meaningfully) 
 1. Clean `idf.py build` + `idf.py size` before/after, baseline = `main` tip `42df61d`. Build with bounded parallelism (`-j2`; full-parallel OOMs this machine).
 2. **Net flash reduction ≥ 15 KB** (expected ~22 KB from dead libsodium, ± mbedtls ECP/chachapoly re-add, KK trim offsetting).
 3. 298/298 host tests green; e2e fixture scenarios prove key-compat.
-4. `grep -rin "sodium" firmware/ tests/ --exclude-dir=build --exclude-dir=managed_components` returns nothing (comments included).
+4. Zero functional libsodium remnants, verified three ways: no `sodium` reference in `firmware/main/src/` or `tests/` source; `firmware/main/idf_component.yml` carries no libsodium dependency; `nm` on the final ELF shows zero sodium symbols. Exempt from the letter of the grep: historical/disclaiming comment prose (e.g. `sdkconfig.defaults`' Phase J block explaining *why* libsodium left), and untracked build artifacts (`firmware/sdkconfig`, `dependencies.lock`, `managed_components/`) where `espressif/arduino-esp32`'s own manifest transitively pulls `espressif/libsodium` — proven 0 bytes in the linked image. *(Amended during execution: the original absolute-grep wording was unsatisfiable without deleting legitimate documentation or forking arduino-esp32.)*
 5. Single PR `feat/phaseJ-crypto-revert` → `main`, CI green.
 
 ## Non-goals

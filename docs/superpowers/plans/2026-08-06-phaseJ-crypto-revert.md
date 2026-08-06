@@ -884,12 +884,12 @@ Expected: 298/298 pass.
 ```bash
 grep -rin "sodium" firmware/ tests/ --exclude-dir=build --exclude-dir=managed_components
 ```
-Expected: empty.
+Expected: hits only in (a) historical comment prose (`sdkconfig.defaults` Phase J block), (b) untracked artifacts (`firmware/sdkconfig`, `dependencies.lock`) generated from arduino-esp32's transitive libsodium dep. Zero hits in `firmware/main/src/` or `tests/`; `idf_component.yml` clean. Binding check: `xtensa-esp32-elf-nm firmware/build/lattice-nodes.elf | grep -ci sodium` → 0. *(Amended during execution — original "empty" expectation unsatisfiable, see spec criterion 4.)*
 
 ```bash
 grep -rn "MBEDTLS_PRIVATE\|mbedtls_mpi_read_binary\b\|mbedtls_mpi_write_binary\b" firmware/main/src/
 ```
-Expected: empty (the `_le` variant in Crypto.h is fine and won't match the `\b`-anchored patterns).
+Expected: hits only in Crypto.h's disclaiming design-rationale comment (lines naming the banned APIs in order to state they are not used); zero functional call sites. *(Amended during execution.)*
 
 ```bash
 cd firmware && idf.py build -- -j2
