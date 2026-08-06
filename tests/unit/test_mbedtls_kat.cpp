@@ -1,0 +1,135 @@
+#include <gtest/gtest.h>
+#include <cstring>
+#include "src/crypto/Crypto.h"
+
+// Phase J (crypto revert): known-answer tests for the lattice::crypto wrapper
+// (firmware/main/src/crypto/Crypto.h) — the only mbedtls call surface in the
+// firmware. These pin the exact byte outputs published in the governing RFCs
+// so a broken/misconfigured mbedtls build on either host or ESP-IDF target
+// fails loudly here rather than as a silent wire-format break downstream.
+// The X25519 test doubles as coverage of the wrapper's private BE<->LE
+// conversion: RFC 7748 vectors are little-endian, the wrapper API speaks this
+// codebase's big-endian storage/wire convention, so the vectors go in
+// byte-reversed and the (LE-native, used-verbatim) secret comes out matching
+// the RFC expectation directly.
+
+namespace {
+void reverse32(const uint8_t in[32], uint8_t out[32]) {
+  for (int i = 0; i < 32; ++i) {
+    out[i] = in[31 - i];
+  }
+}
+} // namespace
+
+// RFC 8439 §2.8.2 — ChaCha20-Poly1305 (IETF) AEAD, full 114-byte ciphertext +
+// tag + decrypt round trip + tamper rejection, via aead_seal/aead_open.
+TEST(MbedtlsKat, ChaCha20Poly1305Rfc8439) {
+  const uint8_t key[32] = {0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a,
+                           0x8b, 0x8c, 0x8d, 0x8e, 0x8f, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95,
+                           0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f};
+  const uint8_t nonce[12] = {0x07, 0x00, 0x00, 0x00, 0x40, 0x41,
+                             0x42, 0x43, 0x44, 0x45, 0x46, 0x47};
+  const uint8_t aad[12] = {0x50, 0x51, 0x52, 0x53, 0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7};
+  const char* plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you "
+                          "only one tip for the future, sunscreen would be it.";
+  ASSERT_EQ(114u, strlen(plaintext));
+
+  const uint8_t expectedCt[114] = {
+      0xd3, 0x1a, 0x8d, 0x34, 0x64, 0x8e, 0x60, 0xdb, 0x7b, 0x86, 0xaf, 0xbc, 0x53, 0xef, 0x7e,
+      0xc2, 0xa4, 0xad, 0xed, 0x51, 0x29, 0x6e, 0x08, 0xfe, 0xa9, 0xe2, 0xb5, 0xa7, 0x36, 0xee,
+      0x62, 0xd6, 0x3d, 0xbe, 0xa4, 0x5e, 0x8c, 0xa9, 0x67, 0x12, 0x82, 0xfa, 0xfb, 0x69, 0xda,
+      0x92, 0x72, 0x8b, 0x1a, 0x71, 0xde, 0x0a, 0x9e, 0x06, 0x0b, 0x29, 0x05, 0xd6, 0xa5, 0xb6,
+      0x7e, 0xcd, 0x3b, 0x36, 0x92, 0xdd, 0xbd, 0x7f, 0x2d, 0x77, 0x8b, 0x8c, 0x98, 0x03, 0xae,
+      0xe3, 0x28, 0x09, 0x1b, 0x58, 0xfa, 0xb3, 0x24, 0xe4, 0xfa, 0xd6, 0x75, 0x94, 0x55, 0x85,
+      0x80, 0x8b, 0x48, 0x31, 0xd7, 0xbc, 0x3f, 0xf4, 0xde, 0xf0, 0x8e, 0x4b, 0x7a, 0x9d, 0xe5,
+      0x76, 0xd2, 0x65, 0x86, 0xce, 0xc6, 0x4b, 0x61, 0x16};
+  const uint8_t expectedTag[16] = {0x1a, 0xe1, 0x0b, 0x59, 0x4f, 0x09, 0xe2, 0x6a,
+                                   0x7e, 0x90, 0x2e, 0xcb, 0xd0, 0x60, 0x06, 0x91};
+
+  uint8_t buf[114];
+  memcpy(buf, plaintext, 114);
+  uint8_t tag[16];
+  ASSERT_TRUE(lattice::crypto::aead_seal(key, nonce, aad, sizeof(aad), buf, 114, tag));
+  EXPECT_EQ(0, memcmp(buf, expectedCt, sizeof(buf)));
+  EXPECT_EQ(0, memcmp(tag, expectedTag, sizeof(tag)));
+
+  ASSERT_TRUE(lattice::crypto::aead_open(key, nonce, aad, sizeof(aad), buf, 114, tag));
+  EXPECT_EQ(0, memcmp(buf, plaintext, 114));
+
+  // Tamper rejection: flip one ciphertext bit, open must fail.
+  ASSERT_TRUE(lattice::crypto::aead_seal(key, nonce, aad, sizeof(aad), buf, 114, tag));
+  buf[0] ^= 0x01;
+  EXPECT_FALSE(lattice::crypto::aead_open(key, nonce, aad, sizeof(aad), buf, 114, tag));
+}
+
+// RFC 7748 §5.2, X25519 Test 1. RFC bytes are LE; wrapper takes BE — reversal
+// at the test boundary IS the conversion under test. Output secret is
+// LE-native and used verbatim, so it compares against the RFC bytes directly.
+TEST(MbedtlsKat, X25519Rfc7748Test1) {
+  const uint8_t scalarLE[32] = {0xa5, 0x46, 0xe3, 0x6b, 0xf0, 0x52, 0x7c, 0x9d, 0x3b, 0x16, 0x15,
+                                0x4b, 0x82, 0x46, 0x5e, 0xdd, 0x62, 0x14, 0x4c, 0x0a, 0xc1, 0xfc,
+                                0x5a, 0x18, 0x50, 0x6a, 0x22, 0x44, 0xba, 0x44, 0x9a, 0xc4};
+  const uint8_t uLE[32] = {0xe6, 0xdb, 0x68, 0x67, 0x58, 0x30, 0x30, 0xdb, 0x35, 0x94, 0xc1,
+                           0xa4, 0x24, 0xb1, 0x5f, 0x7c, 0x72, 0x66, 0x24, 0xec, 0x26, 0xb3,
+                           0x35, 0x3b, 0x10, 0xa9, 0x03, 0xa6, 0xd0, 0xab, 0x1c, 0x4c};
+  const uint8_t expected[32] = {0xc3, 0xda, 0x55, 0x37, 0x9d, 0xe9, 0xc6, 0x90, 0x8e, 0x94, 0xea,
+                                0x4d, 0xf2, 0x8d, 0x08, 0x4f, 0x32, 0xec, 0xcf, 0x03, 0x49, 0x1c,
+                                0x71, 0xf7, 0x54, 0xb4, 0x07, 0x55, 0x77, 0xa2, 0x85, 0x52};
+
+  uint8_t scalarBE[32], uBE[32], out[32];
+  reverse32(scalarLE, scalarBE);
+  reverse32(uLE, uBE);
+  ASSERT_TRUE(lattice::crypto::x25519_shared(scalarBE, uBE, out));
+  EXPECT_EQ(0, memcmp(out, expected, sizeof(expected)));
+}
+
+// RFC 5869 Appendix A.1, Test Case 1 — HKDF-SHA256 through the wrapper's
+// generalized signature (deriveE2EKeys() uses the narrow salt=NULL/0 shape).
+TEST(MbedtlsKat, HkdfSha256Rfc5869TestCase1) {
+  uint8_t ikm[22];
+  memset(ikm, 0x0b, sizeof(ikm));
+  const uint8_t salt[13] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+                            0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c};
+  const uint8_t info[10] = {0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9};
+
+  const uint8_t expectedOkm[42] = {0x3c, 0xb2, 0x5f, 0x25, 0xfa, 0xac, 0xd5, 0x7a, 0x90, 0x43, 0x4f,
+                                   0x64, 0xd0, 0x36, 0x2f, 0x2a, 0x2d, 0x2d, 0x0a, 0x90, 0xcf, 0x1a,
+                                   0x5a, 0x4c, 0x5d, 0xb0, 0x2d, 0x56, 0xec, 0xc4, 0xc5, 0xbf, 0x34,
+                                   0x00, 0x72, 0x08, 0xd5, 0xb8, 0x87, 0x18, 0x58, 0x65};
+
+  uint8_t okm[42];
+  ASSERT_TRUE(lattice::crypto::hkdf_sha256(ikm, sizeof(ikm), salt, sizeof(salt), info,
+                                           sizeof(info), okm, sizeof(okm)));
+  EXPECT_EQ(0, memcmp(okm, expectedOkm, sizeof(expectedOkm)));
+}
+
+// RFC 4231 Test Case 2 — HMAC-SHA256 ("Jefe"). Expected bytes independently
+// re-derived via Python stdlib hmac before being trusted here (see plan).
+TEST(MbedtlsKat, HmacSha256Rfc4231TestCase2) {
+  const uint8_t key[4] = {'J', 'e', 'f', 'e'};
+  const char* data = "what do ya want for nothing?";
+  const uint8_t expected[32] = {0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e,
+                                0x6a, 0x04, 0x24, 0x26, 0x08, 0x95, 0x75, 0xc7,
+                                0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27, 0x39, 0x83,
+                                0x9d, 0xec, 0x58, 0xb9, 0x64, 0xec, 0x38, 0x43};
+  uint8_t out[32];
+  ASSERT_TRUE(lattice::crypto::hmac_sha256(key, sizeof(key),
+                                           reinterpret_cast<const uint8_t*>(data), strlen(data),
+                                           out));
+  EXPECT_EQ(0, memcmp(out, expected, sizeof(expected)));
+}
+
+// Keygen + ECDH self-consistency in the BE convention: two fresh keypairs,
+// both shared-secret directions agree and are nonzero. Validates
+// x25519_keygen's export path against x25519_shared's import path before any
+// consumer (Task 2) depends on them.
+TEST(MbedtlsKat, KeygenSharedRoundTrip) {
+  uint8_t aPriv[32], aPub[32], bPriv[32], bPub[32], s1[32], s2[32];
+  ASSERT_TRUE(lattice::crypto::x25519_keygen(aPriv, aPub));
+  ASSERT_TRUE(lattice::crypto::x25519_keygen(bPriv, bPub));
+  ASSERT_TRUE(lattice::crypto::x25519_shared(aPriv, bPub, s1));
+  ASSERT_TRUE(lattice::crypto::x25519_shared(bPriv, aPub, s2));
+  EXPECT_EQ(0, memcmp(s1, s2, sizeof(s1)));
+  const uint8_t zero[32] = {0};
+  EXPECT_NE(0, memcmp(s1, zero, sizeof(zero)));
+}

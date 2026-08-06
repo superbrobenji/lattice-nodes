@@ -14,6 +14,24 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+# mbedtls — real ChaCha20-Poly1305/X25519/HKDF/HMAC for lattice::crypto
+# (firmware/main/src/crypto/Crypto.h) on host. Pinned to the same 3.6.x line
+# ESP-IDF 5.5.1 bundles (Phase J revert — spec
+# docs/superpowers/specs/2026-08-06-phaseJ-crypto-revert-design.md).
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)      # mbedtls' own tests
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+# Newer AppleClang enables -Wunterminated-string-initialization, which mbedtls's
+# TLS layer (not needed here — only mbedcrypto is linked) trips on;
+# MBEDTLS_FATAL_WARNINGS would promote it to -Werror while compiling it.
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  mbedtls
+  URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
+  URL_HASH SHA256=8b54fb9bcf4d5a7078028e0520acddefb7900b3e66fec7f7175bb5b7d85ccdca
+  DOWNLOAD_EXTRACT_TIMESTAMP ON
+)
+FetchContent_MakeAvailable(mbedtls)
+
 # libsodium — real X25519/ChaCha20-Poly1305/HKDF-SHA256/HMAC-SHA256 for
 # Enrollment/MeshCrypto/E2ECrypto/RouteMac on host (Phase I Task 2, item GG —
 # was mbedtls, FetchContent'd above until this swap). libsodium doesn't ship a
@@ -150,6 +168,9 @@ add_unit_test(test_compact_message    unit/test_compact_message.cpp)
 add_unit_test(test_button             unit/test_button.cpp)
 add_unit_test(test_display_manager    unit/test_display_manager.cpp)
 add_unit_test(test_libsodium_kat      unit/test_libsodium_kat.cpp)
+
+add_unit_test(test_mbedtls_kat        unit/test_mbedtls_kat.cpp)
+target_link_libraries(test_mbedtls_kat mbedcrypto)
 
 # ---- E2E simulation target — SIMULATE_MODE recompiles all firmware sources ----
 add_executable(lattice_e2e
