@@ -1,24 +1,21 @@
 # ESP-IDF default configuration for lattice-nodes firmware
 # Approach: arduino-esp32 as IDF component (spec §Phase 0)
 
-# Arduino-as-component: provides app_main() that calls setup()/loop()
-CONFIG_AUTOSTART_ARDUINO=y
+# Phase I Task 10 (item AAA): CONFIG_AUTOSTART_ARDUINO removed. This firmware
+# now owns app_main() directly (firmware/main/main.cpp) instead of letting
+# arduino-esp32's own app_main() call setup()/loop() on our behalf via its
+# Arduino loop task. Per arduino-esp32's own Kconfig help text for
+# AUTOSTART_ARDUINO ("If disabled, you can call initArduino() to run any
+# preparations required by the framework"), app_main() calls initArduino()
+# explicitly before anything that needs it (Logger.cpp's Serial-based
+# logging, the sole remaining Arduino API user — see non-goals).
+#
+# CONFIG_ARDUINO_LOOP_STACK_SIZE (previously 4096, sized per Task 6's
+# analysis for the old Arduino loop task) is gone with that task — the two
+# FreeRTOS tasks that replace it (the Task 9 mesh-drain task and this task's
+# housekeeping task) each size their own static stack directly in main.cpp
+# (4096 B each, same budget as before).
 CONFIG_FREERTOS_HZ=1000
-# Phase I Task 6 (item II): 8192 -> 4096. Real-hardware
-# uxTaskGetStackHighWaterMark() measurement wasn't available from this
-# worktree (no flashable device), so this is a compile-time estimate instead
-# of Step 6's live measurement — see task-6-report.md "Stack sizing rationale"
-# for the -fstack-usage-verified per-function frame sizes behind it. Deepest
-# verified loop-task call chain (master forwarding a route report to serial:
-# loop -> Mesh::loop -> drainRecvQueue -> processRouteReport -> onMeshData ->
-# SerialAdapter::onMeshDataImpl -> SerialFraming::encode) sums to ~1.4 KB of
-# firmware-code stack frames, leaving >2.5 KB of the new 4096 B budget
-# unaccounted for by vendored library internals (libsodium, ESP-NOW,
-# nvs_flash, uart driver) not covered by -fstack-usage in this analysis.
-# Recommend confirming with a live uxTaskGetStackHighWaterMark() reading at
-# the next hardware-in-loop opportunity before this ships to a production
-# fleet.
-CONFIG_ARDUINO_LOOP_STACK_SIZE=4096
 
 # Flash: optimize for size + link-time optimization (Phase G §2, issue #52 lever 2).
 # gc-sections + function-sections are ESP-IDF defaults already.
@@ -104,11 +101,13 @@ CONFIG_LIBC_NEWLIB_NANO_FORMAT=y
 
 # Phase I Task 9 (item EE): tickless idle + automatic dynamic frequency
 # scaling. CONFIG_FREERTOS_HZ=1000 already set above (Task 6) — verified, not
-# re-added. Paired with the esp_pm_configure(&pm_cfg) call added in
-# main.cpp's setup() (max 240MHz / min 80MHz / light sleep enabled): with
-# tickless idle, the FreeRTOS idle task extends the tick period across idle
-# stretches so the CPU can drop into light sleep between wake sources rather
-# than waking every 1ms tick just to re-check "nothing to do".
+# re-added. Paired with the esp_pm_configure(&pm_cfg) call in main.cpp's
+# app_main() (Task 10 moved this to be the last call in app_main(), after
+# both tasks are spawned; max 240MHz for master / pinned 80MHz for leaf nodes,
+# min 80MHz, light sleep enabled): with tickless idle, the FreeRTOS idle task
+# extends the tick period across idle stretches so the CPU can drop into
+# light sleep between wake sources rather than waking every 1ms tick just to
+# re-check "nothing to do".
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_PM_DFS_INIT_AUTO=y

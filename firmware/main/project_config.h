@@ -14,7 +14,7 @@
 #define LATTICE_DEFAULT_LOG_LEVEL 4 // mirrors lattice::utils::LogLevel::LOG_NONE
 #endif
 
-#include <Arduino.h>
+#include <cstdint>
 #include "src/logging/Logger.h"
 #include "src/adapter/Adapter.h"
 

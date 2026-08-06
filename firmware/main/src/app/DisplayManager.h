@@ -1,6 +1,5 @@
 #pragma once
 #include <cstdint>
-#include <Arduino.h>
 #include <esp_timer.h>
 #include "src/hardware/output/SevenSegDisplay.h"
 

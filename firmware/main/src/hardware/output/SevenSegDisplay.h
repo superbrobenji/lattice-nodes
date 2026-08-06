@@ -1,7 +1,7 @@
 #ifndef SEVENSEGDISPLAY_H
 #define SEVENSEGDISPLAY_H
 
-#include <Arduino.h>
+#include <cstdint>
 #include "GpioOutput.h"
 
 namespace lattice {

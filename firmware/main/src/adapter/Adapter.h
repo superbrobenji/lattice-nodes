@@ -1,7 +1,7 @@
 #ifndef ADAPTER_H
 #define ADAPTER_H
 
-#include <Arduino.h>
+#include <cstdint>
 #include <cstddef>
 
 // Include generated mesh message type — no circular dependency since lattice-protocol
