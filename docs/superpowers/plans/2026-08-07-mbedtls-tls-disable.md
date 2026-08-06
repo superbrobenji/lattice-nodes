@@ -187,10 +187,13 @@ If reverted: no commit; report the measured numbers and the revert decision.
 # CONFIG_MBEDTLS_TLS_DISABLED=y (below) makes TLS_ENABLED=n real (spec
 # docs/superpowers/specs/2026-08-07-mbedtls-tls-disable-design.md). NOTE:
 # AES_C/ECDSA_C/CMAC_C/SECP256R1 remain force-selected =y by
-# ESP_WIFI_MBEDTLS_CRYPTO (esp_wifi Kconfig, default y) — NOT the TLS chain
-# as Phase J's earlier comment said; corrected here. Flipping that to =n was
-# measured to GROW the image (wpa_supplicant internal-crypto fallback) and
-# was deliberately not shipped — see the follow-up spec's decision rule.
+# ESP_WIFI_MBEDTLS_CRYPTO (esp_wifi Kconfig, default y, also selected by
+# WPA3 OWE_STA) — NOT the TLS chain as Phase J's earlier comment said;
+# corrected here. Ending those selects is INFEASIBLE on this ESP-IDF
+# version: AES_C can never be off (the port hardcodes MBEDTLS_CTR_DRBG_C,
+# which requires it), and ESP_WIFI_MBEDTLS_CRYPTO=n fails at link
+# ("undefined reference to sha1_vector" — wpa_supplicant's internal-crypto
+# fallback is broken upstream). See the follow-up spec's final-outcome note.
 ```
 
 - [ ] **Step 2: Rewrite the KK comment block.** Replace lines 121-125 (from `# Phase J item KK (revived):...` through `# ...stripped by LTO/gc-sections).`) with:
