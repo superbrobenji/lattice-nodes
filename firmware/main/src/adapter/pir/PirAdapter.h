@@ -15,8 +15,8 @@ public:
   void loop() override;
   void onMeshDataImpl(const lattice::mesh::mesh_message& message) override;
 
-  // Trampoline for interrupt (must be static):
-  static void detectMotionTrampoline();
+  // Trampoline for interrupt (must be static + IRAM_ATTR):
+  static void IRAM_ATTR detectMotionTrampoline();
   static void sendDataTrampoline(adapter_types adapterType, uint8_t* data);
 
   // Singleton accessor (used by SerialAdapter in SIMULATE_MODE)

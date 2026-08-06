@@ -45,7 +45,7 @@ bool PirAdapter::init() {
   return true;
 }
 
-void PirAdapter::detectMotionTrampoline() {
+void IRAM_ATTR PirAdapter::detectMotionTrampoline() {
   if (instance)
     instance->detectMotion();
 }
