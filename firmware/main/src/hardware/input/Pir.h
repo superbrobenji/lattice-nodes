@@ -28,7 +28,7 @@ private:
   // invoked by isrTrampoline(), which native gpio_isr_handler_add() actually
   // registers (its handler signature takes a void* arg, not a zero-arg fn).
   void (*_isrCallback)() = nullptr;
-  static void isrTrampoline(void* arg);
+  static void IRAM_ATTR isrTrampoline(void* arg);
 };
 
 } // namespace hardware

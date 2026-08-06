@@ -25,7 +25,7 @@ void Pir::clearMotion() {
 // void(*)(void*) — this trampoline recovers the Pir instance from `arg` and
 // forwards to whichever zero-arg callback attachInterrupt() was given (the
 // public API is unchanged: callers still pass a plain void(*)()).
-void Pir::isrTrampoline(void* arg) {
+void IRAM_ATTR Pir::isrTrampoline(void* arg) {
   Pir* self = static_cast<Pir*>(arg);
   if (self && self->_isrCallback)
     self->_isrCallback();
