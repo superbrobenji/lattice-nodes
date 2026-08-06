@@ -44,19 +44,33 @@ CONFIG_MBEDTLS_HKDF_C=y
 CONFIG_MBEDTLS_HARDWARE_SHA=y
 # AES/GCM/CCM/TLS below are a SEPARATE, pre-existing Phase G/Phase A size trim
 # (no TLS/HTTPS use at all, independent of which library E2E crypto calls).
-# NOTE: several of these =n lines are advisory only — ESP-IDF's
-# MBEDTLS_TLS_MODE choice defaults to server+client and force-selects
-# TLS_ENABLED/AES_C (and, via TLS, ECDSA_C + SECP256R1) back to =y;
-# Kconfig select beats sdkconfig.defaults silently. Measured size-neutral:
-# LTO + gc-sections strip the unreferenced TLS/AES code either way (see
-# Phase J task-3 report). Actually disabling TLS would need
-# CONFIG_MBEDTLS_TLS_DISABLED=y (the choice symbol) — deliberate follow-up,
-# out of Phase J scope.
+# CONFIG_MBEDTLS_TLS_DISABLED=y (below) makes TLS_ENABLED=n real (spec
+# docs/superpowers/specs/2026-08-07-mbedtls-tls-disable-design.md). NOTE:
+# AES_C/ECDSA_C/CMAC_C/SECP256R1 remain force-selected =y by
+# ESP_WIFI_MBEDTLS_CRYPTO (esp_wifi Kconfig, default y, also selected by
+# WPA3 OWE_STA) — NOT the TLS chain as Phase J's earlier comment said;
+# corrected here. Ending those selects was REJECTED, not proven
+# impossible: AES_C can never be off (the port hardcodes
+# MBEDTLS_CTR_DRBG_C, which requires it), and with
+# ESP_WIFI_MBEDTLS_CRYPTO=n the link fails (undefined reference to
+# sha1_vector) unless BOTH MBEDTLS_SHA1_C and MBEDTLS_HARDWARE_SHA are
+# also turned off — wpa_supplicant only compiles its internal SHA1
+# (CONFIG_CRYPTO_INTERNAL) then, and trading away hardware SHA in the
+# E2E HMAC/HKDF hot path for a measured-zero flash benefit was declined
+# (the route is untested; further walls possible). WPA3_SAE (currently
+# =n) and DPP_SUPPORT (default n) would also re-select
+# ESP_WIFI_MBEDTLS_CRYPTO if either were ever re-enabled. See the
+# follow-up spec's final-outcome note (fourth amendment).
 CONFIG_MBEDTLS_AES_C=n
 CONFIG_MBEDTLS_GCM_C=n
 CONFIG_MBEDTLS_CCM_C=n
 CONFIG_MBEDTLS_HARDWARE_AES=n
 CONFIG_MBEDTLS_TLS_ENABLED=n
+# TLS-disable follow-up: select the MBEDTLS_TLS_MODE choice's "None" option,
+# ending the choice-default's TLS_SERVER/TLS_CLIENT -> TLS_ENABLED selects —
+# this makes TLS_ENABLED=n above real (it was advisory before; see spec
+# docs/superpowers/specs/2026-08-07-mbedtls-tls-disable-design.md).
+CONFIG_MBEDTLS_TLS_DISABLED=y
 
 # ESP-NOW and WiFi
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
@@ -120,9 +134,9 @@ CONFIG_PM_DFS_INIT_AUTO=y
 
 # Phase J item KK (revived): only Curve25519 is used (X25519 E2E keys).
 # ESP-IDF's default enables every NIST/Brainpool curve in mbedtls — dead
-# flash here (nothing references them; note SECP256R1 + ECDSA_C
-# get force-selected =y by the TLS-mode chain regardless — see comment
-# above — but their unreferenced code is stripped by LTO/gc-sections).
+# flash here (nothing references them; note SECP256R1 + ECDSA_C get
+# force-selected =y by ESP_WIFI_MBEDTLS_CRYPTO — see comment above — but
+# their unreferenced code is stripped by LTO/gc-sections).
 CONFIG_MBEDTLS_ECP_DP_SECP192R1_ENABLED=n
 CONFIG_MBEDTLS_ECP_DP_SECP224R1_ENABLED=n
 CONFIG_MBEDTLS_ECP_DP_SECP256R1_ENABLED=n
