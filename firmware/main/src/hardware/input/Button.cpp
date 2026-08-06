@@ -2,8 +2,6 @@
 #include <cstdint>
 #include <esp_timer.h>
 #include <driver/gpio.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 
 namespace lattice {
 namespace hardware {
@@ -38,18 +36,6 @@ bool Button::isPressed() {
   // Pressed once the DEBOUNCE_READS most-recent samples (~DEBOUNCE_READS *
   // DEBOUNCE_DELAY_MS <= 20ms window) are all HIGH.
   return (_history & DEBOUNCE_HISTORY_MASK) == DEBOUNCE_HISTORY_MASK;
-}
-
-bool Button::waitForHold(uint32_t ms) {
-  uint64_t start = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
-  if (!isPressed())
-    return false;
-  while (isPressed()) {
-    if ((static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - start) >= ms)
-      return true;
-    vTaskDelay(pdMS_TO_TICKS(10)); // yield to RTOS; isPressed() itself is non-blocking (item T)
-  }
-  return false;
 }
 
 } // namespace hardware

@@ -286,6 +286,13 @@ extern "C" void app_main(void) {
   };
   ESP_ERROR_CHECK(gpio_config(&pirInCfg));
 
+  // Phase I Task 7: ISR service uses flags=0 (no ESP_INTR_FLAG_IRAM) because
+  // the PIR ISR chain (Pir::isrTrampoline -> Pir::detectMotion -> Pir::signalMotion,
+  // Pir::detachInterrupt) is only partially IRAM_ATTR'd — the trampolines are,
+  // but the downstream methods reach gpio_isr_handler_remove and other non-IRAM
+  // code paths. DO NOT change flags to ESP_INTR_FLAG_IRAM without first
+  // completing the IRAM audit on the full chain — a flash-cache-disabled window
+  // (e.g. during NVS commit) would crash the ISR.
   ESP_ERROR_CHECK(gpio_install_isr_service(0));
 
   // Phase I Task 5: uart_driver — install the native ESP-IDF UART driver for

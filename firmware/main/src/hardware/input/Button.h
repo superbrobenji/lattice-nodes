@@ -17,14 +17,6 @@ public:
   // callers are expected to poll this every loop() iteration (as
   // ButtonHandler does) rather than spin-wait on it.
   bool isPressed();
-  // Returns true if held for the given ms. Still a blocking call by design —
-  // "wait" implies synchronous blocking until the hold completes or the
-  // button releases — and is NOT used anywhere in the non-blocking main
-  // loop (ButtonHandler polls isPressed() + tracks hold duration itself).
-  // Kept for API compatibility; internally now calls the non-blocking
-  // isPressed() so it no longer pays the old 10ms-per-read debounce cost,
-  // just the intentional poll-loop delay.
-  bool waitForHold(uint32_t ms);
 
 private:
   static constexpr uint8_t DEBOUNCE_READS = 3;    // consecutive positive samples required
