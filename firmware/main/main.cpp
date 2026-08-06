@@ -15,6 +15,7 @@
 #include <esp_wifi.h>
 #include <memory>
 #include <esp_task_wdt.h>
+#include <driver/uart.h>
 #include <nvs_flash.h>
 #include <sodium.h>
 
@@ -94,6 +95,26 @@ void dataRecvCallback(const lattice::mesh::mesh_message& message) {
 }
 
 void setup() {
+  // Phase I Task 5: uart_driver — install the native ESP-IDF UART driver for
+  // UART_NUM_0 before anything touches Serial (Logger) or SerialAdapter.
+  // arduino-esp32's Serial.begin() below detects the driver is already
+  // installed (uart_is_driver_installed()) and skips re-installing it,
+  // calling only uart_param_config() to apply matching settings — so Logger
+  // (hand-rolled Serial.print path, intentionally left alone — see
+  // Logger.cpp) and SerialAdapter (now on uart_read_bytes/uart_write_bytes)
+  // share one underlying driver instance with no conflict. Baud rate here
+  // MUST match Serial.begin(115200) below.
+  uart_config_t uartCfg = {
+      .baud_rate = 115200,
+      .data_bits = UART_DATA_8_BITS,
+      .parity = UART_PARITY_DISABLE,
+      .stop_bits = UART_STOP_BITS_1,
+      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+      .source_clk = UART_SCLK_DEFAULT,
+  };
+  ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, 1024, 0, 0, NULL, 0)); // RX 1024, TX unbuffered
+  ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uartCfg));
+
   // Phase I Task 4: nvs_flash direct — initialize the NVS partition before
   // anything touches lattice::eeprom (which now opens nvs_flash handles
   // directly instead of going through Arduino's Preferences wrapper).

@@ -109,6 +109,7 @@ set(FIRMWARE_SOURCES
   mocks/esp_wifi_mock.cpp
   mocks/time_mock.cpp
   mocks/serial_mock.cpp
+  mocks/uart_driver_mock.cpp
   mocks/Arduino.cpp
   mocks/EEPROM.cpp
   mocks/nvs_flash_mock.cpp
