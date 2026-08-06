@@ -15,6 +15,7 @@
 #include <esp_wifi.h>
 #include <memory>
 #include <esp_task_wdt.h>
+#include <nvs_flash.h>
 
 // Forward declarations (Arduino .ino auto-generates these)
 void setup();
@@ -39,19 +40,18 @@ constexpr bool DEV_MODE = lattice::config::DEV_MODE;
 Led greenLed(GREEN_LED_PIN);
 Led redLed(RED_LED_PIN);
 Button configButton(CONFIG_BUTTON_PIN);
-Button resetButton(RESET_BUTTON_PIN);  // New reset button object
+Button resetButton(RESET_BUTTON_PIN); // New reset button object
 
-SevenSegDisplay sevenSeg(lattice::config::SEVSEG_DATA_PIN,
-                         lattice::config::SEVSEG_CLK_PIN);
+SevenSegDisplay sevenSeg(lattice::config::SEVSEG_DATA_PIN, lattice::config::SEVSEG_CLK_PIN);
 
 lattice::mesh::Mesh mesh;
 lattice::mesh::mesh_message transmissionMessage;
 
 std::unique_ptr<lattice::adapter::Adapter> adapter;
-bool isDevMode = false;                                       // Global variable to track dev mode state
-bool devMasterFlag = lattice::config::DEFAULT_DEV_MASTER;  // runtime master flag used in dev mode
+bool isDevMode = false;                                   // Global variable to track dev mode state
+bool devMasterFlag = lattice::config::DEFAULT_DEV_MASTER; // runtime master flag used in dev mode
 
-//define all known MAC addresses for your mesh (update with your real MACs!)
+// define all known MAC addresses for your mesh (update with your real MACs!)
 const uint8_t (*defaultPeerList)[6] = lattice::config::DEFAULT_PEERS;
 constexpr int NUM_DEFAULT_PEERS = lattice::config::NUM_DEFAULT_PEERS;
 
@@ -59,17 +59,26 @@ constexpr int NUM_DEFAULT_PEERS = lattice::config::NUM_DEFAULT_PEERS;
 static inline void validateServerConfiguration() {
   // Check if this is a master node intended for server communication
   bool isMasterNode = isDevMode ? devMasterFlag : lattice::eeprom::loadMasterFlag();
-  bool hasSerialAdapter = (adapter && adapter->getAdapterType() == lattice::adapter::adapter_types::SERIAL_ADAPTER);
+  bool hasSerialAdapter =
+      (adapter && adapter->getAdapterType() == lattice::adapter::adapter_types::SERIAL_ADAPTER);
   bool loggingDisabled = (lattice::config::DEFAULT_LOG_LEVEL == lattice::utils::LogLevel::LOG_NONE);
-  
-  if (isMasterNode && !hasSerialAdapter && lattice::config::DEFAULT_LOG_LEVEL != lattice::utils::LogLevel::LOG_NONE) {
+
+  if (isMasterNode && !hasSerialAdapter &&
+      lattice::config::DEFAULT_LOG_LEVEL != lattice::utils::LogLevel::LOG_NONE) {
     // This is a potential misconfiguration - master node without serial adapter might cause issues
-    Logger::logln("CONFIG", "WARNING: Master node without SERIAL_ADAPTER may cause server communication issues", LogLevel::LOG_WARN);
+    Logger::logln(
+        "CONFIG",
+        "WARNING: Master node without SERIAL_ADAPTER may cause server communication issues",
+        LogLevel::LOG_WARN);
   }
-  
+
   if (hasSerialAdapter && !loggingDisabled) {
-    Logger::logln("CONFIG", "WARNING: SERIAL_ADAPTER with logging enabled will interfere with server communication", LogLevel::LOG_WARN);
-    Logger::logln("CONFIG", "Set DEFAULT_LOG_LEVEL = LOG_NONE in project_config.h", LogLevel::LOG_WARN);
+    Logger::logln(
+        "CONFIG",
+        "WARNING: SERIAL_ADAPTER with logging enabled will interfere with server communication",
+        LogLevel::LOG_WARN);
+    Logger::logln("CONFIG", "Set DEFAULT_LOG_LEVEL = LOG_NONE in project_config.h",
+                  LogLevel::LOG_WARN);
   }
 }
 
@@ -84,18 +93,31 @@ void dataRecvCallback(const lattice::mesh::mesh_message& message) {
 }
 
 void setup() {
+  // Phase I Task 4: nvs_flash direct — initialize the NVS partition before
+  // anything touches lattice::eeprom (which now opens nvs_flash handles
+  // directly instead of going through Arduino's Preferences wrapper).
+  // Erase-and-retry on a stale/incompatible partition (fresh flash, or an
+  // NVS layout version bump), matching the standard ESP-IDF boot idiom.
+  esp_err_t nvs_err = nvs_flash_init();
+  if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    nvs_err = nvs_flash_init();
+  }
+  ESP_ERROR_CHECK(nvs_err);
+
   Serial.begin(115200);
-  
+
   // Only print startup message if logging is enabled (not LOG_NONE)
   // This prevents text output when using SERIAL_ADAPTER for server communication
   if (lattice::config::DEFAULT_LOG_LEVEL != lattice::utils::LogLevel::LOG_NONE) {
     Serial.println("Lattice Starting...");
   }
-  
+
   Logger::setLogLevel(lattice::config::DEFAULT_LOG_LEVEL);
 
   // Check and log reset reason; escalate if WDT looping
-  // Must init EEPROM before BootManager::check — saveRebootReason/saveRebootCount no-op if not initialized
+  // Must init EEPROM before BootManager::check — saveRebootReason/saveRebootCount no-op if not
+  // initialized
   lattice::eeprom::init();
   lattice::app::BootManager::check();
 
@@ -129,10 +151,8 @@ void setup() {
   if (!greenLed.isInitialized()) {
     if (!greenLed.init()) {
       Logger::logln("MAIN", "FATAL: Failed to initialize green LED!", LogLevel::LOG_ERROR);
-      lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE,
-                            lattice::core::ModuleDigit::CORE,
-                            1,
-                            "MAIN: Failed to initialize green LED");
+      lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::CORE,
+                          1, "MAIN: Failed to initialize green LED");
     }
   }
 
@@ -149,10 +169,8 @@ void setup() {
   // Initialize EEPROM Manager
   if (!lattice::eeprom::init()) {
     Logger::logln("MAIN", "Failed to initialize EEPROM Manager", LogLevel::LOG_ERROR);
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::MEMORY,
-                          lattice::core::ModuleDigit::CORE,
-                          2,
-                          "EEPROM Manager init failed!");
+    lattice::err::fatal(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::CORE, 2,
+                        "EEPROM Manager init failed!");
   }
 
   // Bluetooth disabled via CONFIG_BT_ENABLED=n in sdkconfig
@@ -164,7 +182,8 @@ void setup() {
     isDevMode = lattice::eeprom::loadDevFlag();
   }
 
-  Logger::logln("MAIN", String("Running in ") + (isDevMode ? "DEV" : "PRODUCTION") + " mode", LogLevel::LOG_INFO);
+  Logger::logln("MAIN", String("Running in ") + (isDevMode ? "DEV" : "PRODUCTION") + " mode",
+                LogLevel::LOG_INFO);
 
   // Set dev mode in AdapterFactory and EEPROM Manager
   lattice::adapter::AdapterFactory::setDevMode(isDevMode);
@@ -173,9 +192,8 @@ void setup() {
   // Declare peers to EEPROM (only if not in dev mode and EEPROM is empty)
   if (!isDevMode && !lattice::eeprom::hasPeers()) {
     // Write default peers to EEPROM
-    lattice::eeprom::savePeerList(
-      reinterpret_cast<const uint8_t*>(defaultPeerList),
-      NUM_DEFAULT_PEERS);
+    lattice::eeprom::savePeerList(reinterpret_cast<const uint8_t*>(defaultPeerList),
+                                  NUM_DEFAULT_PEERS);
     Logger::logln("MAIN", "Wrote default peer MACs to EEPROM.", LogLevel::LOG_INFO);
   }
 
@@ -188,8 +206,8 @@ void setup() {
   if (isDevMode) {
     // In dev mode, create default adapter from config
     adapter.reset(lattice::adapter::AdapterFactory::createAdapter(
-      lattice::config::DEFAULT_ADAPTER,
-      lattice::adapter::AdapterFactory::getDefaultPinForAdapter(lattice::config::DEFAULT_ADAPTER)));
+        lattice::config::DEFAULT_ADAPTER, lattice::adapter::AdapterFactory::getDefaultPinForAdapter(
+                                              lattice::config::DEFAULT_ADAPTER)));
     Logger::logln("MAIN", "Created default adapter (DEV mode)", LogLevel::LOG_INFO);
   } else {
     // In production mode, create from EEPROM
@@ -199,28 +217,22 @@ void setup() {
 
   if (!adapter) {
     Logger::logln("MAIN", "Failed to create adapter", LogLevel::LOG_ERROR);
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE,
-                          lattice::core::ModuleDigit::CORE,
-                          3,
-                          "MAIN: Failed to create PIR adapter");
+    lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::CORE,
+                        3, "MAIN: Failed to create PIR adapter");
   }
   Logger::logln("MAIN", "Adapter created", LogLevel::LOG_INFO);
 
   if (!adapter->init()) {
     Logger::logln("MAIN", "Adapter failed to initialize", LogLevel::LOG_ERROR);
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE,
-                          lattice::core::ModuleDigit::CORE,
-                          4,
-                          "MAIN: Adapter failed to initialize");
+    lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::CORE,
+                        4, "MAIN: Adapter failed to initialize");
   }
   Logger::logln("MAIN", "Adapter initialized", LogLevel::LOG_INFO);
 
   if (!mesh.init()) {
     Logger::logln("MAIN", "Mesh init failed", LogLevel::LOG_ERROR);
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::COMM,
-                          lattice::core::ModuleDigit::MESH,
-                          1,
-                          "MAIN: Mesh init failed — cannot operate without mesh");
+    lattice::err::fatal(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 1,
+                        "MAIN: Mesh init failed — cannot operate without mesh");
   }
 
   mesh.setEnrollmentRelayFn(SerialAdapter::relayEnrollmentToServer);
@@ -239,7 +251,8 @@ void setup() {
     const uint8_t* pubKey = mesh.getDevicePublicKey();
     Serial.print("LATTICE_PUBKEY:");
     for (int i = 0; i < 32; ++i) {
-      if (pubKey[i] < 0x10) Serial.print("0");
+      if (pubKey[i] < 0x10)
+        Serial.print("0");
       Serial.print(pubKey[i], HEX);
     }
     Serial.println();
@@ -249,7 +262,8 @@ void setup() {
   bool isMaster;
   if (isDevMode) {
     isMaster = devMasterFlag;
-    Logger::logln("MAIN", String("DEV mode: starting as ") + (isMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
+    Logger::logln("MAIN", String("DEV mode: starting as ") + (isMaster ? "MASTER" : "NODE"),
+                  LogLevel::LOG_INFO);
   } else {
     // In production mode, load from EEPROM
     isMaster = lattice::eeprom::loadMasterFlag();
@@ -271,16 +285,15 @@ void setup() {
 
   // Configure task watchdog: 10-second timeout
   esp_task_wdt_config_t wdtConfig = {
-    .timeout_ms = 10000,
-    .idle_core_mask = 0,
-    .trigger_panic = true,
+      .timeout_ms = 10000,
+      .idle_core_mask = 0,
+      .trigger_panic = true,
   };
   esp_task_wdt_init(&wdtConfig);
-  esp_task_wdt_add(nullptr);  // Add current task
+  esp_task_wdt_add(nullptr); // Add current task
 
   // Validate configuration for potential server communication issues
   validateServerConfiguration();
-  
 }
 
 void loop() {
@@ -293,7 +306,7 @@ void loop() {
     redLed.blink(2, 200, 200);
   }
 
-  mesh.loop();  // drains recv queue, ticks beacon (if master)
+  mesh.loop(); // drains recv queue, ticks beacon (if master)
 
   mesh.checkMasterTimeout();
 
@@ -312,7 +325,8 @@ void loop() {
     if (millis() - lastEnrollmentBroadcast > 10000) {
       lastEnrollmentBroadcast = millis();
       mesh.sendEnrollmentRequest();
-      Logger::logln("MAIN", "Enrollment request sent (awaiting server approval)", LogLevel::LOG_INFO);
+      Logger::logln("MAIN", "Enrollment request sent (awaiting server approval)",
+                    LogLevel::LOG_INFO);
     }
     esp_task_wdt_reset();
     // Do not forward sensor data until enrolled
@@ -324,10 +338,10 @@ void loop() {
     adapter->loop();
   }
 
-  lattice::app::ButtonHandler::tick(configButton, resetButton, mesh,
-    greenLed, redLed, isDevMode, devMasterFlag);
+  lattice::app::ButtonHandler::tick(configButton, resetButton, mesh, greenLed, redLed, isDevMode,
+                                    devMasterFlag);
   // REMOVED: periodic health report was here.
   // Serial_Adapter::loop() handles this correctly when adapter type is SERIAL_ADAPTER.
 
-  delay(1);  // Yield to FreeRTOS idle task — allows CPU power gating between iterations
+  delay(1); // Yield to FreeRTOS idle task — allows CPU power gating between iterations
 }

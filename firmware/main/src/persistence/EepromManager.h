@@ -2,7 +2,10 @@
 #define EEPROM_MANAGER_H
 
 #include <Arduino.h>
-#include <Preferences.h>
+// Phase I Task 4: nvs_flash direct — replaces the Preferences wrapper with
+// straight ESP-IDF nvs_flash calls (nvs_open/nvs_get_*/nvs_set_*/nvs_commit).
+#include <nvs.h>
+#include <nvs_flash.h>
 #include "src/logging/Logger.h"
 #include "../../project_config.h"
 
@@ -54,10 +57,14 @@ namespace detail {
 // (tests/e2e/harness/NodeContext.cpp) can still snapshot/restore it as a flat
 // byte image per simulated node -- the same technique it used against the
 // old singleton object.
+//
+// Phase I Task 4: no persistent Preferences/nvs_handle_t member anymore --
+// each operation opens/commits/closes its own short-lived nvs_handle_t (see
+// EepromManager.cpp), so this struct is a plain POD (safe for the harness's
+// memcpy-based image copy).
 struct State {
   bool isInitialized = false;
   bool isDevMode = false;
-  Preferences prefs;
   uint32_t devEpoch = 0; // DEV_MODE RAM-only monotonic boot-epoch seed (issue #43)
 };
 } // namespace detail

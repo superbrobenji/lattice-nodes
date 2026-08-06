@@ -2,7 +2,7 @@
 #include <cstring>
 #include "persistence/EepromManager.h"
 #include "mesh/Mesh.h" // for PeerInfo and PEER_RECORD_SIZE constants
-#include <Preferences.h>
+#include <nvs.h>
 #include "error/Error.h"
 
 using lattice::mesh::PeerInfo;
@@ -14,15 +14,16 @@ using lattice::utils::EEPROM_SIZES::PEER_RECORD_SIZE;
 // lattice::eeprom holds its state in file-static storage (Phase H2 item AA:
 // migrated off the old Meyers-singleton EepromManager class) — isInitialized
 // stays true for the process lifetime. Between tests we clear the
-// Preferences static store to get a clean slate.
+// NvsMock static store (tests/mocks/nvs.h, Phase I Task 4) to get a clean
+// slate.
 // -----------------------------------------------------------------------
 
 class EEPROMMgrTest : public ::testing::Test {
 protected:
   void SetUp() override {
     resetMillis();
-    // Clear the Preferences static store
-    Preferences::_store.clear();
+    // Clear the NVS mock's static store
+    NvsMock::_store.clear();
     // Init the singleton (idempotent — no-op after first call)
     namespace mgr = lattice::eeprom;
     mgr::init();
@@ -113,7 +114,7 @@ TEST_F(EEPROMMgrTest, DevFlag_SaveAndLoad_RoundTrip) {
 
 TEST_F(EEPROMMgrTest, MeshKey_SaveAndLoad_RoundTrip) {
   namespace mgr = lattice::eeprom;
-  
+
   uint8_t key[16];
   for (int i = 0; i < 16; ++i) {
     key[i] = static_cast<uint8_t>(i + 100);
@@ -146,7 +147,7 @@ TEST_F(EEPROMMgrTest, PeerList_LoadWhenEmpty_FillsWithFF_ReturnsFalse) {
 
   uint8_t loadBuf[PEER_RECORD_SIZE]{};
   bool ok = mgr::loadPeerList(loadBuf, 1);
-  
+
   EXPECT_FALSE(ok);
   // Verify buffer is filled with 0xFF
   for (size_t i = 0; i < PEER_RECORD_SIZE; ++i) {
@@ -228,7 +229,7 @@ TEST_F(EEPROMMgrTest, PeerList_HasPeers_ReturnsTrueAfterSave) {
 
 TEST_F(EEPROMMgrTest, PeerList_ClearPeerList_RemovesAllPeers) {
   namespace mgr = lattice::eeprom;
-  
+
   uint8_t peerRecord[PEER_RECORD_SIZE]{};
   mgr::savePeerList(peerRecord, 1);
   EXPECT_TRUE(mgr::hasPeers());
@@ -312,7 +313,8 @@ TEST_F(EEPROMMgrTest, Keypair_Load_CorruptedData_ReturnsFalse) {
   mgr::saveKeypair(priv, pub);
 
   // Manually corrupt the CRC in the NVS store
-  Preferences::_store["lattice/" + std::string(lattice::utils::NVS_KEYS::KEYPAIR_CRC)] = {0xFF, 0xFF, 0xFF, 0xFF};
+  NvsMock::_store["lattice/" + std::string(lattice::utils::NVS_KEYS::KEYPAIR_CRC)] = {0xFF, 0xFF,
+                                                                                      0xFF, 0xFF};
 
   uint8_t p1[32]{}, p2[32]{};
   EXPECT_FALSE(mgr::loadKeypair(p1, p2));
@@ -454,14 +456,14 @@ TEST_F(EEPROMMgrTest, NodeId_SaveZeroRoundtrips) {
 
 TEST_F(EEPROMMgrTest, ClearAll_RemovesAllData) {
   namespace mgr = lattice::eeprom;
-  
+
   // Save various data
   mgr::saveMasterFlag(true);
   mgr::saveDevFlag(true);
   mgr::saveNodeId(42);
-  
+
   mgr::clearAll();
-  
+
   // Verify all data is cleared
   EXPECT_FALSE(mgr::loadMasterFlag());
   EXPECT_FALSE(mgr::loadDevFlag());
@@ -475,14 +477,14 @@ TEST_F(EEPROMMgrTest, ClearAll_RemovesAllData) {
 TEST_F(EEPROMMgrTest, FlushIfDirty_IsNoOp) {
   namespace mgr = lattice::eeprom;
   mgr::saveNodeId(42);
-  mgr::flushIfDirty(); // Should be a no-op
+  mgr::flushIfDirty();               // Should be a no-op
   EXPECT_EQ(mgr::loadNodeId(), 42u); // Data should already be persisted
 }
 
 TEST_F(EEPROMMgrTest, ForceFlush_IsNoOp) {
   namespace mgr = lattice::eeprom;
   mgr::saveNodeId(42);
-  mgr::forceFlush(); // Should be a no-op
+  mgr::forceFlush();                 // Should be a no-op
   EXPECT_EQ(mgr::loadNodeId(), 42u); // Data should already be persisted
 }
 
@@ -501,11 +503,11 @@ TEST_F(EEPROMMgrTest, SaveBootEpoch_DevMode_UsesRAMSeed) {
 
 TEST_F(EEPROMMgrTest, SaveBootEpoch_DevMode_DoesNotTouchNVS) {
   namespace mgr = lattice::eeprom;
-  Preferences::_store.clear();
+  NvsMock::_store.clear();
   mgr::setDevMode(true);
   mgr::saveBootEpoch(42);
   // NVS store must be empty — DEV never persists.
-  EXPECT_TRUE(Preferences::_store.empty());
+  EXPECT_TRUE(NvsMock::_store.empty());
 }
 
 TEST_F(EEPROMMgrTest, SaveBootEpoch_ProdMode_Persists) {
@@ -522,19 +524,19 @@ TEST_F(EEPROMMgrTest, SaveBootEpoch_ProdMode_Persists) {
 TEST_F(EEPROMMgrTest, SaveBootEpoch_ProdMode_ShortWrite_Fatal) {
   namespace mgr = lattice::eeprom;
   mgr::setDevMode(false);
-  Preferences::_shortWriteKey =
+  NvsMock::_failNextWriteKey =
       lattice::utils::NVS_KEYS::BOOT_EPOCH; // mock: next putUInt for this key returns 0
   EXPECT_THROW(mgr::saveBootEpoch(1), lattice::err::FatalError);
-  Preferences::_shortWriteKey = nullptr;
+  NvsMock::_failNextWriteKey = nullptr;
 }
 
 TEST_F(EEPROMMgrTest, SaveKnownMasterMac_ShortWrite_Fatal) {
   namespace mgr = lattice::eeprom;
   mgr::setDevMode(false);
-  uint8_t mac[6] = {1,2,3,4,5,6};
-  Preferences::_shortWriteKey = lattice::utils::NVS_KEYS::KNOWN_MASTER_MAC;
+  uint8_t mac[6] = {1, 2, 3, 4, 5, 6};
+  NvsMock::_failNextWriteKey = lattice::utils::NVS_KEYS::KNOWN_MASTER_MAC;
   EXPECT_THROW(mgr::saveKnownMasterMac(mac), lattice::err::FatalError);
-  Preferences::_shortWriteKey = nullptr;
+  NvsMock::_failNextWriteKey = nullptr;
 }
 
 TEST_F(EEPROMMgrTest, SaveBootEpoch_ProdMode_FullWrite_NoFatal) {
@@ -550,8 +552,8 @@ TEST_F(EEPROMMgrTest, SaveRebootCount_ShortWrite_WarnsNoFatal) {
   namespace mgr = lattice::eeprom;
   mgr::setDevMode(false);
   int before = lattice_test_errFailCount;
-  Preferences::_shortWriteKey = lattice::utils::NVS_KEYS::REBOOT_COUNT;
-  mgr::saveRebootCount(1);                 // Non-security setter: must NOT escalate
+  NvsMock::_failNextWriteKey = lattice::utils::NVS_KEYS::REBOOT_COUNT;
+  mgr::saveRebootCount(1); // Non-security setter: must NOT escalate
   EXPECT_EQ(lattice_test_errFailCount, before);
-  Preferences::_shortWriteKey = nullptr;
+  NvsMock::_failNextWriteKey = nullptr;
 }

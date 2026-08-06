@@ -11,8 +11,7 @@
 
 namespace sim {
 
-template <typename T>
-static void loadImage(T& obj, std::vector<uint8_t>& image) {
+template <typename T> static void loadImage(T& obj, std::vector<uint8_t>& image) {
   // A fresh NodeContext's image fields are seeded from the pristine snapshot in
   // its constructor (see initPristineImages below), so by the time swapIn() runs
   // the size should always match sizeof(T) exactly. Any mismatch — including an
@@ -26,8 +25,7 @@ static void loadImage(T& obj, std::vector<uint8_t>& image) {
   }
   memcpy(reinterpret_cast<void*>(&obj), image.data(), sizeof(T));
 }
-template <typename T>
-static void saveImage(T& obj, std::vector<uint8_t>& image) {
+template <typename T> static void saveImage(T& obj, std::vector<uint8_t>& image) {
   image.resize(sizeof(T));
   memcpy(image.data(), reinterpret_cast<void*>(&obj), sizeof(T));
 }
@@ -60,7 +58,7 @@ NodeContext::NodeContext() {
 void swapIn(NodeContext& ctx) {
   memcpy(EEPROM._data.data(), ctx.eepromData.data(), 512);
   EEPROM._commitCount = ctx.eepromCommitCount;
-  Preferences::_store = ctx.prefsStore;
+  NvsMock::_store = ctx.nvsStore;
   Serial.written = ctx.serialWritten;
   Serial.output = ctx.serialOutput;
   Serial.rxQueue = ctx.serialRx;
@@ -78,7 +76,7 @@ void swapIn(NodeContext& ctx) {
 void swapOut(NodeContext& ctx) {
   memcpy(ctx.eepromData.data(), EEPROM._data.data(), 512);
   ctx.eepromCommitCount = EEPROM._commitCount;
-  ctx.prefsStore = Preferences::_store;
+  ctx.nvsStore = NvsMock::_store;
   ctx.serialWritten = Serial.written;
   ctx.serialOutput = Serial.output;
   ctx.serialRx = Serial.rxQueue;

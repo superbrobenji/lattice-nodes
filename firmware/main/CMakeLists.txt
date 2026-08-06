@@ -2,9 +2,12 @@
 #
 # arduino-as-component: `espressif/arduino-esp32` (v3.x) is pulled in by
 # idf_component.yml and registers the ESP-IDF component name `arduino-esp32`.
-# Listing it in REQUIRES exposes Arduino.h, Serial, WiFi, String, Preferences,
+# Listing it in REQUIRES exposes Arduino.h, Serial, WiFi, String,
 # esp_now, and the rest of the Arduino API headers.
 # CONFIG_AUTOSTART_ARDUINO=y (sdkconfig.defaults) provides app_main().
+# Persistence (src/persistence/EepromManager.*) uses the `nvs_flash` component
+# directly (nvs_open/nvs_get_*/nvs_set_*) rather than Arduino's Preferences
+# wrapper — Phase I Task 4.
 idf_component_register(
   SRCS
     "main.cpp"
