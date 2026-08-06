@@ -4,7 +4,3 @@ dependencies:
     version: ">=5.0.0"
   espressif/arduino-esp32:
     version: "^3.3.10"
-  # Phase I Task 2 (item GG): full mbedtls drop for E2E crypto (E2ECrypto.h,
-  # MeshCrypto.h, RouteMac.h). arduino-esp32 stays (retired in Task 10).
-  espressif/libsodium:
-    version: "^1.0.19"
