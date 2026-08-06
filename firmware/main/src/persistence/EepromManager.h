@@ -1,7 +1,8 @@
 #ifndef EEPROM_MANAGER_H
 #define EEPROM_MANAGER_H
 
-#include <Arduino.h>
+#include <cstdint>
+#include <cstddef>
 // Phase I Task 4: nvs_flash direct — replaces the Preferences wrapper with
 // straight ESP-IDF nvs_flash calls (nvs_open/nvs_get_*/nvs_set_*/nvs_commit).
 #include <nvs.h>

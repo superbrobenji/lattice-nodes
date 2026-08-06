@@ -1,7 +1,7 @@
 #ifndef PLANETOPA_MACADDRESS_H
 #define PLANETOPA_MACADDRESS_H
 
-#include <Arduino.h>
+#include <cstdint>
 #include <cstring>
 #include <cstdio>
 #include "MacEq.h"

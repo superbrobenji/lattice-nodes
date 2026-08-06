@@ -5,7 +5,7 @@
 #include "../hardware/output/SevenSegDisplay.h"
 #include "ErrorCodes.h"
 #include "../logging/Logger.h"
-#include <Arduino.h>
+#include <cstdint>
 namespace lattice {
 namespace utils {
 enum class ErrorType : uint8_t {

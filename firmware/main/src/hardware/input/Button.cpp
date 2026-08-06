@@ -1,8 +1,9 @@
 #include "Button.h"
-#include <Arduino.h>
 #include <cstdint>
 #include <esp_timer.h>
 #include <driver/gpio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 namespace lattice {
 namespace hardware {
@@ -31,7 +32,7 @@ bool Button::isPressed() {
   if (!_hasPolled || (now - _lastPollMs) >= DEBOUNCE_DELAY_MS) {
     _hasPolled = true;
     _lastPollMs = now;
-    bool raw = (gpio_get_level(static_cast<gpio_num_t>(_pin)) == HIGH);
+    bool raw = (gpio_get_level(static_cast<gpio_num_t>(_pin)) == 1);
     _history = static_cast<uint8_t>((_history << 1) | (raw ? 1u : 0u));
   }
   // Pressed once the DEBOUNCE_READS most-recent samples (~DEBOUNCE_READS *
@@ -46,7 +47,7 @@ bool Button::waitForHold(uint32_t ms) {
   while (isPressed()) {
     if ((static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - start) >= ms)
       return true;
-    delay(10); // yield to RTOS; isPressed() itself is non-blocking (item T)
+    vTaskDelay(pdMS_TO_TICKS(10)); // yield to RTOS; isPressed() itself is non-blocking (item T)
   }
   return false;
 }

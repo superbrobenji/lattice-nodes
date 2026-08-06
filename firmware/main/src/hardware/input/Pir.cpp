@@ -35,9 +35,9 @@ bool Pir::attachInterrupt(void (*isr)(), int mode) {
   if (!_initialized)
     return false;
   gpio_int_type_t intrType = GPIO_INTR_ANYEDGE;
-  if (mode == RISING)
+  if (mode == kEdgeRising)
     intrType = GPIO_INTR_POSEDGE;
-  else if (mode == FALLING)
+  else if (mode == kEdgeFalling)
     intrType = GPIO_INTR_NEGEDGE;
   _isrCallback = isr;
   gpio_set_intr_type(static_cast<gpio_num_t>(_pin), intrType);

@@ -32,7 +32,7 @@ bool PirAdapter::init() {
   }
 
   instance = this;
-  if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING)) {
+  if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, hardware::Pir::kEdgeRising)) {
     lattice::err::fail(lattice::core::ErrorTypeDigit::CONFIG, lattice::core::ModuleDigit::ADAPTER,
                        2, "PIR_Adapter: Failed to attach interrupt.");
     return false;
@@ -99,7 +99,7 @@ void PirAdapter::loop() {
     LATTICE_LOGLN("PIR_Adapter", "Cooldown ended. Re-arming sensor.", LogLevel::LOG_DEBUG);
     _state = PirState::IDLE;
 
-    if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, RISING)) {
+    if (!_pir.attachInterrupt(PirAdapter::detectMotionTrampoline, hardware::Pir::kEdgeRising)) {
       lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE,
                          lattice::core::ModuleDigit::ADAPTER, 2,
                          "PIR_Adapter: Could not re-attach interrupt (possible hardware error)");

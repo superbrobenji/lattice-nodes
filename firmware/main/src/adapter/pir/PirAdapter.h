@@ -4,6 +4,7 @@
 #include "src/adapter/Adapter.h"
 #include "src/hardware/input/Pir.h"
 #include <cstdint>
+#include <esp_attr.h>
 
 namespace lattice {
 namespace adapter {

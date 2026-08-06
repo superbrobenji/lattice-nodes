@@ -3,7 +3,7 @@
 
 #include <functional>
 #include <esp_now.h>
-#include <Arduino.h>
+#include <esp_attr.h>
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include <esp_event.h>
