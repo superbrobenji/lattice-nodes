@@ -99,10 +99,14 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
 # TLS-disable follow-up step B: stop esp_wifi selecting mbedtls crypto
 # (AES_C/ECP_C/ECDH_C/ECDSA_C/CMAC_C/SECP256R1 all force-selected =y by
-# ESP_WIFI_MBEDTLS_CRYPTO, default y). wpa_supplicant falls back to its
-# internal crypto implementations — near-dead code here (pure ESP-NOW, no
-# AP association, no WPA handshake at runtime). Completes item KK: resolved
+# ESP_WIFI_MBEDTLS_CRYPTO, default y). Requires OWE_STA off too — WPA3 OWE
+# (default y) independently selects ESP_WIFI_MBEDTLS_CRYPTO, and OWE only
+# matters for open-AP association, which this firmware never does (pure
+# ESP-NOW; WPA3_SAE/SAE_PK already =n above). wpa_supplicant falls back to
+# its internal crypto implementations — near-dead code here (no AP
+# association, no WPA handshake at runtime). Completes item KK: resolved
 # config carries exactly one ECP curve (CURVE25519).
+CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
 CONFIG_ESP_WIFI_MBEDTLS_CRYPTO=n
 ```
 
