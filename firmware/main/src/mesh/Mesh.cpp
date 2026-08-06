@@ -8,7 +8,8 @@
 #include "src/persistence/EepromManager.h"
 // Error.h already provides ERROR_CHECK macros
 #include <esp_now.h>
-#include <WiFi.h>
+#include <esp_netif.h>
+#include <esp_event.h>
 #include <cstring>
 #include <cstdio>
 #include "../../project_config.h"
@@ -266,11 +267,18 @@ bool Mesh::init() {
 }
 
 bool Mesh::setupWiFi() {
-  if (!WiFi.mode(WIFI_STA)) {
-    lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 6,
-                       "MESH: Failed to set WiFi mode STA");
-    return false;
-  }
+  // Phase I Task 3 (BB + ZZ): raw ESP-IDF WiFi bring-up, replacing the
+  // arduino-esp32 WiFi.mode(WIFI_STA) wrapper. ESP-NOW is our only WiFi use
+  // (no AP association, no persisted creds) so STA mode + WIFI_STORAGE_RAM
+  // (making CONFIG_ESP_WIFI_NVS_ENABLED=n fully effective) is sufficient.
+  ESP_ERROR_CHECK(esp_netif_init());
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+  ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+  ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+  ESP_ERROR_CHECK(esp_wifi_start());
+
   lattice::err::checkEsp(esp_wifi_set_channel(lattice::config::WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE),
                          lattice::utils::ErrorType::HARDWARE_FAILURE, "Failed to set WiFi channel");
 

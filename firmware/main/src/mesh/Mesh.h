@@ -3,9 +3,10 @@
 
 #include <functional>
 #include <esp_now.h>
-#include <WiFi.h>
 #include <Arduino.h>
 #include <esp_wifi.h>
+#include <esp_netif.h>
+#include <esp_event.h>
 #include <array>
 #include <cstdint>
 #include <memory>
