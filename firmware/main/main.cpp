@@ -20,6 +20,9 @@
 #include <driver/gpio.h>
 #include <nvs_flash.h>
 #include <sodium.h>
+#include <esp_pm.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 // Forward declarations (Arduino .ino auto-generates these)
 void setup();
@@ -52,6 +55,28 @@ lattice::mesh::Mesh mesh;
 lattice::mesh::mesh_message transmissionMessage;
 
 std::unique_ptr<lattice::adapter::Adapter> adapter;
+
+// Phase I Task 9 (item EE): dedicated mesh-drain task. Static stack + TCB
+// (xTaskCreateStaticPinnedToCore below) — no heap allocation, per this task's
+// "no new dynamic alloc" constraint. Woken via xTaskNotifyWait() by
+// onDataRecvCallback's ISR trampoline (Mesh.cpp) after it enqueues into
+// recvQueue, instead of loop() polling for work every tick — this is what
+// lets the FreeRTOS idle task (and therefore tickless idle / light sleep)
+// actually go idle between mesh RX events.
+static StackType_t mesh_task_stack[4096];
+static StaticTask_t mesh_task_tcb;
+static TaskHandle_t mesh_task_handle = nullptr;
+
+extern "C" void mesh_task_fn(void*) {
+  for (;;) {
+    xTaskNotifyWait(0, ULONG_MAX, NULL, portMAX_DELAY);
+    lattice::mesh::Mesh* instance = lattice::mesh::Mesh::getInstance();
+    if (instance) {
+      instance->drain();
+    }
+  }
+}
+
 bool isDevMode = false;                                   // Global variable to track dev mode state
 bool devMasterFlag = lattice::config::DEFAULT_DEV_MASTER; // runtime master flag used in dev mode
 
@@ -131,6 +156,24 @@ void setup() {
     nvs_err = nvs_flash_init();
   }
   ESP_ERROR_CHECK(nvs_err);
+
+  // Phase I Task 9 (item EE): tickless PM — enable dynamic frequency scaling
+  // (80-240MHz) + automatic light sleep as early as possible in boot (right
+  // after NVS, before any peripheral/radio init below starts taking PM
+  // locks). CONFIG_PM_ENABLE / CONFIG_FREERTOS_USE_TICKLESS_IDLE /
+  // CONFIG_PM_DFS_INIT_AUTO in sdkconfig.defaults are what make this call
+  // meaningful — without CONFIG_PM_ENABLE, esp_pm_configure() would fail with
+  // ESP_ERR_NOT_SUPPORTED. Master keeps a later, separate
+  // setCpuFrequencyMhz(80) call gated off for non-master nodes further down
+  // (pre-existing, Phase-G-era optimization, untouched by this task) — that
+  // still applies on top of this DFS range for leaves; see task-9-report.md
+  // "Concerns" for the interaction between the two.
+  esp_pm_config_t pm_cfg = {
+      .max_freq_mhz = 240,
+      .min_freq_mhz = 80,
+      .light_sleep_enable = true,
+  };
+  ESP_ERROR_CHECK(esp_pm_configure(&pm_cfg));
 
   // Phase I Task 7 (QQ + RR): bundled gpio_config_t calls replace the
   // scattered per-component pinMode() calls that used to run inside each of
@@ -327,6 +370,17 @@ void setup() {
     lattice::err::fatal(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 1,
                         "MAIN: Mesh init failed — cannot operate without mesh");
   }
+
+  // Phase I Task 9 (item EE): create the dedicated mesh-drain task and hand
+  // its handle to Mesh so the RX-ISR trampoline (Mesh.cpp's
+  // onDataRecvCallback) can wake it via vTaskNotifyGiveFromISR. Pinned to
+  // core 0 alongside the WiFi/ESP-NOW stack that delivers the RX callback;
+  // priority above tskIDLE_PRIORITY so it preempts idle immediately on
+  // notify, but well below time-critical ISR-adjacent work.
+  mesh_task_handle = xTaskCreateStaticPinnedToCore(
+      mesh_task_fn, "mesh", sizeof(mesh_task_stack) / sizeof(StackType_t), NULL,
+      tskIDLE_PRIORITY + 3, mesh_task_stack, &mesh_task_tcb, 0);
+  mesh.setDrainNotifyHandle(mesh_task_handle);
 
   mesh.setEnrollmentRelayFn(SerialAdapter::relayEnrollmentToServer);
 

@@ -370,7 +370,20 @@ void IRAM_ATTR Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uin
   // are not safe from that context — see loop()'s comment on
   // drainPendingRelay).
   xRingbufferSendFromISR(instance->recvQueue, &entry, sizeof(entry), &woken);
-  if (woken)
+
+  // Phase I Task 9 (item EE): wake the dedicated mesh-drain task instead of
+  // leaving drain() to be discovered by a polling loop() iteration — this is
+  // what lets loop() (and therefore the FreeRTOS idle task) go idle between
+  // real work instead of busy-checking recvQueue every tick, which is a
+  // prerequisite for tickless idle / light sleep to pay off. Null handle
+  // (host/SimNode builds, or a real boot before setDrainNotifyHandle() has
+  // run yet) is a no-op here — the item just waits in recvQueue for the next
+  // explicit drain() call.
+  BaseType_t woken2 = pdFALSE;
+  if (instance->drainNotifyHandle_ != nullptr) {
+    vTaskNotifyGiveFromISR(instance->drainNotifyHandle_, &woken2);
+  }
+  if (woken || woken2)
     portYIELD_FROM_ISR();
 }
 
@@ -1328,7 +1341,12 @@ void Mesh::processRouteReport(const mesh_message& msg) {
 }
 
 void Mesh::loop() {
-  drainRecvQueue();
+  // Phase I Task 9 (item EE): recvQueue draining moved off loop() and onto
+  // the dedicated mesh task (main.cpp's mesh_task_fn), woken via
+  // xTaskNotifyWait() when onDataRecvCallback's ISR trampoline signals
+  // drainNotifyHandle_ — see drain()/setDrainNotifyHandle() in Mesh.h. Host
+  // unit tests and the SimNode e2e harness (no real FreeRTOS task) call
+  // drain() directly instead.
   lattice::eeprom::flushIfDirty();
 
   // Drain enrollment relay queued from ESP-NOW receive callback (WiFi task context).
