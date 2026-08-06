@@ -13,8 +13,8 @@ namespace crypto {
 // X25519 ECDH shared secret (Phase J: back on mbedtls via lattice::crypto —
 // see src/crypto/Crypto.h for the byte-order model). Keys arrive in this
 // codebase's big-endian storage/wire convention; the returned secret is
-// byte-identical to what the pre-Phase-I mbedtls code and the Phase I
-// libsodium code both produced. err::fatal digits 20-25 (LMK path used 10-19).
+// byte-identical to what both the pre-Phase-I mbedtls code and the Phase I
+// swap produced. err::fatal digits 20-25 (LMK path used 10-19).
 inline void computeSharedSecret(const uint8_t* ownPrivateKey32, const uint8_t* peerPublicKey32,
                                 uint8_t* secret32Out) {
   if (!lattice::crypto::x25519_shared(ownPrivateKey32, peerPublicKey32, secret32Out)) {

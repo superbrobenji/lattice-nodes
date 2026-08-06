@@ -26,8 +26,8 @@
 // else. The shared secret needs NO reversal: mbedtls_ecdh_calc_secret emits
 // RFC 7748 LE natively for Montgomery curves (verified empirically against
 // mbedtls 3.6 during Phase I Task 2 — see that task's report), which is
-// byte-identical to what both the old raw-MPI code and the Phase I libsodium
-// code produced. Consumers therefore see: BE keys in/out, secret verbatim.
+// byte-identical to what both the old raw-MPI code and the Phase I swap
+// produced. Consumers therefore see: BE keys in/out, secret verbatim.
 //
 // No MBEDTLS_PRIVATE anywhere, no generic-MPI point serialization — the two
 // footguns of the pre-Phase-I implementation. Public API calls only.
