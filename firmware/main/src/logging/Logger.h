@@ -100,8 +100,13 @@ public:
   static void warn(const char* fmt, ...);
   static void error(const char* fmt, ...);
 
-  static void logln(const char* tag, const String& message, LogLevel level = LogLevel::LOG_INFO);
-  static void log(const char* tag, const String& message, LogLevel level = LogLevel::LOG_INFO);
+  // Phase I Task 7 (XX): signature changed from `const String&` to
+  // `const char*` — String temporaries at call sites (String concatenation,
+  // MacAddress::toString(), etc.) are eliminated repo-wide; callers now use
+  // LATTICE_LOGF (snprintf into a stack buffer) or pass literals/.c_str()
+  // directly.
+  static void logln(const char* tag, const char* message, LogLevel level = LogLevel::LOG_INFO);
+  static void log(const char* tag, const char* message, LogLevel level = LogLevel::LOG_INFO);
 
 private:
   static LogLevel currentLevel;

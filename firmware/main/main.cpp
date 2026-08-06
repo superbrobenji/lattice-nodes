@@ -17,6 +17,7 @@
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
 #include <driver/uart.h>
+#include <driver/gpio.h>
 #include <nvs_flash.h>
 #include <sodium.h>
 
@@ -92,7 +93,10 @@ void dataRecvCallback(const lattice::mesh::mesh_message& message) {
   if (adapter) {
     adapter->onMeshData(message);
   }
-  greenLed.blink(2, 100, 100);
+  // Phase I Task 7 (WW): pulse() arms the pattern without blocking this
+  // receive path (the old blink() blocked every ESP-NOW receive for ~300ms);
+  // loop()'s greenLed.update()/redLed.update() calls animate it.
+  greenLed.pulse(2, 100, 100);
 }
 
 void setup() {
@@ -128,6 +132,49 @@ void setup() {
   }
   ESP_ERROR_CHECK(nvs_err);
 
+  // Phase I Task 7 (QQ + RR): bundled gpio_config_t calls replace the
+  // scattered per-component pinMode() calls that used to run inside each of
+  // SevenSegDisplay::init()/Button::init()/GpioInput::init()/
+  // GpioOutput::init() — those now only validate the pin + set _initialized.
+  // Must run before any of those init() calls below, and gpio_install_isr_
+  // service() must run before PirAdapter::init() (reached via adapter->init()
+  // further down) calls Pir::attachInterrupt().
+  gpio_config_t outCfg = {
+      .pin_bit_mask = (1ULL << RED_LED_PIN) | (1ULL << GREEN_LED_PIN) |
+                      (1ULL << lattice::config::SEVSEG_DATA_PIN) |
+                      (1ULL << lattice::config::SEVSEG_CLK_PIN),
+      .mode = GPIO_MODE_OUTPUT,
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE,
+  };
+  ESP_ERROR_CHECK(gpio_config(&outCfg));
+
+  // Config/reset buttons: internal pull-DOWN (matches Button::init()'s prior
+  // pinMode(_pin, INPUT_PULLDOWN) — line is LOW unless actively driven HIGH).
+  gpio_config_t buttonInCfg = {
+      .pin_bit_mask = (1ULL << CONFIG_BUTTON_PIN) | (1ULL << RESET_BUTTON_PIN),
+      .mode = GPIO_MODE_INPUT,
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_ENABLE,
+      .intr_type = GPIO_INTR_DISABLE,
+  };
+  ESP_ERROR_CHECK(gpio_config(&buttonInCfg));
+
+  // PIR sensor: internal pull-UP (matches GpioInput::init()'s prior
+  // pinMode(_pin, INPUT_PULLUP) default). Edge-interrupt type is armed
+  // separately by Pir::attachInterrupt() once PirAdapter::init() runs, below.
+  gpio_config_t pirInCfg = {
+      .pin_bit_mask = (1ULL << lattice::adapter::PIR_ADAPTER_DEFAULT_PIN),
+      .mode = GPIO_MODE_INPUT,
+      .pull_up_en = GPIO_PULLUP_ENABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE,
+  };
+  ESP_ERROR_CHECK(gpio_config(&pirInCfg));
+
+  ESP_ERROR_CHECK(gpio_install_isr_service(0));
+
   Serial.begin(115200);
 
   // Only print startup message if logging is enabled (not LOG_NONE)
@@ -151,8 +198,18 @@ void setup() {
   if (!redLed.init()) {
     Logger::logln("MAIN", "FATAL: Failed to initialize red LED!", LogLevel::LOG_ERROR);
     if (greenLed.init()) {
+      // Phase I Task 7 (WW): greenLed.pulse() arms a pattern non-blockingly;
+      // this halt loop is the (rare) legitimate case that pumps
+      // greenLed.update() itself inline — nothing else runs here, so it's
+      // equivalent in effect to the old blink()'s internal delay()-driven
+      // blocking, just implemented as an explicit local pump instead.
       while (true) {
-        greenLed.blink(6, 100, 100);
+        greenLed.pulse(6, 100, 100);
+        while (greenLed.isBusy()) {
+          uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
+          greenLed.update(nowMs);
+          delay(10);
+        }
         delay(1000);
       }
     } else {
@@ -215,7 +272,10 @@ void setup() {
     isDevMode = lattice::eeprom::loadDevFlag();
   }
 
-  Logger::logln("MAIN", String("Running in ") + (isDevMode ? "DEV" : "PRODUCTION") + " mode",
+  // Phase I Task 7 (XX): String concat eliminated — Logger now takes
+  // const char*, and both branches are fixed literals, so a ternary of two
+  // string literals covers it with no snprintf/buffer needed.
+  Logger::logln("MAIN", isDevMode ? "Running in DEV mode" : "Running in PRODUCTION mode",
                 LogLevel::LOG_INFO);
 
   // Set dev mode in AdapterFactory and EEPROM Manager
@@ -295,7 +355,7 @@ void setup() {
   bool isMaster;
   if (isDevMode) {
     isMaster = devMasterFlag;
-    Logger::logln("MAIN", String("DEV mode: starting as ") + (isMaster ? "MASTER" : "NODE"),
+    Logger::logln("MAIN", isMaster ? "DEV mode: starting as MASTER" : "DEV mode: starting as NODE",
                   LogLevel::LOG_INFO);
   } else {
     // In production mode, load from EEPROM
@@ -310,7 +370,7 @@ void setup() {
 
   mesh.setIsMaster(isMaster);
   Logger::logln("MESH", "Mesh initialized", LogLevel::LOG_INFO);
-  Logger::logln("MAIN", String("Booted as: ") + (isMaster ? "MASTER" : "NODE"), LogLevel::LOG_INFO);
+  Logger::logln("MAIN", isMaster ? "Booted as: MASTER" : "Booted as: NODE", LogLevel::LOG_INFO);
 
   adapter->setTransmitFn(&lattice::mesh::Mesh::transmit);
 
@@ -332,11 +392,22 @@ void setup() {
 void loop() {
   lattice::err_core::drainPendingBlink();
 
+  // Phase I Task 7 (WW): pump both LEDs' non-blocking pulse() state machines
+  // every iteration — this is what actually advances a pattern armed by
+  // pulse() (dataRecvCallback, the startup blink below, err_core's
+  // signalError/drainPendingBlink, and ButtonHandler's role-toggle/reset
+  // confirmations). Placed before the unenrolled-node early return further
+  // down so blinking never stalls while a node is still awaiting enrollment.
+  uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
+  greenLed.update(nowMs);
+  redLed.update(nowMs);
+  lattice::err_core::tick();
+
   static bool startupBlinkDone = false;
   if (!startupBlinkDone) {
     startupBlinkDone = true;
-    greenLed.blink(2, 200, 200);
-    redLed.blink(2, 200, 200);
+    greenLed.pulse(2, 200, 200);
+    redLed.pulse(2, 200, 200);
   }
 
   mesh.loop(); // drains recv queue, ticks beacon (if master)

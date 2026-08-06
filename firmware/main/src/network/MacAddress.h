@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <cstring>
+#include <cstdio>
 #include "MacEq.h"
 
 namespace lattice {
@@ -18,12 +19,13 @@ struct MacAddress {
   bool operator==(const MacAddress& other) const { return lattice::mac::eq(bytes, other.bytes); }
   bool operator!=(const MacAddress& other) const { return !(*this == other); }
 
-  // Utility
-  String toString() const {
-    char buf[18];
-    sprintf(buf, "%02X:%02X:%02X:%02X:%02X:%02X", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4],
-            bytes[5]);
-    return String(buf);
+  // Utility. Phase I Task 7 (XX): returns via a caller-provided fixed buffer
+  // (18 bytes: "aa:bb:cc:dd:ee:ff" + NUL) instead of a heap-touching String,
+  // matching Logger's char*-only signature. No callers exist yet in this
+  // codebase; kept for future debug/log call sites.
+  void toString(char out[18]) const {
+    snprintf(out, 18, "%02X:%02X:%02X:%02X:%02X:%02X", bytes[0], bytes[1], bytes[2], bytes[3],
+             bytes[4], bytes[5]);
   }
   bool isZero() const {
     for (auto b : bytes)

@@ -49,6 +49,14 @@ void signalError(lattice::core::ErrorTypeDigit t, lattice::core::ModuleDigit m, 
 void signalError(lattice::utils::ErrorType type, const char* msg = nullptr);
 void setCallbackContext(bool inCallback);
 void drainPendingBlink(); // Call from main loop
+// Phase I Task 7 (WW): pumps the error LED's non-blocking pulse() state
+// machine (Led::update()). signalError()/drainPendingBlink() now only ARM a
+// pattern via Led::pulse() — this call is what actually advances it. Call
+// from the main loop every iteration, AND from any halt loop (e.g.
+// Error.h's fatal()'s while(true){}) that needs the pattern to keep
+// animating instead of the LED just sitting at whatever level pulse() left
+// it on.
+void tick();
 
 #ifdef UNIT_TEST
 detail::State& debugStateForTest();
