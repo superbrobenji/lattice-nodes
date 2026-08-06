@@ -50,3 +50,19 @@ CONFIG_NVS_ENCRYPTION=n
 CONFIG_ESP_TASK_WDT=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_ESP_TASK_WDT_PANIC=y
+
+# Phase I Task 1: log + WiFi trim (item LL + audit XX-AAA)
+CONFIG_LOG_DEFAULT_LEVEL_NONE=y
+
+# ESP-NOW is our only WiFi use: no AP association, no aggregation, no persisted creds
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+CONFIG_ESP_WIFI_ENABLE_WPA3_SAE=n
+CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
+
+# LWIP: no sockets used; disable TCP + UDP if arduino-esp32 WiFi.mode allows it.
+# NOTE: If Task 1 build fails with these, comment them out and leave a TODO to
+# re-enable them at Task 3 (which replaces WiFi.mode with raw esp_netif_new).
+CONFIG_LWIP_TCP_ENABLED=n
+CONFIG_LWIP_UDP_ENABLED=n
