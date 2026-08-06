@@ -15,6 +15,7 @@
 #include <esp_wifi.h>
 #include <memory>
 #include <esp_task_wdt.h>
+#include <esp_timer.h>
 #include <driver/uart.h>
 #include <nvs_flash.h>
 #include <sodium.h>
@@ -201,10 +202,8 @@ void setup() {
   // call, not merely "somewhere in setup()".
   if (sodium_init() < 0) {
     Logger::logln("MAIN", "FATAL: libsodium init failed!", LogLevel::LOG_ERROR);
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE,
-                          lattice::core::ModuleDigit::CORE,
-                          5,
-                          "MAIN: sodium_init failed");
+    lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::CORE,
+                        5, "MAIN: sodium_init failed");
   }
 
   // Bluetooth disabled via CONFIG_BT_ENABLED=n in sdkconfig
@@ -354,10 +353,10 @@ void loop() {
   // Enrollment state machine: non-master nodes that are not yet enrolled
   // broadcast their public key every 10 seconds and skip sensor data forwarding
   // until approved by the server and JOIN_ACK received.
-  static uint32_t lastEnrollmentBroadcast = 0;
+  static uint64_t lastEnrollmentBroadcast = 0;
   if (!mesh.isEnrolled() && !mesh.getIsMaster()) {
-    if (millis() - lastEnrollmentBroadcast > 10000) {
-      lastEnrollmentBroadcast = millis();
+    if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - lastEnrollmentBroadcast > 10000) {
+      lastEnrollmentBroadcast = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
       mesh.sendEnrollmentRequest();
       Logger::logln("MAIN", "Enrollment request sent (awaiting server approval)",
                     LogLevel::LOG_INFO);

@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <cstdio>
+#include <esp_timer.h>
 #include "src/hardware/input/Button.h"
 #include "src/hardware/output/Led.h"
 #include "src/mesh/Mesh.h"
@@ -11,7 +12,7 @@ namespace lattice {
 namespace app {
 
 struct ButtonHandler {
-  static constexpr unsigned long HOLD_MS = 5000;
+  static constexpr uint64_t HOLD_MS = 5000;
 
   static void tick(lattice::hardware::Button& configBtn, lattice::hardware::Button& resetBtn,
                    lattice::mesh::Mesh& mesh, lattice::hardware::Led& greenLed,
@@ -24,13 +25,13 @@ private:
   static void tickConfig(lattice::hardware::Button& btn, lattice::mesh::Mesh& mesh,
                          lattice::hardware::Led& greenLed, bool isDevMode, bool& devMasterFlag) {
     static bool wasPressed = false;
-    static unsigned long holdStart = 0;
+    static uint64_t holdStart = 0;
 
     if (btn.isPressed()) {
       if (!wasPressed) {
         wasPressed = true;
-        holdStart = millis();
-      } else if (millis() - holdStart >= HOLD_MS) {
+        holdStart = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
+      } else if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - holdStart >= HOLD_MS) {
         wasPressed = false; // Reset BEFORE action to prevent re-fire
         if (isDevMode) {
           bool newMaster = !mesh.getIsMaster();
@@ -61,23 +62,23 @@ private:
   static void tickReset(lattice::hardware::Button& btn, lattice::hardware::Led& greenLed,
                         lattice::hardware::Led& redLed) {
     static bool wasPressed = false;
-    static unsigned long holdStart = 0;
+    static uint64_t holdStart = 0;
     static bool confirmPending = false;
-    static uint32_t confirmDeadline = 0;
+    static uint64_t confirmDeadline = 0;
 
     if (btn.isPressed()) {
       if (!wasPressed) {
         wasPressed = true;
-        holdStart = millis();
-      } else if (millis() - holdStart >= HOLD_MS) {
+        holdStart = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
+      } else if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - holdStart >= HOLD_MS) {
         wasPressed = false;
         if (!confirmPending) {
           confirmPending = true;
-          confirmDeadline = millis() + 3000;
+          confirmDeadline = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL + 3000;
           LATTICE_LOGLN("MAIN", "Reset armed: hold again within 3s to confirm EEPROM wipe",
                         lattice::utils::LogLevel::LOG_WARN);
           redLed.blink(3, 100, 100);
-        } else if (millis() < confirmDeadline) {
+        } else if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL < confirmDeadline) {
           confirmPending = false;
           LATTICE_LOGLN("MAIN", "EEPROM wipe confirmed. Clearing all...",
                         lattice::utils::LogLevel::LOG_WARN);
@@ -91,7 +92,8 @@ private:
       }
     } else {
       wasPressed = false;
-      if (confirmPending && millis() > confirmDeadline) {
+      if (confirmPending &&
+          static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL > confirmDeadline) {
         confirmPending = false;
         LATTICE_LOGLN("MAIN", "Reset confirmation timed out", lattice::utils::LogLevel::LOG_INFO);
       }

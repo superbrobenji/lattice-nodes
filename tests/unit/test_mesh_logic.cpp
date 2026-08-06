@@ -345,11 +345,11 @@ TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
   memcpy(mesh.deviceMacAddress, kMyMac, 6);
   PeerInfo p1{};
   memcpy(p1.mac, kPeer1Mac, 6);
-  p1.lastSeenMillis = 0;
+  p1.lastSeenMs = 0;
   mesh.peers.append(p1);
   PeerInfo p2{};
   memcpy(p2.mac, kPeer2Mac, 6);
-  p2.lastSeenMillis = 0;
+  p2.lastSeenMs = 0;
   mesh.peers.append(p2);
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1, /*hopCount=*/1);
@@ -371,7 +371,7 @@ TEST_F(RelayDownlinkTest, DropsAtMaxHops) {
   memcpy(mesh.deviceMacAddress, kMyMac, 6);
   PeerInfo p1{};
   memcpy(p1.mac, kPeer1Mac, 6);
-  p1.lastSeenMillis = 0;
+  p1.lastSeenMs = 0;
   mesh.peers.append(p1);
 
   auto msg = makeDataMsg(kOriginMac, kPeer1Mac, 1, 1,
@@ -387,12 +387,12 @@ TEST_F(RelayDownlinkTest, SkipsSelf_WhenSelfInPeerList) {
   memcpy(mesh.deviceMacAddress, kMyMac, 6);
   PeerInfo p1{};
   memcpy(p1.mac, kPeer1Mac, 6);
-  p1.lastSeenMillis = 0;
+  p1.lastSeenMs = 0;
   mesh.peers.append(p1);
   // Add self to peer list (shouldn't happen in production but guard against it)
   PeerInfo self{};
   memcpy(self.mac, kMyMac, 6);
-  self.lastSeenMillis = 0;
+  self.lastSeenMs = 0;
   mesh.peers.append(self);
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1);
@@ -430,7 +430,7 @@ protected:
     // Register master as enrolled peer (required for sendMessage + isPeerInRange)
     PeerInfo p{};
     memcpy(p.mac, kMasterMac, 6);
-    p.lastSeenMillis = 0;
+    p.lastSeenMs = 0;
     mesh.peers.append(p);
     return mesh;
   }
@@ -485,7 +485,7 @@ TEST_F(AdapterDataRelayTest, Master_DoesNotRelayUplink_DeliversLocally) {
   PeerInfo sensorPeer{};
   memcpy(sensorPeer.mac, kSensorMac, 6);
   memcpy(sensorPeer.publicKey, sensorPub, 32);
-  sensorPeer.lastSeenMillis = 0;
+  sensorPeer.lastSeenMs = 0;
   mesh.peers.append(sensorPeer);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(sensorPriv, masterPub, kUp, kDown);
@@ -512,7 +512,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysDownlinkToOtherTarget) {
   // Add a second peer (different from master) to relay toward
   PeerInfo extra{};
   memcpy(extra.mac, kPeerMac, 6);
-  extra.lastSeenMillis = 0;
+  extra.lastSeenMs = 0;
   mesh.peers.append(extra);
 
   mesh_message msg{};
@@ -542,7 +542,7 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_BroadcastTarget_DeliveredAndRelaye
   Mesh mesh = makeIntermediateNode();
   PeerInfo extra{};
   memcpy(extra.mac, kPeerMac, 6);
-  extra.lastSeenMillis = 0;
+  extra.lastSeenMs = 0;
   mesh.peers.append(extra);
 
   bool callbackFired = false;
@@ -573,7 +573,7 @@ TEST_F(AdapterDataRelayTest, BroadcastAdapterData_UsesBroadcastTargetMAC) {
   // Add a peer so broadcastToAllPeers has someone to send to
   PeerInfo extra{};
   memcpy(extra.mac, kPeerMac, 6);
-  extra.lastSeenMillis = 0;
+  extra.lastSeenMs = 0;
   mesh.peers.append(extra);
 
   static constexpr uint8_t kPayload[64] = {0x01, 0x02, 0x03};
@@ -653,7 +653,7 @@ protected:
     mesh.isMaster = false; // explicit defensive guard
     PeerInfo p{};
     memcpy(p.mac, kPeerMac, 6);
-    p.lastSeenMillis = 0;
+    p.lastSeenMs = 0;
     mesh.peers.append(p);
     return mesh;
   }
@@ -674,7 +674,7 @@ protected:
     PeerInfo leaf{};
     memcpy(leaf.mac, kLeafMac, 6);
     memcpy(leaf.publicKey, leafPub, 32);
-    leaf.lastSeenMillis = 0;
+    leaf.lastSeenMs = 0;
     mesh.peers.append(leaf);
     // isMaster is set directly above (not via setIsMaster()+init()), so the
     // RouteTable allocation Mesh::init() would normally trigger never runs —
@@ -878,7 +878,7 @@ TEST_F(JoinAckRelayTest, NextHopThroughRelayIsRegisteredAsEspNowPeer) {
 // must not blackhole its uplink — the NeighborTable fallback branch of
 // findNextHopToMaster() must still find a route if the master is also known
 // as a fresh distance-0 neighbor (e.g. its own beacon was still heard even
-// though the direct PeerRegistry entry's lastSeenMillis is stale).
+// though the direct PeerRegistry entry's lastSeenMs is stale).
 TEST_F(JoinAckRelayTest, DirectMasterStaleFallsBackToNeighborTable) {
   Mesh node = makeIntermediateNode();
   const uint8_t masterMac[6] = {0x02, 0, 0, 0, 0, 0x01};
@@ -890,7 +890,7 @@ TEST_F(JoinAckRelayTest, DirectMasterStaleFallsBackToNeighborTable) {
   // PeerRegistry::isPeerInRange() returns false for it.
   PeerInfo masterPeer{};
   memcpy(masterPeer.mac, masterMac, 6);
-  masterPeer.lastSeenMillis = 0;
+  masterPeer.lastSeenMs = 0;
   node.peers.append(masterPeer);
   advanceMillis(lattice::config::STALE_PEER_THRESHOLD_MS);
 
@@ -1021,7 +1021,7 @@ TEST_F(JoinAckRelayTest, RelayedAdapterDataKeepsOriginTarget) {
   // is actually sent.
   PeerInfo relayMasterPeer{};
   memcpy(relayMasterPeer.mac, relaysMaster, 6);
-  relayMasterPeer.lastSeenMillis = 0;
+  relayMasterPeer.lastSeenMs = 0;
   relay.peers.append(relayMasterPeer);
   memcpy(relay.currentMaster.mac, relaysMaster, 6);
   relay.currentMaster.distance = 1;
@@ -1182,7 +1182,7 @@ TEST(RegisterDownlinkPeer, LRUEntryBecomesEnrolled_EvictsOnTouch) {
   //    to seed peers directly (e.g. RelayedAdapterDataKeepsOriginTarget above).
   PeerInfo enrolled{};
   memcpy(enrolled.mac, mac, 6);
-  enrolled.lastSeenMillis = 0;
+  enrolled.lastSeenMs = 0;
   ASSERT_TRUE(m.peers.append(enrolled));
 
   // 3. Call registerDownlinkPeer(mac) again.
@@ -1304,7 +1304,7 @@ protected:
     PeerInfo master{};
     memcpy(master.mac, kMasterMac, 6);
     memcpy(master.publicKey, masterPub, 32);
-    master.lastSeenMillis = 0;
+    master.lastSeenMs = 0;
     mesh.peers.append(master);
     return mesh;
   }
@@ -1449,7 +1449,7 @@ protected:
     PeerInfo master{};
     memcpy(master.mac, kMasterMac, 6);
     memcpy(master.publicKey, masterKey, 32);
-    master.lastSeenMillis = 0;
+    master.lastSeenMs = 0;
     mesh.peers.append(master);
     return mesh;
   }
@@ -1569,7 +1569,7 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   PeerInfo origin{};
   memcpy(origin.mac, kOriginMac, 6);
   memcpy(origin.publicKey, originPub, 32);
-  origin.lastSeenMillis = 0;
+  origin.lastSeenMs = 0;
   mesh.peers.append(origin);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
@@ -1612,7 +1612,7 @@ TEST_F(DrainRecvQueueTest, DropsProtoVersionZeroAdapterData) {
   PeerInfo origin{};
   memcpy(origin.mac, kOriginMac, 6);
   memcpy(origin.publicKey, originPub, 32);
-  origin.lastSeenMillis = 0;
+  origin.lastSeenMs = 0;
   mesh.peers.append(origin);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);

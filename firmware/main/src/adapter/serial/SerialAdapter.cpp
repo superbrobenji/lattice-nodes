@@ -5,6 +5,7 @@
 #include "src/network/MacEq.h"
 #include <cstring>
 #include <cstdio>
+#include <esp_timer.h>
 #if SIMULATE_MODE
 #include "src/adapter/pir/PirAdapter.h"
 #endif
@@ -44,7 +45,7 @@ void SerialAdapter::loop() {
   uint32_t currentHopCount = meshPtr ? meshPtr->getHopCount() : 0;
   bool stateChanged = (currentHopCount != lastReportedHopCount);
 
-  uint32_t now = static_cast<uint32_t>(millis());
+  uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   bool intervalDue = healthTickDue(now);
   if (stateChanged || intervalDue) {
     // Interval didn't fire on its own but the hop-count change triggers a
@@ -173,9 +174,12 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
         meshRef->debugDumpRadio();
         for (size_t i = 0; i < meshRef->getPeerCount(); ++i) {
           const lattice::mesh::PeerInfo& p = meshRef->getPeerList()[i];
-          Serial.printf("  Peer[%d]: %02X:%02X:%02X:%02X:%02X:%02X last=%lums\n", (int)i, p.mac[0],
+          // Phase I Task 6 (NN): %lu -> %llu — lastSeenMs widened uint32_t ->
+          // uint64_t (FF); nano-format (CONFIG_LIBC_NEWLIB_NANO_FORMAT=y)
+          // requires an exact-width specifier match.
+          Serial.printf("  Peer[%d]: %02X:%02X:%02X:%02X:%02X:%02X last=%llums\n", (int)i, p.mac[0],
                         p.mac[1], p.mac[2], p.mac[3], p.mac[4], p.mac[5],
-                        (unsigned long)p.lastSeenMillis);
+                        (unsigned long long)p.lastSeenMs);
         }
       }
       return;

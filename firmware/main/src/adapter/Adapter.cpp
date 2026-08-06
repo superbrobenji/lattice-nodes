@@ -4,6 +4,7 @@
 #include "src/error/Error.h"
 #include <cstdio>
 #include <cstring>
+#include <esp_timer.h>
 #include <esp_wifi.h>
 #include "src/adapter/AdapterFactory.h"
 #include "src/adapter/serial/SerialAdapter.h"
@@ -95,7 +96,10 @@ void Adapter::buildHealthFrame(uint8_t opcode, uint8_t* buf, size_t bufsize) con
   lattice::hw::readOwnMac(mac);
   memcpy(&buf[2], mac, 6);
 
-  uint32_t uptimeSec = millis() / 1000;
+  // Wire format is a fixed 4-byte LE uptime-seconds field (unchanged) — only
+  // the source clock moved from millis() to esp_timer_get_time().
+  uint32_t uptimeSec =
+      static_cast<uint32_t>(static_cast<uint64_t>(esp_timer_get_time()) / 1000000ULL);
   buf[8] = static_cast<uint8_t>(uptimeSec & 0xFF);
   buf[9] = static_cast<uint8_t>((uptimeSec >> 8) & 0xFF);
   buf[10] = static_cast<uint8_t>((uptimeSec >> 16) & 0xFF);
@@ -113,7 +117,7 @@ void Adapter::sendSelfHealthReport() const {
   LATTICE_LOGLN("Adapter", "Health report sent via self-originated transmit", LogLevel::LOG_DEBUG);
 }
 
-bool Adapter::healthTickDue(uint32_t now) {
+bool Adapter::healthTickDue(uint64_t now) {
   if (now - _lastHealthMillis >= lattice::config::HEALTH_REPORT_INTERVAL_MS) {
     _lastHealthMillis = now;
     return true;
@@ -121,7 +125,7 @@ bool Adapter::healthTickDue(uint32_t now) {
   return false;
 }
 
-void Adapter::resetHealthTick(uint32_t now) {
+void Adapter::resetHealthTick(uint64_t now) {
   _lastHealthMillis = now;
 }
 

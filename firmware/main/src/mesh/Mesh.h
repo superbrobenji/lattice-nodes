@@ -7,6 +7,7 @@
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include <esp_event.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/ringbuf.h>
 #include <array>
@@ -79,8 +80,12 @@ private:
 
   MasterInfo currentMaster;
   bool isMaster;
-  uint32_t lastBeaconMillis;
-  uint32_t lastMasterBeaconReceivedMs;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+  // millis() -> esp_timer_get_time()/1000ULL swap. lastBeaconMillis is NOT
+  // renamed to lastBeaconMs to avoid colliding with the (separate, unrelated)
+  // lastBeaconMs field further down this class.
+  uint64_t lastBeaconMillis;
+  uint64_t lastMasterBeaconReceivedMs;
   static constexpr uint32_t STALE_MASTER_THRESHOLD_MS = lattice::config::STALE_MASTER_THRESHOLD_MS;
 
   // Peer routing (uses currentMaster — stays in Mesh)
@@ -161,13 +166,16 @@ private:
   ReplayCache& testReplay() { return replay; }
   NeighborTable& testNeighbors() { return neighbors; }
   RouteTable* testRoutes() { return routes.get(); }
-  uint32_t testMillisNow() { return millis(); } // exposes the node's mocked clock to tests
+  // Exposes the node's mocked clock to tests. Phase I Task 6 (FF): return
+  // type widened uint32_t -> uint64_t to match esp_timer_get_time()/1000ULL.
+  uint64_t testMillisNow() { return static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL; }
   const uint8_t* testDeviceMac() const { return deviceMacAddress; }
 #endif
 
   // Relay jitter: deferred relay pending fields (Task 3)
   mesh_message relayPendingMsg;
-  uint32_t relayPendingAt;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t (absolute deadline in ms).
+  uint64_t relayPendingAt;
   bool relayPending;
 
   bool _dualMasterMode;
@@ -212,9 +220,13 @@ private:
   bool sendRouteReport();
   void processRouteReport(const mesh_message& msg);
 
-  // Beacon timer (moved from broadcastMasterBeacon for loop() integration)
-  uint32_t lastBeaconMs;
-  uint32_t lastRouteReportMs;
+  // Beacon timer (moved from broadcastMasterBeacon for loop() integration).
+  // lastBeaconMs is currently dead (unused outside its zero-init in the
+  // constructor) — pre-existing, out of Task 6's scope — retyped for
+  // consistency with the rest of this FF sweep rather than left a stale
+  // uint32_t.
+  uint64_t lastBeaconMs;
+  uint64_t lastRouteReportMs;
 
   // Enrollment state (composed — mbedtls-heavy methods stubbed in test builds)
   Enrollment enrollment;

@@ -1,6 +1,7 @@
 #include "PirAdapter.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include <cstdint>
+#include <esp_timer.h>
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/mesh/Mesh.h"
@@ -79,7 +80,7 @@ void PirAdapter::loop() {
   if (!_initialized)
     return;
 
-  uint32_t now = millis();
+  uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
 
   if (_pir.isMotionDetected()) {
     _lastTrigger = now;

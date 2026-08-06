@@ -2,6 +2,7 @@
 #include "GpioOutput.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
+#include <esp_timer.h>
 
 using lattice::core::ErrorTypeDigit;
 using lattice::core::ModuleDigit;
@@ -104,9 +105,9 @@ bool SevenSegDisplay::writeByte(uint8_t b) {
   digitalWrite(_clkPin, HIGH);
   tmDelay();
 
-  unsigned long start = millis();
+  uint64_t start = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   bool ack = false;
-  while (millis() - start < 20) {
+  while (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - start < 20) {
     if (!digitalRead(_dioPin)) {
       ack = true;
       break;

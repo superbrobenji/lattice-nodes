@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <Arduino.h>
+#include <esp_timer.h>
 #include "src/hardware/output/SevenSegDisplay.h"
 
 namespace lattice {
@@ -9,7 +10,9 @@ namespace app {
 struct DisplayManager {
   static void tick(lattice::hardware::SevenSegDisplay& display, bool enrolled, bool isMaster,
                    uint8_t nodeId) {
-    static uint32_t lastToggleMs = 0;
+    // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+    // millis() -> esp_timer_get_time()/1000ULL swap.
+    static uint64_t lastToggleMs = 0;
     static bool dashVisible = false;
 
     // Change-detection state (audit item S) — display.show()/showWithDP() only fire
@@ -24,8 +27,8 @@ struct DisplayManager {
 
     if (!enrolled) {
       _wasEnrolled = false; // force a redraw once we become enrolled again
-      if (millis() - lastToggleMs >= 500) {
-        lastToggleMs = static_cast<uint32_t>(millis());
+      if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - lastToggleMs >= 500) {
+        lastToggleMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
         dashVisible = !dashVisible;
         if (dashVisible) {
           static const uint8_t dashes[4] = {0x40, 0x40, 0x40, 0x40};
