@@ -57,6 +57,11 @@ CONFIG_MBEDTLS_GCM_C=n
 CONFIG_MBEDTLS_CCM_C=n
 CONFIG_MBEDTLS_HARDWARE_AES=n
 CONFIG_MBEDTLS_TLS_ENABLED=n
+# TLS-disable follow-up: select the MBEDTLS_TLS_MODE choice's "None" option,
+# ending the choice-default's TLS_SERVER/TLS_CLIENT -> TLS_ENABLED selects —
+# this makes TLS_ENABLED=n above real (it was advisory before; see spec
+# docs/superpowers/specs/2026-08-07-mbedtls-tls-disable-design.md).
+CONFIG_MBEDTLS_TLS_DISABLED=y
 
 # ESP-NOW and WiFi
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
