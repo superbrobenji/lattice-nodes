@@ -46,7 +46,7 @@ CONFIG_MBEDTLS_HARDWARE_SHA=y
 # (no TLS/HTTPS use at all, independent of which library E2E crypto calls).
 # NOTE: several of these =n lines are advisory only — ESP-IDF's
 # MBEDTLS_TLS_MODE choice defaults to server+client and force-selects
-# TLS_ENABLED/AES_C (and, via TLS, ECDSA_C + SECP256R1/SECP192R1) back to =y;
+# TLS_ENABLED/AES_C (and, via TLS, ECDSA_C + SECP256R1) back to =y;
 # Kconfig select beats sdkconfig.defaults silently. Measured size-neutral:
 # LTO + gc-sections strip the unreferenced TLS/AES code either way (see
 # Phase J task-3 report). Actually disabling TLS would need
@@ -120,7 +120,7 @@ CONFIG_PM_DFS_INIT_AUTO=y
 
 # Phase J item KK (revived): only Curve25519 is used (X25519 E2E keys).
 # ESP-IDF's default enables every NIST/Brainpool curve in mbedtls — dead
-# flash here (nothing references them; note SECP256R1/SECP192R1 + ECDSA_C
+# flash here (nothing references them; note SECP256R1 + ECDSA_C
 # get force-selected =y by the TLS-mode chain regardless — see comment
 # above — but their unreferenced code is stripped by LTO/gc-sections).
 CONFIG_MBEDTLS_ECP_DP_SECP192R1_ENABLED=n
