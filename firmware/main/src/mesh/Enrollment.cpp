@@ -37,8 +37,7 @@ Enrollment::Enrollment() {
 
 // NOTE: Enrollment::init() and Enrollment::enrollPeer() are crypto-heavy (X25519
 // keygen via MeshCrypto.h::generateKeypair). Host test builds compile them for real
-// against a host-installed libsodium (Phase I Task 2 — was host-built mbedtls; see
-// tests/CMakeLists.txt).
+// against a host-built mbedtls (Phase J revert; see tests/CMakeLists.txt).
 
 void Enrollment::init() {
   if (lattice::eeprom::loadKeypair(devicePrivateKey, devicePublicKey)) {

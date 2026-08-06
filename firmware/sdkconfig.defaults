@@ -29,20 +29,29 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Bluetooth: disabled — unused, saves ~10KB flash + heap
 CONFIG_BT_ENABLED=n
 
-# Phase I Task 2 (item GG): mbedtls fully dropped from E2E crypto — E2ECrypto.h,
-# MeshCrypto.h, and RouteMac.h now call libsodium exclusively (see
-# firmware/main/idf_component.yml's espressif/libsodium dependency), so the
-# CHACHA20/POLY1305/CHACHAPOLY/HKDF/HARDWARE_SHA tuning that only existed for
-# those call sites is gone. CONFIG_MBEDTLS_AES_C/GCM_C/CCM_C/HARDWARE_AES/
-# TLS_ENABLED below are a SEPARATE, pre-existing Phase G/Phase A size trim
-# (this node has no TLS/HTTPS use at all, independent of which library E2E
-# crypto happens to call) — those stay =n. Measured: dropping them too (i.e.
-# deleting this whole block, matching the Task 2 brief's Step 13 literally)
-# silently re-enables mbedTLS's TLS stack + AES/GCM/CCM by falling back to
-# ESP-IDF's default (=y for all five), a +82KB regression relative to the
-# pre-Task-2 baseline (measured via a real mbedtls-linked build of this exact
-# tree) that has nothing to do with this task's E2E-crypto swap — see task
-# report.
+# Phase J: E2E crypto back on mbedtls — libsodium reverted (measured +82KB in
+# Phase I Task 2 vs the predicted win; ~22KB of it never-called primitives
+# reachable only via sodium_init()'s dispatch tables — see
+# docs/superpowers/specs/2026-08-06-phaseJ-crypto-revert-design.md).
+# E2ECrypto.h/MeshCrypto.h/RouteMac.h now call mbedtls exclusively through
+# lattice::crypto (firmware/main/src/crypto/Crypto.h). CHACHA20/POLY1305/
+# CHACHAPOLY seal the E2E payloads, HKDF derives the direction-split keys,
+# HARDWARE_SHA accelerates HMAC/HKDF (SHA-256 hardware block).
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_POLY1305_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+CONFIG_MBEDTLS_HKDF_C=y
+CONFIG_MBEDTLS_HARDWARE_SHA=y
+# AES/GCM/CCM/TLS below are a SEPARATE, pre-existing Phase G/Phase A size trim
+# (no TLS/HTTPS use at all, independent of which library E2E crypto calls).
+# NOTE: several of these =n lines are advisory only — ESP-IDF's
+# MBEDTLS_TLS_MODE choice defaults to server+client and force-selects
+# TLS_ENABLED/AES_C (and, via TLS, ECDSA_C + SECP256R1) back to =y;
+# Kconfig select beats sdkconfig.defaults silently. Measured size-neutral:
+# LTO + gc-sections strip the unreferenced TLS/AES code either way (see
+# Phase J task-3 report). Actually disabling TLS would need
+# CONFIG_MBEDTLS_TLS_DISABLED=y (the choice symbol) — deliberate follow-up,
+# out of Phase J scope.
 CONFIG_MBEDTLS_AES_C=n
 CONFIG_MBEDTLS_GCM_C=n
 CONFIG_MBEDTLS_CCM_C=n
@@ -80,10 +89,7 @@ CONFIG_LWIP_UDP_ENABLED=n
 
 # Phase I Task 2 follow-up: disable WiFi Enterprise to break the
 # esp_wifi -> MBEDTLS_TLS_ENABLED force-select chain (no AP association in
-# this firmware; pure ESP-NOW). LIBSODIUM_USE_MBEDTLS_SHA=y kept at default
-# — measured: routing libsodium SHA through mbedtls's HW-accelerated SHA256
-# is ~3KB smaller than libsodium's portable SHA256 impl (mbedtls is linked
-# anyway for esp_wifi's WPA/PMK path).
+# this firmware; pure ESP-NOW).
 CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 
 # Phase I Task 6 (item NN): newlib-nano printf/scanf. Per ESP-IDF's own Kconfig
@@ -111,3 +117,25 @@ CONFIG_LIBC_NEWLIB_NANO_FORMAT=y
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_PM_DFS_INIT_AUTO=y
+
+# Phase J item KK (revived): only Curve25519 is used (X25519 E2E keys).
+# ESP-IDF's default enables every NIST/Brainpool curve in mbedtls — dead
+# flash here (nothing references them; note SECP256R1 + ECDSA_C
+# get force-selected =y by the TLS-mode chain regardless — see comment
+# above — but their unreferenced code is stripped by LTO/gc-sections).
+CONFIG_MBEDTLS_ECP_DP_SECP192R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP224R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP256R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP384R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP521R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP192K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP224K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_CURVE448_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED=y
+# Nothing signs or verifies with ECDSA (no certs). Drop this single line if
+# the build reports an unmet Kconfig dependency on it.
+CONFIG_MBEDTLS_ECDSA_C=n

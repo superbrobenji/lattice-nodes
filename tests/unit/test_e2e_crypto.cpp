@@ -2,8 +2,8 @@
 #include <cstring>
 #include "src/mesh/MeshCrypto.h"
 #include "src/mesh/E2ECrypto.h"
+#include "src/crypto/Crypto.h"
 #include "lattice-protocol/c/mesh_message.h"
-#include <sodium.h>
 
 using namespace lattice::mesh::crypto;
 
@@ -99,10 +99,10 @@ TEST(E2EAead, MutableFieldsNotBound) {
   EXPECT_TRUE(lattice::mesh::crypto::openPayload(key, m));
 }
 
-// RFC 8439 §2.8.2 known-answer vector, exercised against the same libsodium
-// primitive sealPayload uses (Phase I Task 2 — was mbedtls_chachapoly_*; spec
-// §7: AEAD KAT). Guards against a broken or misconfigured chacha20poly1305
-// build on either host or target toolchains.
+// RFC 8439 §2.8.2 known-answer vector, exercised against the same wrapper call
+// sealPayload uses (lattice::crypto::aead_seal; Phase J — spec §Test changes).
+// Guards against a broken or misconfigured chacha20poly1305 build on either
+// host or target toolchains.
 TEST(E2EAead, Rfc8439KnownAnswer) {
   const uint8_t key[32] = {0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a,
                            0x8b, 0x8c, 0x8d, 0x8e, 0x8f, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95,
@@ -114,14 +114,11 @@ TEST(E2EAead, Rfc8439KnownAnswer) {
                           "only one tip for the future, sunscreen would be it.";
   const uint8_t expectedTag[16] = {0x1a, 0xe1, 0x0b, 0x59, 0x4f, 0x09, 0xe2, 0x6a,
                                    0x7e, 0x90, 0x2e, 0xcb, 0xd0, 0x60, 0x06, 0x91};
-  uint8_t ct[114], tag[16];
-  unsigned long long tagLen = 0;
-  ASSERT_EQ(0, crypto_aead_chacha20poly1305_ietf_encrypt_detached(
-                   ct, tag, &tagLen, reinterpret_cast<const uint8_t*>(plaintext), 114, aad,
-                   sizeof(aad), nullptr, nonce, key));
-  EXPECT_EQ(16u, tagLen);
+  uint8_t buf[114], tag[16];
+  memcpy(buf, plaintext, 114);
+  ASSERT_TRUE(lattice::crypto::aead_seal(key, nonce, aad, sizeof(aad), buf, 114, tag));
   EXPECT_EQ(0, memcmp(tag, expectedTag, 16));
-  EXPECT_EQ(0xd3, ct[0]); // first ciphertext byte per RFC 8439 §2.8.2
+  EXPECT_EQ(0xd3, buf[0]); // first ciphertext byte per RFC 8439 §2.8.2
 }
 
 TEST(E2EAead, WrongKeyFailsOpen) {

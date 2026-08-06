@@ -14,55 +14,23 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# libsodium — real X25519/ChaCha20-Poly1305/HKDF-SHA256/HMAC-SHA256 for
-# Enrollment/MeshCrypto/E2ECrypto/RouteMac on host (Phase I Task 2, item GG —
-# was mbedtls, FetchContent'd above until this swap). libsodium doesn't ship a
-# CMake package config, so locate it via pkg-config if available, else fall
-# back to common install prefixes (Homebrew on macOS — both Apple Silicon
-# /opt/homebrew and Intel /usr/local — and system paths on Linux CI). If
-# neither finds it, build from source instead (same GIT_TAG the ESP-IDF side
-# consumes via the espressif/libsodium component-manager package, so host and
-# target link the same libsodium release).
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-  pkg_check_modules(SODIUM QUIET libsodium)
-endif()
-if(NOT SODIUM_FOUND)
-  find_path(SODIUM_INCLUDE_DIRS NAMES sodium.h HINTS /opt/homebrew/include /usr/local/include /usr/include)
-  find_library(SODIUM_LIBRARY_FILE NAMES sodium HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
-  if(SODIUM_INCLUDE_DIRS AND SODIUM_LIBRARY_FILE)
-    set(SODIUM_LIBRARIES ${SODIUM_LIBRARY_FILE})
-  endif()
-endif()
-if(SODIUM_INCLUDE_DIRS AND SODIUM_LIBRARIES)
-  include_directories(${SODIUM_INCLUDE_DIRS})
-  add_library(sodium INTERFACE)
-  target_link_libraries(sodium INTERFACE ${SODIUM_LIBRARIES})
-else()
-  # No system libsodium found — build the same release ESP-IDF's
-  # espressif/libsodium component vendors (1.0.19+) from source.
-  FetchContent_Declare(
-    libsodium_src
-    GIT_REPOSITORY https://github.com/jedisct1/libsodium
-    GIT_TAG 1.0.19
-  )
-  FetchContent_GetProperties(libsodium_src)
-  if(NOT libsodium_src_POPULATED)
-    FetchContent_Populate(libsodium_src)
-  endif()
-  # libsodium ships an autotools build, not CMake — build via its configure
-  # script at CMake-configure time (host builds only run this once, cached).
-  execute_process(
-    COMMAND sh -c "cd ${libsodium_src_SOURCE_DIR} && ./configure --disable-shared --enable-static --prefix=${libsodium_src_BINARY_DIR}/install >${libsodium_src_BINARY_DIR}/configure.log 2>&1 && make -j2 install >>${libsodium_src_BINARY_DIR}/configure.log 2>&1"
-    RESULT_VARIABLE SODIUM_BUILD_RESULT
-  )
-  if(NOT SODIUM_BUILD_RESULT EQUAL 0)
-    message(FATAL_ERROR "libsodium source build failed — see ${libsodium_src_BINARY_DIR}/configure.log")
-  endif()
-  include_directories(${libsodium_src_BINARY_DIR}/install/include)
-  add_library(sodium INTERFACE)
-  target_link_libraries(sodium INTERFACE ${libsodium_src_BINARY_DIR}/install/lib/libsodium.a)
-endif()
+# mbedtls — real ChaCha20-Poly1305/X25519/HKDF/HMAC for lattice::crypto
+# (firmware/main/src/crypto/Crypto.h) on host. Pinned to the same 3.6.x line
+# ESP-IDF 5.5.1 bundles (Phase J revert — spec
+# docs/superpowers/specs/2026-08-06-phaseJ-crypto-revert-design.md).
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)      # mbedtls' own tests
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+# Newer AppleClang enables -Wunterminated-string-initialization, which mbedtls's
+# TLS layer (not needed here — only mbedcrypto is linked) trips on;
+# MBEDTLS_FATAL_WARNINGS would promote it to -Werror while compiling it.
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  mbedtls
+  URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
+  URL_HASH SHA256=8b54fb9bcf4d5a7078028e0520acddefb7900b3e66fec7f7175bb5b7d85ccdca
+  DOWNLOAD_EXTRACT_TIMESTAMP ON
+)
+FetchContent_MakeAvailable(mbedtls)
 
 # Mock layer + firmware source include paths
 # Mocks shadow real hardware headers via include order — tests/mocks/ MUST
@@ -127,7 +95,7 @@ include(GoogleTest)
 # Helper macro — one test executable per file
 macro(add_unit_test name source)
   add_executable(${name} ${source} ${FIRMWARE_SOURCES})
-  target_link_libraries(${name} gtest_main gmock sodium)
+  target_link_libraries(${name} gtest_main gmock mbedcrypto)
   gtest_discover_tests(${name})
 endmacro()
 
@@ -149,7 +117,8 @@ add_unit_test(test_mem                unit/test_mem.cpp)
 add_unit_test(test_compact_message    unit/test_compact_message.cpp)
 add_unit_test(test_button             unit/test_button.cpp)
 add_unit_test(test_display_manager    unit/test_display_manager.cpp)
-add_unit_test(test_libsodium_kat      unit/test_libsodium_kat.cpp)
+
+add_unit_test(test_mbedtls_kat        unit/test_mbedtls_kat.cpp)
 
 # ---- E2E simulation target — SIMULATE_MODE recompiles all firmware sources ----
 add_executable(lattice_e2e
@@ -175,5 +144,5 @@ add_executable(lattice_e2e
 )
 target_compile_definitions(lattice_e2e PRIVATE SIMULATE_MODE=1)
 target_include_directories(lattice_e2e PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/e2e)
-target_link_libraries(lattice_e2e gtest_main gmock sodium)
+target_link_libraries(lattice_e2e gtest_main gmock mbedcrypto)
 gtest_discover_tests(lattice_e2e PROPERTIES LABELS e2e)

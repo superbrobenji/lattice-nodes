@@ -20,7 +20,6 @@
 #include <driver/uart.h>
 #include <driver/gpio.h>
 #include <nvs_flash.h>
-#include <sodium.h>
 #include <esp_pm.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -398,16 +397,6 @@ extern "C" void app_main(void) {
     Logger::logln("MAIN", "Failed to initialize EEPROM Manager", LogLevel::LOG_ERROR);
     lattice::err::fatal(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::CORE, 2,
                         "EEPROM Manager init failed!");
-  }
-
-  // Phase I Task 2: libsodium — must run before any crypto:: call (E2ECrypto.h,
-  // MeshCrypto.h, RouteMac.h). mesh.init() below reaches keypair generation via
-  // Enrollment::init() on an unenrolled device, so this has to land before that
-  // call, not merely "somewhere in app_main()".
-  if (sodium_init() < 0) {
-    Logger::logln("MAIN", "FATAL: libsodium init failed!", LogLevel::LOG_ERROR);
-    lattice::err::fatal(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::CORE,
-                        5, "MAIN: sodium_init failed");
   }
 
   // Bluetooth disabled via CONFIG_BT_ENABLED=n in sdkconfig
