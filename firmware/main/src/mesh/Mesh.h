@@ -7,6 +7,8 @@
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include <esp_event.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/ringbuf.h>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -193,9 +195,18 @@ private:
     mesh_message msg;
   };
 
-  RecvQueueEntry recvQueue[RECV_QUEUE_SIZE];
-  volatile uint8_t recvQueueHead; // written by WiFi task (callback)
-  uint8_t recvQueueTail;          // read by main task (loop)
+  // Phase I Task 8 (item OO): static FreeRTOS ring buffer replaces the
+  // hand-rolled head/tail/count SPSC array above. RINGBUF_TYPE_NOSPLIT keeps
+  // each xRingbufferReceive() call returning a contiguous pointer to one
+  // whole RecvQueueEntry (never split across the wrap boundary), matching
+  // the old array's per-slot semantics. Storage is a static member array —
+  // xRingbufferCreateStatic() places the ring entirely inside it, so this
+  // stays heap-free like the array it replaces. The +128 pads for the ring's
+  // internal per-item header overhead (a few bytes/item); real usage is
+  // RECV_QUEUE_SIZE * (sizeof(RecvQueueEntry) + ~8).
+  RingbufHandle_t recvQueue = nullptr;
+  StaticRingbuffer_t _recvQueueStruct;
+  uint8_t _recvQueueStorage[RECV_QUEUE_SIZE * sizeof(RecvQueueEntry) + 128];
 
   void drainRecvQueue();
   bool sendRouteReport();
@@ -424,13 +435,12 @@ public:
 #if SIMULATE_MODE
   // Inject a message directly into the receive queue (bypasses radio — for dev/test only)
   void injectReceivedMessage(const uint8_t* srcMac, const mesh_message& msg) {
-    uint8_t nextHead = (recvQueueHead + 1) % RECV_QUEUE_SIZE;
-    if (nextHead == recvQueueTail)
-      return; // Queue full — drop
-    RecvQueueEntry& slot = recvQueue[recvQueueHead];
-    memcpy(slot.srcMac, srcMac, 6);
-    slot.msg = msg;
-    recvQueueHead = nextHead;
+    RecvQueueEntry entry;
+    memcpy(entry.srcMac, srcMac, 6);
+    entry.msg = msg;
+    // Non-blocking send (0 ticks); silently dropped if full, matching the
+    // old array-based "Queue full — drop" behavior.
+    xRingbufferSend(recvQueue, &entry, sizeof(entry), 0);
   }
 #endif
 };

@@ -28,6 +28,11 @@ Enrollment::Enrollment() {
   memset(devicePublicKey, 0, 32);
   memset(knownMasterMac, 0xFF, 6);
   memset(knownMasterMacSecondary, 0xFF, 6);
+  // Phase I Task 8 (item OO): static ring buffer over
+  // _pendingRelayQueueStorage — heap-free, matching the array it replaces.
+  _pendingRelayQueue =
+      xRingbufferCreateStatic(sizeof(_pendingRelayQueueStorage), RINGBUF_TYPE_NOSPLIT,
+                              _pendingRelayQueueStorage, &_pendingRelayQueueStruct);
 }
 
 // NOTE: Enrollment::init() and Enrollment::enrollPeer() are crypto-heavy (X25519
@@ -89,14 +94,15 @@ void Enrollment::processRequest(const mesh_message& msg) {
 }
 
 void Enrollment::enqueuePendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
-  if (_pendingRelayCount >= PENDING_RELAY_QUEUE_SIZE) {
+  PendingRelay entry;
+  memcpy(entry.mac, mac, 6);
+  memcpy(entry.pubKey, pubKey, 32);
+  // Non-blocking send (0 ticks) — this runs from Mesh::drainRecvQueue() in
+  // task context (not ISR), so the LOG_WARN below is safe here, unlike
+  // Mesh::onDataRecvCallback's silent ISR-context drop.
+  if (xRingbufferSend(_pendingRelayQueue, &entry, sizeof(entry), 0) != pdTRUE) {
     LATTICE_LOGLN("MESH", "Enrollment relay queue full — dropping request", LogLevel::LOG_WARN);
-    return;
   }
-  size_t idx = (_pendingRelayHead + _pendingRelayCount) % PENDING_RELAY_QUEUE_SIZE;
-  memcpy(_pendingRelayQueue[idx].mac, mac, 6);
-  memcpy(_pendingRelayQueue[idx].pubKey, pubKey, 32);
-  _pendingRelayCount++;
 }
 
 void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*deviceMac*/,
@@ -204,13 +210,14 @@ void Enrollment::setPendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
 
 void Enrollment::drainPendingRelay() {
   // Drain EVERY queued entry per call so concurrent enrollments are not starved.
-  while (_pendingRelayCount > 0) {
-    const PendingRelay& e = _pendingRelayQueue[_pendingRelayHead];
-    if (_enrollmentRelayFn) {
-      _enrollmentRelayFn(e.mac, e.pubKey);
+  size_t itemSize = 0;
+  PendingRelay* entryPtr;
+  while ((entryPtr = static_cast<PendingRelay*>(
+              xRingbufferReceive(_pendingRelayQueue, &itemSize, 0))) != nullptr) {
+    if (itemSize == sizeof(PendingRelay) && _enrollmentRelayFn) {
+      _enrollmentRelayFn(entryPtr->mac, entryPtr->pubKey);
     }
-    _pendingRelayHead = (_pendingRelayHead + 1) % PENDING_RELAY_QUEUE_SIZE;
-    _pendingRelayCount--;
+    vRingbufferReturnItem(_pendingRelayQueue, entryPtr);
   }
 }
 

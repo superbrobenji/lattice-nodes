@@ -31,15 +31,20 @@ Mesh* Mesh::instance = nullptr;
 
 Mesh::Mesh()
     : isMaster(false), lastBeaconMillis(0), lastMasterBeaconReceivedMs(0), relayPendingAt(0),
-      relayPending(false), _dualMasterMode(lattice::config::DUAL_MASTER_MODE), recvQueueHead(0),
-      recvQueueTail(0), lastBeaconMs(0), lastRouteReportMs(0) {
+      relayPending(false), _dualMasterMode(lattice::config::DUAL_MASTER_MODE), lastBeaconMs(0),
+      lastRouteReportMs(0) {
   instance = this;
   memset(currentMaster.mac, 0, 6);
   currentMaster.distance = 0xFF;
   memset(lastSeenMasterMac, 0, 6);
   memset(deviceMacAddress, 0, 6);
-  memset(recvQueue, 0, sizeof(recvQueue));
   memset(&relayPendingMsg, 0, sizeof(relayPendingMsg));
+  // Phase I Task 8 (item OO): static ring buffer over _recvQueueStorage —
+  // heap-free, matching the array it replaces. Storage is a Mesh member so
+  // its lifetime matches the instance; safe to create unconditionally here
+  // (doesn't depend on WiFi/ESP-NOW being up yet).
+  recvQueue = xRingbufferCreateStatic(sizeof(_recvQueueStorage), RINGBUF_TYPE_NOSPLIT,
+                                      _recvQueueStorage, &_recvQueueStruct);
 }
 
 // Seal-time AEAD nonce-reuse guard — see declaration comment in Mesh.h. Must
@@ -346,22 +351,34 @@ void IRAM_ATTR Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uin
   if (static_cast<size_t>(len) < sizeof(mesh_message))
     return;
 
-  uint8_t nextHead = (instance->recvQueueHead + 1) % RECV_QUEUE_SIZE;
-  if (nextHead == instance->recvQueueTail) {
-    // Queue full — drop packet
-    return;
-  }
+  RecvQueueEntry entry;
+  memcpy(entry.srcMac, info->src_addr, 6);
+  memcpy(&entry.msg, incomingData, sizeof(mesh_message));
 
-  RecvQueueEntry& slot = instance->recvQueue[instance->recvQueueHead];
-  memcpy(slot.srcMac, info->src_addr, 6);
-  memcpy(&slot.msg, incomingData, sizeof(mesh_message));
-  instance->recvQueueHead = nextHead;
+  BaseType_t woken = pdFALSE;
+  // Queue full — xRingbufferSendFromISR returns pdFALSE and the packet is
+  // silently dropped, matching the old array's "Queue full — drop" behavior
+  // (no logging here: this runs in WiFi task/ISR context, and Serial writes
+  // are not safe from that context — see loop()'s comment on
+  // drainPendingRelay).
+  xRingbufferSendFromISR(instance->recvQueue, &entry, sizeof(entry), &woken);
+  if (woken)
+    portYIELD_FROM_ISR();
 }
 
 void Mesh::drainRecvQueue() {
-  while (recvQueueTail != recvQueueHead) {
-    RecvQueueEntry& entry = recvQueue[recvQueueTail];
-    recvQueueTail = (recvQueueTail + 1) % RECV_QUEUE_SIZE;
+  size_t itemSize = 0;
+  RecvQueueEntry* entryPtr;
+  while ((entryPtr = static_cast<RecvQueueEntry*>(xRingbufferReceive(recvQueue, &itemSize, 0))) !=
+         nullptr) {
+    if (itemSize != sizeof(RecvQueueEntry)) {
+      // Should never happen (NOSPLIT items are always sent whole) — guard
+      // against a corrupt/short item rather than reading past it.
+      vRingbufferReturnItem(recvQueue, entryPtr);
+      continue;
+    }
+    RecvQueueEntry entry = *entryPtr;
+    vRingbufferReturnItem(recvQueue, entryPtr);
 
     const mesh_message& msg = entry.msg;
 

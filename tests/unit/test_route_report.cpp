@@ -497,10 +497,10 @@ TEST_F(RouteReportTest, DrainRecvQueue_DispatchesRouteReport) {
 
   // Directly push to recv queue (UNIT_TEST exposes all members)
   uint8_t srcMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
-  uint8_t nextHead = (mesh.recvQueueHead + 1) % Mesh::RECV_QUEUE_SIZE;
-  memcpy(mesh.recvQueue[mesh.recvQueueHead].srcMac, srcMac, 6);
-  mesh.recvQueue[mesh.recvQueueHead].msg = msg;
-  mesh.recvQueueHead = nextHead;
+  Mesh::RecvQueueEntry entry;
+  memcpy(entry.srcMac, srcMac, 6);
+  entry.msg = msg;
+  xRingbufferSend(mesh.recvQueue, &entry, sizeof(entry), 0);
 
   size_t before = espNowSentPackets.size();
   mesh.drainRecvQueue();
