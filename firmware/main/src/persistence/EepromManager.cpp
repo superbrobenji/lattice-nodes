@@ -396,7 +396,10 @@ void savePeerList(const uint8_t* peerRecords, size_t numPeers) {
       erasePeerRecord(i);
     }
   }
-  logOperation("Peer list saved", String(numPeers).c_str());
+  // Phase I Task 7 (TT): String() temporary eliminated.
+  char numPeersBuf[12];
+  snprintf(numPeersBuf, sizeof(numPeersBuf), "%zu", numPeers);
+  logOperation("Peer list saved", numPeersBuf);
 }
 
 bool hasPeers() {

@@ -2,6 +2,7 @@
 #include "Error.h"
 #include "../logging/Logger.h"
 #include <esp_system.h>
+#include <esp_timer.h>
 #include <cstdio>
 using lattice::core::ErrorTypeDigit;
 using lattice::core::makeErrorCode;
@@ -46,7 +47,7 @@ void blinkPattern(ErrorType t) {
     b = 1;
   }
   if (_state.errorLed && _state.errorLed->isInitialized())
-    _state.errorLed->blink(b, 200, 200);
+    _state.errorLed->pulse(b, 200, 200);
 }
 
 bool shouldRestart(ErrorType t) {
@@ -121,6 +122,13 @@ void drainPendingBlink() {
   if (_state.pendingBlink) {
     _state.pendingBlink = false;
     blinkPattern(_state.pendingBlinkType);
+  }
+}
+
+void tick() {
+  if (_state.errorLed) {
+    uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
+    _state.errorLed->update(now);
   }
 }
 

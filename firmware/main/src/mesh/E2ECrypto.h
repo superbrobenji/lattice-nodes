@@ -109,32 +109,33 @@ inline void deriveE2EKeys(const uint8_t* ownPrivateKey32, const uint8_t* peerPub
 constexpr size_t E2E_AAD_LEN = 24;
 constexpr size_t E2E_NONCE_LEN = 12;
 
+// Phase I Task 7 (SS): byte-by-byte little-endian shift+mask+store replaced
+// with memcpy. ESP32 (Xtensa and RISC-V variants alike) is little-endian, so
+// a direct memcpy of these fixed-width fields reproduces the prior output
+// bit-for-bit — verified by the existing buildNonce/buildAad test coverage
+// (tests/unit/test_mesh_logic.cpp et al.), which pins the exact wire bytes.
+// memcpy (not a raw pointer cast/dereference) is required here, not just
+// cosmetic: mesh_message is __attribute__((packed)), so msg.epoch_num /
+// msg.seq_num are not guaranteed 4-/2-byte aligned, and Xtensa faults on
+// unaligned word loads through a typed pointer — memcpy is well-defined for
+// any alignment.
 inline void buildNonce(const mesh_message& msg, uint8_t nonce[E2E_NONCE_LEN]) {
-  nonce[0] = static_cast<uint8_t>(msg.epoch_num);
-  nonce[1] = static_cast<uint8_t>(msg.epoch_num >> 8);
-  nonce[2] = static_cast<uint8_t>(msg.epoch_num >> 16);
-  nonce[3] = static_cast<uint8_t>(msg.epoch_num >> 24);
-  nonce[4] = static_cast<uint8_t>(msg.seq_num);
-  nonce[5] = static_cast<uint8_t>(msg.seq_num >> 8);
+  memcpy(nonce + 0, &msg.epoch_num, sizeof(msg.epoch_num));
+  memcpy(nonce + 4, &msg.seq_num, sizeof(msg.seq_num));
   memcpy(nonce + 6, msg.origin_mac_address, 6);
 }
 
 inline void buildAad(const mesh_message& msg, uint8_t aad[E2E_AAD_LEN]) {
   aad[0] = msg.proto_version;
   aad[1] = msg.message_type;
-  uint32_t dt = static_cast<uint32_t>(msg.data_type);
-  aad[2] = static_cast<uint8_t>(dt);
-  aad[3] = static_cast<uint8_t>(dt >> 8);
-  aad[4] = static_cast<uint8_t>(dt >> 16);
-  aad[5] = static_cast<uint8_t>(dt >> 24);
+  // data_type is int32_t; memcpy copies its 4-byte little-endian bit pattern
+  // directly — identical to the prior uint32_t-cast shift+mask+store (a
+  // static_cast<uint32_t> from int32_t never changes the underlying bits).
+  memcpy(aad + 2, &msg.data_type, sizeof(msg.data_type));
   memcpy(aad + 6, msg.origin_mac_address, 6);
   memcpy(aad + 12, msg.target_mac_address, 6);
-  aad[18] = static_cast<uint8_t>(msg.epoch_num);
-  aad[19] = static_cast<uint8_t>(msg.epoch_num >> 8);
-  aad[20] = static_cast<uint8_t>(msg.epoch_num >> 16);
-  aad[21] = static_cast<uint8_t>(msg.epoch_num >> 24);
-  aad[22] = static_cast<uint8_t>(msg.seq_num);
-  aad[23] = static_cast<uint8_t>(msg.seq_num >> 8);
+  memcpy(aad + 18, &msg.epoch_num, sizeof(msg.epoch_num));
+  memcpy(aad + 22, &msg.seq_num, sizeof(msg.seq_num));
 }
 
 // Encrypts msg.data in place and writes msg.auth_tag. Returns false on libsodium error.

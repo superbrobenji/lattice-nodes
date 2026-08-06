@@ -74,9 +74,12 @@ void Mesh::_checkEpochRollback(uint32_t epoch, uint16_t seq) {
 void Mesh::readMacAddress() {
   esp_err_t ret = esp_wifi_get_mac(WIFI_IF_STA, deviceMacAddress);
   if (ret != ESP_OK) {
-    lattice::err::fail(
-        lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::MESH, 1,
-        (String("MESH: Failed to read MAC address: ") + esp_err_to_name(ret)).c_str());
+    // Phase I Task 7 (TT): String() temporary eliminated — stack buffer +
+    // snprintf feeds err::fail's const char* directly.
+    char errBuf[80];
+    snprintf(errBuf, sizeof(errBuf), "MESH: Failed to read MAC address: %s", esp_err_to_name(ret));
+    lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::MESH, 1,
+                       errBuf);
   } else {
     // Prime the boot-time cache (item F) so every adapter's readOwnMac() call
     // is a memcpy instead of a repeat esp_wifi_get_mac() syscall.
@@ -309,8 +312,11 @@ void Mesh::loadPersistentState() {
 bool Mesh::setupEspNow() {
   esp_err_t res = esp_now_init();
   if (res != ESP_OK) {
+    // Phase I Task 7 (TT): String() temporary eliminated.
+    char errBuf[80];
+    snprintf(errBuf, sizeof(errBuf), "MESH: esp_now_init failed: %s", esp_err_to_name(res));
     lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 3,
-                       (String("MESH: esp_now_init failed: ") + esp_err_to_name(res)).c_str());
+                       errBuf);
     return false;
   }
   lattice::err::checkEsp(esp_now_set_pmk(meshKey), lattice::utils::ErrorType::HARDWARE_FAILURE,
@@ -447,8 +453,11 @@ void Mesh::sendMessage(const uint8_t* target, const mesh_message& msg) {
   if (result == ESP_OK) {
     LATTICE_LOGLN("MESH", "Message sent to peer", LogLevel::LOG_DEBUG);
   } else {
+    // Phase I Task 7 (TT): String() temporary eliminated.
+    char errBuf[80];
+    snprintf(errBuf, sizeof(errBuf), "MESH: Error sending message: %s", esp_err_to_name(result));
     lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 5,
-                       (String("MESH: Error sending message: ") + esp_err_to_name(result)).c_str());
+                       errBuf);
   }
 }
 

@@ -65,7 +65,13 @@ inline bool fail(utils::ErrorType type, const char* msg) {
 #ifdef UNIT_TEST
   throw FatalError(msg ? msg : "fatal");
 #else
+  // Phase I Task 7 (WW): signalError() above now only ARMS the error LED's
+  // blink pattern via Led::pulse() (non-blocking) — err_core::tick() must be
+  // pumped here or the halted device would just show a solid-ON LED instead
+  // of the intended blink pattern.
   while (true) {
+    err_core::tick();
+    delay(1);
   }
 #endif
 }

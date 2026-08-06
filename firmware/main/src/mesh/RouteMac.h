@@ -27,6 +27,11 @@ namespace routemac {
 constexpr size_t HOP_CTX_LEN = 30;
 constexpr size_t AUTH_PATH_LEN = 8;
 
+// Phase I Task 7 (SS): byte-by-byte little-endian shift+mask+store replaced
+// with memcpy (see E2ECrypto.h::buildNonce for the alignment rationale —
+// mesh_message is packed, and memcpy is the alignment-safe way to copy a
+// multi-byte field out of it on Xtensa). ESP32 is little-endian, so this
+// reproduces the prior output bit-for-bit.
 inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
                             const uint8_t this_hop[6], uint8_t out_ctx[HOP_CTX_LEN]) {
   uint8_t* p = out_ctx;
@@ -34,14 +39,10 @@ inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
   p += 6;
   memcpy(p, msg.target_mac_address, 6);
   p += 6;
-  p[0] = static_cast<uint8_t>(msg.epoch_num);
-  p[1] = static_cast<uint8_t>(msg.epoch_num >> 8);
-  p[2] = static_cast<uint8_t>(msg.epoch_num >> 16);
-  p[3] = static_cast<uint8_t>(msg.epoch_num >> 24);
-  p += 4;
-  p[0] = static_cast<uint8_t>(msg.seq_num);
-  p[1] = static_cast<uint8_t>(msg.seq_num >> 8);
-  p += 2;
+  memcpy(p, &msg.epoch_num, sizeof(msg.epoch_num));
+  p += sizeof(msg.epoch_num);
+  memcpy(p, &msg.seq_num, sizeof(msg.seq_num));
+  p += sizeof(msg.seq_num);
   memcpy(p, prev_hop, 6);
   p += 6;
   memcpy(p, this_hop, 6);
