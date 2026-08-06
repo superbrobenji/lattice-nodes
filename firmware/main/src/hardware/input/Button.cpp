@@ -1,6 +1,7 @@
 #include "Button.h"
 #include <Arduino.h>
 #include <cstdint>
+#include <esp_timer.h>
 
 namespace lattice {
 namespace hardware {
@@ -28,8 +29,8 @@ bool Button::isPressed() {
   // poll this repeatedly (e.g. once per main loop) instead of blocking here
   // — the old implementation blocked for DEBOUNCE_DELAY_MS * (DEBOUNCE_READS
   // - 1) = 10ms per call via delay().
-  uint32_t now = static_cast<uint32_t>(millis());
-  if (!_hasPolled || static_cast<uint32_t>(now - _lastPollMs) >= DEBOUNCE_DELAY_MS) {
+  uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
+  if (!_hasPolled || (now - _lastPollMs) >= DEBOUNCE_DELAY_MS) {
     _hasPolled = true;
     _lastPollMs = now;
     bool raw = (digitalRead(_pin) == HIGH);
@@ -41,11 +42,11 @@ bool Button::isPressed() {
 }
 
 bool Button::waitForHold(uint32_t ms) {
-  uint32_t start = millis();
+  uint64_t start = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   if (!isPressed())
     return false;
   while (isPressed()) {
-    if (static_cast<uint32_t>(millis() - start) >= ms)
+    if ((static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - start) >= ms)
       return true;
     delay(10); // yield to RTOS; isPressed() itself is non-blocking (item T)
   }

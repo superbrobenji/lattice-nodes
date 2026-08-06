@@ -44,7 +44,7 @@ protected:
     PeerInfo peer{};
     memcpy(peer.mac, masterMac, 6);
     memcpy(peer.publicKey, masterPub, 32);
-    peer.lastSeenMillis = millis();
+    peer.lastSeenMs = millis();
     mesh.peers.append(peer);
   }
 
@@ -291,7 +291,7 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
   PeerInfo origin{};
   memcpy(origin.mac, originMac, 6);
   memcpy(origin.publicKey, originPub, 32);
-  origin.lastSeenMillis = 0;
+  origin.lastSeenMs = 0;
   mesh.peers.append(origin);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
@@ -364,17 +364,17 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterRecordsRouteFromReport) {
   PeerInfo origin{};
   memcpy(origin.mac, originMac, 6);
   memcpy(origin.publicKey, originPub, 32);
-  origin.lastSeenMillis = 0;
+  origin.lastSeenMs = 0;
   mesh.peers.append(origin);
   PeerInfo relay1{};
   memcpy(relay1.mac, r1, 6);
   memcpy(relay1.publicKey, r1Pub, 32);
-  relay1.lastSeenMillis = 0;
+  relay1.lastSeenMs = 0;
   mesh.peers.append(relay1);
   PeerInfo relay2{};
   memcpy(relay2.mac, r2, 6);
   memcpy(relay2.publicKey, r2Pub, 32);
-  relay2.lastSeenMillis = 0;
+  relay2.lastSeenMs = 0;
   mesh.peers.append(relay2);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);
@@ -463,7 +463,7 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterDropsOnBadOpcodeAfterOpen) {
   PeerInfo origin{};
   memcpy(origin.mac, originMac, 6);
   memcpy(origin.publicKey, originPub, 32);
-  origin.lastSeenMillis = 0;
+  origin.lastSeenMs = 0;
   mesh.peers.append(origin);
   uint8_t kUp[32], kDown[32];
   lattice::mesh::crypto::deriveE2EKeys(originPriv, masterPub, kUp, kDown);

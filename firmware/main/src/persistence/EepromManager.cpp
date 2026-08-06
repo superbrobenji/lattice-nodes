@@ -191,9 +191,10 @@ bool nvsRemove(const char* key) {
 }
 
 // Mirrors Preferences::isKey. NVS has no direct "does this key exist"
-// accessor independent of type; PEER_LIST is only ever stored via
-// nvs_set_blob, so querying its size via nvs_get_blob(..., NULL, &size) --
-// real-IDF's documented size-query mode -- doubles as an existence check.
+// accessor independent of type; every caller of this helper (peerN keys,
+// among others) only ever stores blobs via nvs_set_blob, so querying size via
+// nvs_get_blob(..., NULL, &size) -- real-IDF's documented size-query mode --
+// doubles as an existence check.
 bool nvsHasKey(const char* key) {
   nvs_handle_t h;
   if (nvsOpenRW(h) != ESP_OK) {
@@ -203,6 +204,15 @@ bool nvsHasKey(const char* key) {
   esp_err_t err = nvs_get_blob(h, key, nullptr, &size);
   nvs_close(h);
   return err == ESP_OK;
+}
+
+// Phase I Task 6 (JJ): builds the "peerN" key for a given peer index — shared
+// by loadPeerRecord/savePeerRecord/erasePeerRecord and the loadPeerList/
+// savePeerList/hasPeers/clearPeerList loops built on top of them. 8 bytes is
+// ample for "peer" + up to 3 digits + NUL (EEPROM_SIZES::MAX_PEERS is 10
+// today; this comfortably covers a 3-digit MAX_PEERS without truncation).
+void peerKey(uint8_t index, char* out, size_t outSize) {
+  snprintf(out, outSize, "peer%u", static_cast<unsigned>(index));
 }
 
 // Mirrors Preferences::clear (erase every key in the namespace).
@@ -307,41 +317,84 @@ void saveMeshKey(const uint8_t* key, size_t keySize) {
   logOperation("Mesh key saved");
 }
 
+// Phase I Task 6 (JJ): record[0..PEER_RECORD_SIZE) <-> the "peerN" NVS key.
+// Returns false (record left untouched by the caller's own prefill, if any)
+// when the key is absent — the same "not yet saved" signal
+// loadPeerList()'s old single-blob short-read path used to report per-record
+// instead of for the whole list at once.
+bool loadPeerRecord(uint8_t index, uint8_t* record) {
+  if (!ensureInitialized())
+    return false;
+  if (index >= EEPROM_SIZES::MAX_PEERS)
+    return false;
+  char key[8];
+  peerKey(index, key, sizeof(key));
+  size_t read = nvsGetBytes(key, record, EEPROM_SIZES::PEER_RECORD_SIZE);
+  return read == EEPROM_SIZES::PEER_RECORD_SIZE;
+}
+
+void savePeerRecord(uint8_t index, const uint8_t* record) {
+  if (!ensureInitialized() || _state.isDevMode)
+    return;
+  if (index >= EEPROM_SIZES::MAX_PEERS)
+    return;
+  char key[8];
+  peerKey(index, key, sizeof(key));
+  size_t n = nvsPutBytes(key, record, EEPROM_SIZES::PEER_RECORD_SIZE);
+  // securityRelevant=true: each record carries a peer's E2E public key —
+  // trust material, same tier as MESH_KEY/KNOWN_MASTER_MAC below.
+  persistOrEscalate(key, n, EEPROM_SIZES::PEER_RECORD_SIZE, /*securityRelevant=*/true);
+}
+
+void erasePeerRecord(uint8_t index) {
+  if (!ensureInitialized())
+    return;
+  if (index >= EEPROM_SIZES::MAX_PEERS)
+    return;
+  char key[8];
+  peerKey(index, key, sizeof(key));
+  nvsRemove(key); // no-op (returns false, ignored) if the key was never set
+}
+
+// Thin loop over loadPeerRecord — kept for main.cpp's default-peer bootstrap
+// and existing host tests. peerRecords must hold maxPeers *
+// EEPROM_SIZES::PEER_RECORD_SIZE bytes.
 bool loadPeerList(uint8_t* peerRecords, size_t maxPeers) {
   if (!ensureInitialized())
     return false;
   if (maxPeers > EEPROM_SIZES::MAX_PEERS)
     return false;
   size_t maxBytes = maxPeers * EEPROM_SIZES::PEER_RECORD_SIZE;
-  // Pre-fill the whole output buffer with the "empty slot" sentinel (0xFF)
-  // before reading: a persisted list shorter than maxBytes (fewer peers were
-  // ever saved than MAX_PEERS) leaves getBytes() writing only the first
-  // `read` bytes, and the caller (PeerRegistry::loadFromEEPROM) scans every
-  // record up to maxPeers regardless of how many bytes came back. Without
-  // this prefill, the untouched tail of the caller's uninitialized stack
-  // buffer was read as real peer records — an uninitialized-memory bug that
-  // could inject bogus peers with garbage MAC/public-key bytes.
+  // Pre-fill with the "empty slot" sentinel (0xFF) — a slot whose key was
+  // never saved is left at this sentinel rather than read from
+  // uninitialized/stale caller memory, same guarantee the old single-blob
+  // prefill provided.
   memset(peerRecords, 0xFF, maxBytes);
-  size_t read = nvsGetBytes(NVS_KEYS::PEER_LIST, peerRecords, maxBytes);
-  if (read == 0) {
-    return false;
+  bool anyFound = false;
+  for (size_t i = 0; i < maxPeers; ++i) {
+    uint8_t* record = peerRecords + i * EEPROM_SIZES::PEER_RECORD_SIZE;
+    if (loadPeerRecord(static_cast<uint8_t>(i), record)) {
+      anyFound = true;
+    } else {
+      memset(record, 0xFF, EEPROM_SIZES::PEER_RECORD_SIZE);
+    }
   }
-  return true;
+  return anyFound;
 }
 
+// Thin loop over savePeerRecord/erasePeerRecord — kept for main.cpp's
+// default-peer bootstrap and existing host tests.
 void savePeerList(const uint8_t* peerRecords, size_t numPeers) {
   if (!ensureInitialized() || _state.isDevMode)
     return;
   if (numPeers > EEPROM_SIZES::MAX_PEERS)
     return;
-  if (numPeers == 0) {
-    nvsRemove(NVS_KEYS::PEER_LIST);
-  } else {
-    size_t want = numPeers * EEPROM_SIZES::PEER_RECORD_SIZE;
-    size_t n = nvsPutBytes(NVS_KEYS::PEER_LIST, peerRecords, want);
-    // securityRelevant=true: each record carries a peer's E2E public key —
-    // trust material, same tier as MESH_KEY/KNOWN_MASTER_MAC below.
-    persistOrEscalate(NVS_KEYS::PEER_LIST, n, want, /*securityRelevant=*/true);
+  for (uint8_t i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
+    if (i < numPeers) {
+      savePeerRecord(i, peerRecords + static_cast<size_t>(i) * EEPROM_SIZES::PEER_RECORD_SIZE);
+    } else {
+      erasePeerRecord(i);
+    }
   }
   logOperation("Peer list saved", String(numPeers).c_str());
 }
@@ -349,13 +402,21 @@ void savePeerList(const uint8_t* peerRecords, size_t numPeers) {
 bool hasPeers() {
   if (!ensureInitialized())
     return false;
-  return nvsHasKey(NVS_KEYS::PEER_LIST);
+  for (uint8_t i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
+    char key[8];
+    peerKey(i, key, sizeof(key));
+    if (nvsHasKey(key))
+      return true;
+  }
+  return false;
 }
 
 void clearPeerList() {
   if (!ensureInitialized())
     return;
-  nvsRemove(NVS_KEYS::PEER_LIST);
+  for (uint8_t i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
+    erasePeerRecord(i);
+  }
   logOperation("Peer list cleared");
 }
 

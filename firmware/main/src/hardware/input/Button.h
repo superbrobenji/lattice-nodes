@@ -31,7 +31,9 @@ private:
   static constexpr uint8_t DEBOUNCE_DELAY_MS = 5; // sample period
   static constexpr uint8_t DEBOUNCE_HISTORY_MASK = (1u << DEBOUNCE_READS) - 1u; // last 3 samples
 
-  uint32_t _lastPollMs = 0;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+  // millis() -> esp_timer_get_time()/1000ULL swap.
+  uint64_t _lastPollMs = 0;
   uint8_t _history = 0;    // rolling bitfield of raw samples, newest in bit0
   bool _hasPolled = false; // true once the first sample has been taken
 };

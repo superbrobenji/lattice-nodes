@@ -4,7 +4,21 @@
 # Arduino-as-component: provides app_main() that calls setup()/loop()
 CONFIG_AUTOSTART_ARDUINO=y
 CONFIG_FREERTOS_HZ=1000
-CONFIG_ARDUINO_LOOP_STACK_SIZE=8192
+# Phase I Task 6 (item II): 8192 -> 4096. Real-hardware
+# uxTaskGetStackHighWaterMark() measurement wasn't available from this
+# worktree (no flashable device), so this is a compile-time estimate instead
+# of Step 6's live measurement — see task-6-report.md "Stack sizing rationale"
+# for the -fstack-usage-verified per-function frame sizes behind it. Deepest
+# verified loop-task call chain (master forwarding a route report to serial:
+# loop -> Mesh::loop -> drainRecvQueue -> processRouteReport -> onMeshData ->
+# SerialAdapter::onMeshDataImpl -> SerialFraming::encode) sums to ~1.4 KB of
+# firmware-code stack frames, leaving >2.5 KB of the new 4096 B budget
+# unaccounted for by vendored library internals (libsodium, ESP-NOW,
+# nvs_flash, uart driver) not covered by -fstack-usage in this analysis.
+# Recommend confirming with a live uxTaskGetStackHighWaterMark() reading at
+# the next hardware-in-loop opportunity before this ships to a production
+# fleet.
+CONFIG_ARDUINO_LOOP_STACK_SIZE=4096
 
 # Flash: optimize for size + link-time optimization (Phase G §2, issue #52 lever 2).
 # gc-sections + function-sections are ESP-IDF defaults already.
@@ -74,3 +88,16 @@ CONFIG_LWIP_UDP_ENABLED=n
 # is ~3KB smaller than libsodium's portable SHA256 impl (mbedtls is linked
 # anyway for esp_wifi's WPA/PMK path).
 CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
+
+# Phase I Task 6 (item NN): newlib-nano printf/scanf. Per ESP-IDF's own Kconfig
+# help text (components/newlib/Kconfig), this option "doesn't support 64-bit
+# integer formats" (%llu/%lld) at all -- not just "needs the right specifier",
+# contradicting the plan's original assumption. Verified (grep -rn "%ll"
+# firmware/main/) that the only %llu specifier in the firmware
+# (SerialAdapter.cpp's SIMULATE_MODE peer-dump line, printing the
+# now-uint64_t PeerInfo::lastSeenMs) is compiled out entirely under the
+# default SIMULATE_MODE=0 (project_config.h) -- so nano-format is safe for
+# the default/production build. If a SIMULATE_MODE=1 debug build is ever
+# combined with nano-format, that one debug line will render lastSeenMs
+# incorrectly (cosmetic only -- not wire, not safety-relevant).
+CONFIG_LIBC_NEWLIB_NANO_FORMAT=y

@@ -40,7 +40,9 @@ private:
   // Never configured differently at runtime — was a per-instance member,
   // now a compile-time constant (Phase G audit item K).
   static constexpr uint16_t _cooldownSeconds = 3;
-  uint32_t _lastTrigger;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+  // millis() -> esp_timer_get_time()/1000ULL swap.
+  uint64_t _lastTrigger;
   PirState _state{PirState::IDLE};
   bool _interruptEnabled;
   bool _initialized;

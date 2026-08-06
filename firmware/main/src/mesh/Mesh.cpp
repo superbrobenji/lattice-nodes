@@ -10,6 +10,7 @@
 #include <esp_now.h>
 #include <esp_netif.h>
 #include <esp_event.h>
+#include <esp_timer.h>
 #include <cstring>
 #include <cstdio>
 #include "../../project_config.h"
@@ -101,7 +102,8 @@ PeerInfo* Mesh::findNextHopToMaster() {
   // Multi-hop (spec §3): pick the freshest neighbor strictly closer to the
   // master from the NeighborTable. The relay need not be an enrolled peer.
   uint8_t hopMac[6];
-  if (!neighbors.selectNextHop(currentMaster.distance, millis(), hopMac))
+  if (!neighbors.selectNextHop(currentMaster.distance,
+                               static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL, hopMac))
     return nullptr;
   if (lattice::mac::eq(hopMac, deviceMacAddress))
     return nullptr;
@@ -395,7 +397,7 @@ void Mesh::drainRecvQueue() {
 
     // Replay check
     if (msg.proto_version == PROTO_VERSION && msg.epoch_num > 0) {
-      if (replay.isReplay(msg, millis())) {
+      if (replay.isReplay(msg, static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL)) {
         LATTICE_LOGLN("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
         continue;
       }
@@ -577,7 +579,7 @@ void Mesh::linkDataRecvCallback(std::function<void(const mesh_message&)> recvCal
 
 // --- Periodically called in main loop if this node is master ---
 void Mesh::broadcastMasterBeacon() {
-  unsigned long now = millis();
+  uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   if (now - lastBeaconMillis < lattice::config::MASTER_BEACON_INTERVAL_MS)
     return;
   lastBeaconMillis = now;
@@ -741,7 +743,8 @@ void Mesh::checkMasterTimeout() {
     return;
   if (currentMaster.distance == 0xFF)
     return; // No master known yet
-  if (millis() - lastMasterBeaconReceivedMs > STALE_MASTER_THRESHOLD_MS) {
+  if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - lastMasterBeaconReceivedMs >
+      STALE_MASTER_THRESHOLD_MS) {
     LATTICE_LOGLN("MESH", "Master beacon timeout — clearing route, treating as offline",
                   LogLevel::LOG_WARN);
     memset(currentMaster.mac, 0, 6);
@@ -803,7 +806,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
       lattice::eeprom::saveKnownMasterMacSecondary(enrollment.knownMasterMacSecondary);
       LATTICE_LOGLN("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
       // fall through to process this beacon as valid
-    } else if (millis() - lastMasterBeaconReceivedMs < STALE_MASTER_THRESHOLD_MS) {
+    } else if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - lastMasterBeaconReceivedMs <
+               STALE_MASTER_THRESHOLD_MS) {
       // Known master(s) still fresh — reject unknown MAC
       LATTICE_LOGLN("MESH", "Beacon from unexpected MAC rejected (master still alive)",
                     LogLevel::LOG_WARN);
@@ -827,7 +831,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     }
   }
   memcpy(lastSeenMasterMac, msg.origin_mac_address, 6);
-  lastMasterBeaconReceivedMs = millis();
+  lastMasterBeaconReceivedMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
 
   // Multi-hop routing (spec §3): the node we heard this beacon THROUGH
   // (last_hop) is a forwarding candidate. msg.hop_count is last_hop's OWN
@@ -846,7 +850,8 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
   // flap if NeighborTable itself flaps.
   memcpy(currentMaster.mac, msg.origin_mac_address, 6);
   uint8_t min_d =
-      neighbors.observeAndMinDistance(msg.last_hop_mac_address, msg.hop_count, millis());
+      neighbors.observeAndMinDistance(msg.last_hop_mac_address, msg.hop_count,
+                                      static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL);
   uint8_t derived = (min_d == 0xFF) ? 0xFF : static_cast<uint8_t>(min_d + 1);
   if (derived != currentMaster.distance) {
     currentMaster.distance = derived;
@@ -877,7 +882,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     // this node's true (possibly smaller) distance, not an inflated one.
     relayPendingMsg.hop_count = derived;
     memcpy(relayPendingMsg.last_hop_mac_address, deviceMacAddress, 6);
-    relayPendingAt = millis() + 10 + jitterMs;
+    relayPendingAt = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL + 10 + jitterMs;
     relayPending = true;
   }
 }
@@ -1102,13 +1107,13 @@ bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, b
       if (keyEstablished) {
         LATTICE_LOGLN("MESH", "Peer already registered — keeping established key",
                       LogLevel::LOG_DEBUG);
-        p->lastSeenMillis = millis();
+        p->lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
         return true; // already routable; nothing to change
       }
     }
     // Update existing peer's public key
     memcpy(p->publicKey, publicKey32, 32);
-    p->lastSeenMillis = millis();
+    p->lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   } else {
     if (peers.peerCount >= MAX_PEERS) {
       LATTICE_LOGLN("MESH", "Peer list full, cannot enroll", LogLevel::LOG_WARN);
@@ -1117,7 +1122,7 @@ bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, b
     PeerInfo newPeer;
     memcpy(newPeer.mac, mac, 6);
     memcpy(newPeer.publicKey, publicKey32, 32);
-    newPeer.lastSeenMillis = millis();
+    newPeer.lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
     peers.append(newPeer);
   }
   peers.saveToEEPROM();
@@ -1252,7 +1257,8 @@ void Mesh::processRouteReport(const mesh_message& msg) {
     // route_path/route_len are plaintext header fields (accumulated by relays);
     // bounds-checked by RouteTable::record. Only recorded on MAC-verify pass.
     if (routes) {
-      routes->record(msg.origin_mac_address, msg.route_path, msg.route_len, millis());
+      routes->record(msg.origin_mac_address, msg.route_path, msg.route_len,
+                     static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL);
     }
     // Terminal endpoint — deliver to server via external callback
     if (externalRecvCallback)
@@ -1321,7 +1327,7 @@ void Mesh::loop() {
   enrollment.drainPendingRelay();
 
   {
-    uint32_t now = millis();
+    uint64_t now = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
     if (!isMaster && now - lastRouteReportMs >= lattice::config::ROUTE_REPORT_INTERVAL_MS) {
       if (sendRouteReport())
         lastRouteReportMs = now;
@@ -1334,7 +1340,7 @@ void Mesh::loop() {
   // broadcast: routing it through transmitCore()/findNextHopToMaster() sent it back toward
   // the master (backwards — nodes 2+ hops out never heard it) and raised a spurious
   // err::fail every beacon interval on any node without a route (e.g. pre-enrollment).
-  if (relayPending && millis() >= relayPendingAt) {
+  if (relayPending && static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL >= relayPendingAt) {
     relayPending = false;
     sendBroadcast(relayPendingMsg);
   }
