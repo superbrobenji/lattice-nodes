@@ -87,6 +87,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ### Task 2: Step B — CONFIG_ESP_WIFI_MBEDTLS_CRYPTO=n + keep/revert decision
 
+> **Outcome note:** Step B was not shipped — see spec final-outcome + fourth amendment; insert text below is the historical attempt-3 payload.
+
 **Files:**
 - Modify: `firmware/sdkconfig.defaults:90-93` region (append after `CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n`)
 
@@ -245,7 +247,7 @@ gh pr create --base main --title "TLS disable: make mbedtls =n trims real (Phase
 Config-only follow-up to Phase J (#94). Makes the advisory `=n` lines in `sdkconfig.defaults` real:
 
 - `CONFIG_MBEDTLS_TLS_DISABLED=y` — ends the `MBEDTLS_TLS_MODE` choice's `TLS_ENABLED` force-select.
-- `CONFIG_ESP_WIFI_MBEDTLS_CRYPTO=n` — ends esp_wifi's `AES_C/ECDSA_C/CMAC_C/SECP256R1` selects; wpa_supplicant uses its internal crypto (near-dead code in this pure-ESP-NOW firmware). <ADJUST IF REVERTED: state the flag was measured to grow the image and was not shipped.>
+- `CONFIG_ESP_WIFI_MBEDTLS_CRYPTO=n` — ends esp_wifi's `AES_C/ECDSA_C/CMAC_C/SECP256R1` selects; wpa_supplicant uses its internal crypto (near-dead code in this pure-ESP-NOW firmware). <ADJUST IF REVERTED: state the flag was not shipped — rejected as a trade (a config-only route exists via SHA1_C=n + HARDWARE_SHA=n but surrenders hardware SHA in the E2E HMAC/HKDF hot path for a measured-zero flash benefit; untested), not proven impossible — see spec fourth amendment.>
 - Comment truth pass: corrects Phase J's misattribution of the ECDSA/SECP256R1 force-select (source is `ESP_WIFI_MBEDTLS_CRYPTO`, not the TLS chain).
 
 Item KK completed for real: resolved config carries exactly one ECP curve (CURVE25519). <ADJUST IF REVERTED.>
