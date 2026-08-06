@@ -177,9 +177,10 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
           // Phase I Task 6 (NN): %lu -> %llu — lastSeenMs widened uint32_t ->
           // uint64_t (FF); nano-format (CONFIG_LIBC_NEWLIB_NANO_FORMAT=y)
           // requires an exact-width specifier match.
-          Serial.printf("  Peer[%d]: %02X:%02X:%02X:%02X:%02X:%02X last=%llums\n", (int)i, p.mac[0],
-                        p.mac[1], p.mac[2], p.mac[3], p.mac[4], p.mac[5],
-                        (unsigned long long)p.lastSeenMs);
+          LATTICE_LOGF("SIM", LogLevel::LOG_WARN,
+                       "  Peer[%d]: %02X:%02X:%02X:%02X:%02X:%02X last=%llums", (int)i, p.mac[0],
+                       p.mac[1], p.mac[2], p.mac[3], p.mac[4], p.mac[5],
+                       (unsigned long long)p.lastSeenMs);
         }
       }
       return;

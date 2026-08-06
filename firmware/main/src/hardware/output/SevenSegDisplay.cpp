@@ -3,7 +3,10 @@
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include <esp_timer.h>
+#include <esp_rom_sys.h>
 #include <driver/gpio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 using lattice::core::ErrorTypeDigit;
 using lattice::core::ModuleDigit;
@@ -50,7 +53,7 @@ bool SevenSegDisplay::init() {
   // Self-test: flash all segments 0x7F (88:88)
   uint8_t testSeg[4] = {0x7F, 0x7F, 0x7F, 0x7F};
   setSegments(testSeg);
-  delay(500);
+  vTaskDelay(pdMS_TO_TICKS(500));
   clear();
   return true;
 }
@@ -66,7 +69,7 @@ void SevenSegDisplay::setBrightness(uint8_t level) {
 
 // timing helper
 static inline void tmDelay() {
-  delayMicroseconds(3);
+  esp_rom_delay_us(3);
 }
 
 void SevenSegDisplay::start() {

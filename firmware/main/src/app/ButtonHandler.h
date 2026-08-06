@@ -1,7 +1,9 @@
 #pragma once
-#include <Arduino.h>
 #include <cstdio>
+#include <esp_system.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "src/hardware/input/Button.h"
 #include "src/hardware/output/Led.h"
 #include "src/mesh/Mesh.h"
@@ -35,7 +37,7 @@ private:
         b->update(now);
       if (!a.isBusy() && !(b && b->isBusy()))
         break;
-      delay(5);
+      vTaskDelay(pdMS_TO_TICKS(5));
     }
   }
 
@@ -67,9 +69,9 @@ private:
                         lattice::utils::LogLevel::LOG_INFO);
           greenLed.pulse(newMaster ? 3 : 2, 200, 200);
           pumpLedsUntilIdle(greenLed);
-          delay(2000);
+          vTaskDelay(pdMS_TO_TICKS(2000));
           lattice::eeprom::forceFlush();
-          ESP.restart();
+          esp_restart();
         }
       }
     } else {
@@ -104,9 +106,9 @@ private:
           redLed.pulse(5, 100, 100);
           greenLed.pulse(5, 100, 100);
           pumpLedsUntilIdle(redLed, &greenLed);
-          delay(3000);
+          vTaskDelay(pdMS_TO_TICKS(3000));
           lattice::eeprom::forceFlush();
-          ESP.restart();
+          esp_restart();
         }
       }
     } else {

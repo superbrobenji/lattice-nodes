@@ -17,3 +17,11 @@ inline void vTaskNotifyGiveFromISR(TaskHandle_t /*xTaskToNotify*/,
   if (pxHigherPriorityTaskWoken)
     *pxHigherPriorityTaskWoken = pdFALSE; // no real scheduler on host to wake
 }
+
+// pdMS_TO_TICKS / vTaskDelay — Phase I Task 10 prereq cleanup replaced
+// Arduino's blocking delay(ms) call sites with the native FreeRTOS
+// equivalent (project_config.h §NN). There is no real scheduler on host
+// builds to block, so vTaskDelay is a no-op here — matches the prior
+// delay(uint32_t) no-op mock in time_mock.h.
+#define pdMS_TO_TICKS(ms) ((TickType_t)(ms))
+inline void vTaskDelay(TickType_t /*xTicksToDelay*/) {}

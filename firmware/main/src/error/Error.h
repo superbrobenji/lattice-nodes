@@ -7,6 +7,10 @@
 #include <esp_err.h>
 #include <cstdint>
 #include <cstdio>
+#ifndef UNIT_TEST
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
 #ifdef UNIT_TEST
 #include <stdexcept>
 extern int lattice_test_errFailCount;
@@ -71,7 +75,7 @@ inline bool fail(utils::ErrorType type, const char* msg) {
   // of the intended blink pattern.
   while (true) {
     err_core::tick();
-    delay(1);
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
 #endif
 }

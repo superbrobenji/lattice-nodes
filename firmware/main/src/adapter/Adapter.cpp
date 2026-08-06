@@ -4,6 +4,7 @@
 #include "src/error/Error.h"
 #include <cstdio>
 #include <cstring>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
 #include "src/adapter/AdapterFactory.h"
@@ -158,7 +159,7 @@ void Adapter::opConfigSet(const lattice::mesh::mesh_message& message,
   lattice::adapter::AdapterFactory::saveAdapterTypeToEEPROM(newType);
   LATTICE_LOGLN("ADAPTER", "CONFIG_SET received, restarting with new adapter type",
                 LogLevel::LOG_INFO);
-  ESP.restart();
+  esp_restart();
 }
 
 void Adapter::opNodeIdSet(const lattice::mesh::mesh_message& message,

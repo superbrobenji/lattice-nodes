@@ -59,7 +59,7 @@ bool shouldRestart(ErrorType t) {
 #ifdef UNIT_TEST
   throw lattice::err::FatalError("ErrorCore::restartDevice");
 #else
-  ESP.restart();
+  esp_restart();
 #endif
 }
 
