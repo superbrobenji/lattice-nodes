@@ -41,13 +41,7 @@ inline void attachInterrupt(int, void(*)(), int) {}
 inline void detachInterrupt(int)       {}
 inline void yield()                    {}
 inline void btStop()                   {}
-// See mocks/esp_random.h for why this is guarded — that header (pulled in via
-// Crypto.h) defines the same scalar esp_random() for lattice::crypto's mock
-// RNG; the guard prevents an ODR clash in TUs that include both.
-#ifndef LATTICE_MOCK_ESP_RANDOM_SCALAR_DEFINED
-#define LATTICE_MOCK_ESP_RANDOM_SCALAR_DEFINED
 inline uint32_t esp_random()           { return 42; }  // Deterministic for tests
-#endif
 inline void delayMicroseconds(uint32_t) {}  // no-op in tests
 inline int digitalPinToInterrupt(int pin) { return pin; }  // identity on host
 

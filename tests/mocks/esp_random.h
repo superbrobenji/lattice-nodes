@@ -16,18 +16,11 @@ inline void esp_fill_random(void* buf, size_t len) {
   }
 }
 
-// esp_random() (the scalar form) is ALSO mocked by mocks/Arduino.h (used
-// elsewhere for e.g. Mesh.cpp's relay jitter, deterministic there for test
-// repeatability). lattice::crypto (Crypto.h) only ever calls esp_fill_random
-// above, never this scalar form, so whichever mock's definition wins is
-// inert here — the guard just avoids an ODR clash in translation units that
-// pull in both headers (e.g. any firmware .cpp via Logger.h -> Arduino.h,
-// then Mesh.h -> E2ECrypto.h -> Crypto.h -> this header).
-#ifndef LATTICE_MOCK_ESP_RANDOM_SCALAR_DEFINED
-#define LATTICE_MOCK_ESP_RANDOM_SCALAR_DEFINED
-inline uint32_t esp_random(void) {
-  uint32_t v = 0;
-  esp_fill_random(&v, sizeof(v));
-  return v;
-}
-#endif
+// The scalar esp_random() is intentionally NOT mocked here — lattice::crypto
+// (Crypto.h) only ever calls esp_fill_random() above. mocks/Arduino.h is the
+// sole owner of the scalar esp_random() mock (deterministic, used by e.g.
+// Mesh.cpp's relay jitter); defining it here too would be an ODR violation
+// in any translation unit that ends up linking both mocks' object files into
+// the same binary (see Phase J Task 2 review — two conflicting inline
+// definitions of the same function is ill-formed, no diagnostic required,
+// even if only one header is included per TU).
