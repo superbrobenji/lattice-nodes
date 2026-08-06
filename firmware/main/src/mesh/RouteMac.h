@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include <sodium.h>
+#include "src/crypto/Crypto.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
 
 // Route-report chain MAC (Phase C, spec §4 / issue #44, header-only, mirrors
@@ -52,9 +52,7 @@ inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
 // For the originating hop, prev_mac must be zeroed 8B.
 // Tiger-Style: stack-only, fixed-size buffers, no heap, no dynamic length.
 //
-// Phase I Task 2: libsodium — was mbedtls_md_hmac(MBEDTLS_MD_SHA256, ...).
-// crypto_auth_hmacsha256() takes a fixed 32-byte key (matches `secret`'s width
-// exactly), so the one-shot call maps directly with no state-variant needed.
+// Phase J: HMAC via lattice::crypto::hmac_sha256 (mbedtls one-shot).
 inline void chainStep(const uint8_t secret[32], const uint8_t hop_ctx[HOP_CTX_LEN],
                       const uint8_t prev_mac[AUTH_PATH_LEN], uint8_t out_mac[AUTH_PATH_LEN]) {
   uint8_t input[HOP_CTX_LEN + AUTH_PATH_LEN];
@@ -62,7 +60,12 @@ inline void chainStep(const uint8_t secret[32], const uint8_t hop_ctx[HOP_CTX_LE
   memcpy(input + HOP_CTX_LEN, prev_mac, AUTH_PATH_LEN);
 
   uint8_t full[32]; // SHA-256 output
-  crypto_auth_hmacsha256(full, input, sizeof(input), secret);
+  if (!lattice::crypto::hmac_sha256(secret, 32, input, sizeof(input), full)) {
+    // Fail-safe: an unwritable MAC must not leak garbage — zero it so the
+    // frame fails verification at the master and gets dropped.
+    memset(out_mac, 0, AUTH_PATH_LEN);
+    return;
+  }
   memcpy(out_mac, full, AUTH_PATH_LEN); // truncate to first 8 bytes
 }
 
