@@ -86,6 +86,7 @@ set(FIRMWARE_SOURCES
   ../firmware/main/src/mesh/PeerRegistry.cpp
   ../firmware/main/src/mesh/Mesh.cpp
   ../firmware/main/src/mesh/Enrollment.cpp
+  ../firmware/main/src/mesh/PendingRelayQueue.cpp
   ../firmware/main/src/mesh/CompactMessage.cpp
 )
 
@@ -106,6 +107,7 @@ add_unit_test(test_replay_cache       unit/test_replay_cache.cpp)
 add_unit_test(test_mesh_logic         unit/test_mesh_logic.cpp)
 add_unit_test(test_pir_adapter        unit/test_pir_adapter.cpp)
 add_unit_test(test_route_report       unit/test_route_report.cpp)
+add_unit_test(test_pending_relay_queue unit/test_pending_relay_queue.cpp)
 add_unit_test(test_route_mac          unit/test_route_mac.cpp)
 add_unit_test(test_mocks              unit/test_mocks.cpp)
 add_unit_test(test_e2e_crypto         unit/test_e2e_crypto.cpp)

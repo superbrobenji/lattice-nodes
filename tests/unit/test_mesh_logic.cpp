@@ -1650,9 +1650,9 @@ TEST_F(DrainRecvQueueTest, DropsReplayedEnrollmentRequestBeforeRelay) {
   msg.seq_num = 7;
 
   injectAndDrain(mesh, msg); // first: enqueued for relay-to-server
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 1u);
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 1u);
   injectAndDrain(mesh, msg); // duplicate (same epoch/seq): dropped before processRequest
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 1u)
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 1u)
       << "duplicate must not enqueue a second relay";
 }
 
@@ -1673,7 +1673,7 @@ TEST_F(DrainRecvQueueTest, ForwardsEnrollmentRetryWithFreshSeq) {
   injectAndDrain(mesh, msg);
   msg.seq_num = 8; // next 10s retry round — distinct seq
   injectAndDrain(mesh, msg);
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 2u) << "retry must still be forwarded";
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 2u) << "retry must still be forwarded";
 }
 
 // Task 9c R2: a node re-broadcasts a given JOIN_ACK at most once. A reflected copy
@@ -1768,9 +1768,9 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
 
   mesh.enrollment.processRequest(msg);
 
-  ASSERT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 1u);
-  const auto& e = *reinterpret_cast<const Enrollment::PendingRelay*>(
-      mesh.enrollment._pendingRelayQueue->items.front().data());
+  ASSERT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 1u);
+  const auto& e = *reinterpret_cast<const PendingRelayQueue::Entry*>(
+      mesh.enrollment._relayQueue._queue->items.front().data());
   EXPECT_EQ(memcmp(e.mac, kMac, 6), 0);
   EXPECT_EQ(memcmp(e.pubKey, kKey, 32), 0)
       << "Full 32-byte key must be copied without chunk reassembly";
@@ -1897,7 +1897,7 @@ TEST_F(EnrollmentRelayCallbackTest, DrainCallsRegisteredCallback) {
 
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 0u) << "queue must be empty after drain";
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 0u) << "queue must be empty after drain";
   ASSERT_TRUE(g_captured) << "callback was not called";
   EXPECT_EQ(memcmp(g_capturedMac, kMac, 6), 0) << "wrong MAC passed to callback";
   EXPECT_EQ(memcmp(g_capturedKey, kKey, 32), 0) << "wrong pubKey passed to callback";
@@ -1913,7 +1913,7 @@ TEST_F(EnrollmentRelayCallbackTest, DrainWithNoCallbackClearsFlag) {
   mesh.enrollment.setPendingRelay(kMac, kKey);
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 0u)
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 0u)
       << "queue must clear even with no callback";
   EXPECT_FALSE(g_captured) << "callback must not fire when unregistered";
 }
@@ -1947,14 +1947,14 @@ TEST_F(EnrollmentRelayCallbackTest, QueueHoldsAndDrainsMultipleConcurrentRelays)
 
   mesh.enrollment.processRequest(reqA);
   mesh.enrollment.processRequest(reqB); // second request must NOT overwrite the first
-  ASSERT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 2u);
+  ASSERT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 2u);
 
   mesh.enrollment.drainPendingRelay();
 
   ASSERT_EQ(drained.size(), 2u) << "both queued relays must fire (Bug #6 starvation)";
   EXPECT_EQ(memcmp(drained[0].data(), kMacA, 6), 0) << "FIFO order: A first";
   EXPECT_EQ(memcmp(drained[1].data(), kMacB, 6), 0) << "FIFO order: B second";
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 0u);
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 0u);
 }
 
 // --- Seal-time AEAD epoch-rollback guard (Phase A Task 3) ---

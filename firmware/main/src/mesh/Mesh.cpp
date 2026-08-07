@@ -814,18 +814,14 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 
   if (!enrollment.hasMasterMac) {
     // First beacon ever — TOFU (fallback if JOIN_ACK path not taken, e.g. master node itself)
-    memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
-    enrollment.hasMasterMac = true;
-    lattice::eeprom::saveKnownMasterMac(enrollment.knownMasterMac);
+    enrollment.learnMasterMac(msg.origin_mac_address);
     LATTICE_LOGLN("MESH", "Master MAC learned from first beacon (TOFU fallback)",
                   LogLevel::LOG_INFO);
   } else if (!fromPrimary && !fromSecondary) {
     // Beacon from unrecognised MAC
     if (_dualMasterMode && !enrollment.hasMasterMacSecondary) {
       // Second master TOFU — learn and save as secondary
-      memcpy(enrollment.knownMasterMacSecondary, msg.origin_mac_address, 6);
-      enrollment.hasMasterMacSecondary = true;
-      lattice::eeprom::saveKnownMasterMacSecondary(enrollment.knownMasterMacSecondary);
+      enrollment.learnSecondaryMasterMac(msg.origin_mac_address);
       LATTICE_LOGLN("MESH", "Secondary master MAC learned (TOFU)", LogLevel::LOG_INFO);
       // fall through to process this beacon as valid
     } else if (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - lastMasterBeaconReceivedMs <
@@ -837,8 +833,7 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
     } else {
       // All known masters stale — accept as new primary (hotswap)
       LATTICE_LOGLN("MESH", "Stale master — accepting new master MAC", LogLevel::LOG_INFO);
-      memcpy(enrollment.knownMasterMac, msg.origin_mac_address, 6);
-      lattice::eeprom::saveKnownMasterMac(enrollment.knownMasterMac);
+      enrollment.learnMasterMac(msg.origin_mac_address);
     }
   }
 
