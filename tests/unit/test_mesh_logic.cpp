@@ -404,6 +404,94 @@ TEST_F(RelayDownlinkTest, SkipsSelf_WhenSelfInPeerList) {
   EXPECT_EQ(memcmp(espNowSentPackets[0].addr, kPeer1Mac, 6), 0);
 }
 
+// ─── DownlinkRouter::classify() — DropHopLimitExceeded ──────────────────────
+// Phase B Task 6 review fix round 1: classify() is the single most
+// correctness-sensitive point in this refactor — collapsing
+// DropHopLimitExceeded back into NotRouted (an easy "these look similar"
+// mistake) would silently let a hop-limit-exceeded frame fall through to the
+// security gate instead of being dropped, with no other test in this file
+// catching it (relayDownlink's own internal hop-limit guard, exercised by
+// RelayDownlinkTest.DropsAtMaxHops above, is a completely different code
+// path). These two tests drive classify() directly, one per branch that can
+// produce DropHopLimitExceeded.
+
+class DownlinkRouterClassifyTest : public ::testing::Test {
+protected:
+  static constexpr uint8_t kMyMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  static constexpr uint8_t kOtherMac[6] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0x01};
+
+  mesh_message makeMsg(uint8_t hopCount) {
+    mesh_message m{};
+    m.proto_version = PROTO_VERSION;
+    m.message_type = MESH_TYPE_ADAPTER_DATA;
+    m.data_type = adapter_types::PIR_ADAPTER;
+    memcpy(m.origin_mac_address, kOtherMac, 6);
+    m.hop_count = hopCount;
+    m.epoch_num = 1;
+    m.seq_num = 1;
+    return m;
+  }
+};
+
+constexpr uint8_t DownlinkRouterClassifyTest::kMyMac[];
+constexpr uint8_t DownlinkRouterClassifyTest::kOtherMac[];
+
+// addressedToMaster branch: hop_count already at MAX_HOPS must classify as
+// DropHopLimitExceeded, NOT RelayTowardMaster — the caller's switch treats
+// these completely differently (unconditional drop vs. relay-and-return).
+TEST_F(DownlinkRouterClassifyTest, AddressedToMaster_HopLimitExceeded_DropsNotRelays) {
+  DownlinkRouter router;
+  auto msg = makeMsg(/*hopCount=*/lattice::config::MAX_HOPS);
+  uint8_t nextHop[6];
+
+  RouteDecision decision =
+      router.classify(msg, kMyMac, /*isMaster=*/false, /*addressedToSelf=*/false,
+                      /*isBroadcastTarget=*/false, /*addressedToMaster=*/true, nextHop);
+
+  EXPECT_EQ(decision, RouteDecision::DropHopLimitExceeded);
+  EXPECT_NE(decision, RouteDecision::RelayTowardMaster);
+
+  // Sanity: same frame one hop under the limit still relays normally — proves
+  // the DropHopLimitExceeded case above is genuinely hop-limit-gated, not a
+  // permanent override of the addressedToMaster branch.
+  auto underLimitMsg = makeMsg(/*hopCount=*/lattice::config::MAX_HOPS - 1);
+  RouteDecision underLimitDecision =
+      router.classify(underLimitMsg, kMyMac, /*isMaster=*/false, /*addressedToSelf=*/false,
+                      /*isBroadcastTarget=*/false, /*addressedToMaster=*/true, nextHop);
+  EXPECT_EQ(underLimitDecision, RouteDecision::RelayTowardMaster);
+}
+
+// Route-path-match branch: this device's own MAC appears in msg.route_path
+// (we are on the frame's source route) and hop_count is already at
+// MAX_HOPS — must classify as DropHopLimitExceeded, NOT ForwardOnRoute.
+TEST_F(DownlinkRouterClassifyTest, RoutePathMatch_HopLimitExceeded_DropsNotForwards) {
+  DownlinkRouter router;
+  auto msg = makeMsg(/*hopCount=*/lattice::config::MAX_HOPS);
+  static constexpr uint8_t kNextHopMac[6] = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0x02};
+  msg.route_len = 2;
+  memcpy(&msg.route_path[0], kMyMac, 6);      // this device is on the route...
+  memcpy(&msg.route_path[6], kNextHopMac, 6); // ...with a next hop after it
+  uint8_t nextHop[6];
+
+  RouteDecision decision =
+      router.classify(msg, kMyMac, /*isMaster=*/false, /*addressedToSelf=*/false,
+                      /*isBroadcastTarget=*/false, /*addressedToMaster=*/false, nextHop);
+
+  EXPECT_EQ(decision, RouteDecision::DropHopLimitExceeded);
+  EXPECT_NE(decision, RouteDecision::ForwardOnRoute);
+
+  // Sanity: same route one hop under the limit still forwards normally.
+  auto underLimitMsg = makeMsg(/*hopCount=*/lattice::config::MAX_HOPS - 1);
+  underLimitMsg.route_len = 2;
+  memcpy(&underLimitMsg.route_path[0], kMyMac, 6);
+  memcpy(&underLimitMsg.route_path[6], kNextHopMac, 6);
+  RouteDecision underLimitDecision =
+      router.classify(underLimitMsg, kMyMac, /*isMaster=*/false, /*addressedToSelf=*/false,
+                      /*isBroadcastTarget=*/false, /*addressedToMaster=*/false, nextHop);
+  EXPECT_EQ(underLimitDecision, RouteDecision::ForwardOnRoute);
+  EXPECT_EQ(memcmp(nextHop, kNextHopMac, 6), 0);
+}
+
 // ─── processAdapterData: uplink relay ────────────────────────────────────────
 
 class AdapterDataRelayTest : public ::testing::Test {
@@ -467,6 +555,30 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysUplinkTowardMaster) {
   const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
   EXPECT_EQ(sent.hop_count, 2u);                                      // incremented
   EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0); // routed via nextHop
+}
+
+// Phase B Task 6 review fix round 1: end-to-end companion to the classify()
+// unit tests above, driven through the real Mesh::processAdapterData — this
+// is the test that would actually catch a future DropHopLimitExceeded ->
+// NotRouted collapse. If that regression were reintroduced, this hop-limited,
+// addressed-to-master frame would (since this node is neither master nor
+// addressedToSelf nor a broadcast target) fall through the security gate and
+// both E2E-open branches untouched and reach externalRecvCallback with a
+// still-sealed payload — so this test asserts the callback does NOT fire,
+// not just that no relay happens.
+TEST_F(AdapterDataRelayTest, HopLimitExceeded_UplinkToMaster_DropsFrame_NoRelayNoDelivery) {
+  Mesh mesh = makeIntermediateNode();
+  bool callbackFired = false;
+  mesh.linkDataRecvCallback([&](const mesh_message&) { callbackFired = true; });
+
+  auto msg = makeUplinkMsg(1, 1, /*hopCount=*/lattice::config::MAX_HOPS);
+
+  size_t before = espNowSentPackets.size();
+  mesh.processAdapterData(msg);
+
+  EXPECT_EQ(espNowSentPackets.size(), before) << "hop-limit-exceeded frame must not be relayed";
+  EXPECT_FALSE(callbackFired) << "hop-limit-exceeded frame must be dropped outright, not fall "
+                                 "through to the security gate / local delivery";
 }
 
 TEST_F(AdapterDataRelayTest, Master_DoesNotRelayUplink_DeliversLocally) {
