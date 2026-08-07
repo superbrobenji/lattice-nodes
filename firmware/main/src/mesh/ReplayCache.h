@@ -26,20 +26,10 @@ struct ReplayCache {
   };
 
   Entry cache[config::LATTICE_REPLAY_MAX_ORIGINS]{};
-  uint32_t bootEpoch{0};
-  uint16_t txSeqNum{0};
-  uint32_t lastRelayedEpoch{0};
-  uint16_t lastRelayedSeqNum{0};
 
-  void init(uint32_t epoch) {
-    bootEpoch = epoch;
-    txSeqNum = 0;
-    lastRelayedEpoch = 0;
-    lastRelayedSeqNum = 0;
+  void init() {
     memset(cache, 0, sizeof(cache));
   }
-
-  uint16_t nextSeq() { return ++txSeqNum; }
 
   // Return true if msg is a replay (drop it). Per-origin high-water:
   // accept iff strictly newer (epoch, seq) than the stored tuple.
@@ -85,6 +75,39 @@ struct ReplayCache {
     cache[slot].lastSeenMs = nowMs;
     cache[slot].used = true;
     return false;
+  }
+};
+
+// This node's own outbound sequence + relay-dedup bookkeeping — split out of
+// ReplayCache (finding 15), which is scoped to incoming-message replay
+// detection only. Plain public fields, same as ReplayCache's own cache[] is
+// internally: this is a small owned-state aggregate on Mesh, not a class
+// needing its own access control.
+struct OutboundSequenceState {
+  uint32_t bootEpoch{0};
+  uint16_t txSeqNum{0};
+  uint32_t lastRelayedEpoch{0};
+  uint16_t lastRelayedSeqNum{0};
+
+  void init(uint32_t epoch) {
+    bootEpoch = epoch;
+    txSeqNum = 0;
+    lastRelayedEpoch = 0;
+    lastRelayedSeqNum = 0;
+  }
+
+  uint16_t nextSeq() { return ++txSeqNum; }
+  void bumpEpoch(uint32_t newEpoch) { bootEpoch = newEpoch; }
+
+  void markRelayed(uint32_t epoch, uint16_t seq) {
+    lastRelayedEpoch = epoch;
+    lastRelayedSeqNum = seq;
+  }
+
+  bool wasRelayedBefore(uint32_t epoch, uint16_t seq) const {
+    bool isNewer = (epoch > lastRelayedEpoch) ||
+                   (epoch == lastRelayedEpoch && seq > lastRelayedSeqNum);
+    return !isNewer;
   }
 };
 

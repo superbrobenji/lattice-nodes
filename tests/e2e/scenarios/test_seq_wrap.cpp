@@ -5,7 +5,7 @@
 // stays unique for the life of the device.
 //
 // This scenario forces the wrap by hand (setting the leaf's in-memory
-// txSeqNum to 0xFFFE via the UNIT_TEST-only testReplay() hook — no real
+// txSeqNum to 0xFFFE via the UNIT_TEST-only testTxState() hook — no real
 // device would send 65 thousand frames in a test's lifetime) and then drives
 // three real uplinks through the actual buildMessage()/seal/send path via
 // simulatePirMotion(). PirAdapter enforces a 3s post-trigger cooldown before
@@ -23,11 +23,11 @@ TEST_F(MeshSimTest, SeqWrapBumpsEpochAndKeepsSealing) {
 
   // Force the leaf to the brink of a seq wrap.
   sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
-    mesh.testReplay().txSeqNum = 0xFFFE;
+    mesh.testTxState().txSeqNum = 0xFFFE;
     return 0;
   });
   uint32_t epochBefore = sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
-    return mesh.testReplay().bootEpoch;
+    return mesh.testTxState().bootEpoch;
   });
 
   // Three uplinks: #1 -> seq 0xFFFF (no wrap yet). #2 -> nextSeq() wraps to 0,
@@ -42,7 +42,7 @@ TEST_F(MeshSimTest, SeqWrapBumpsEpochAndKeepsSealing) {
   runPolled(4000);
 
   uint32_t epochAfter = sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
-    return mesh.testReplay().bootEpoch;
+    return mesh.testTxState().bootEpoch;
   });
   EXPECT_EQ(epochAfter, epochBefore + 1)
       << "the in-memory boot epoch must bump exactly once across the wrap";
@@ -76,7 +76,7 @@ TEST_F(MeshSimTest, SeqWrapBumpsEpochAndKeepsSealing) {
 
 // Regression for the finding that the seq-wrap guard originally lived ONLY in
 // Mesh::buildMessage — sendEnrollmentRequest() and enrollPeer() (JOIN_ACK) draw
-// from the very same ReplayCache::txSeqNum via a raw replay.nextSeq() call, so
+// from the very same OutboundSequenceState::txSeqNum via a raw txState.nextSeq() call, so
 // a wrap landing on either of those un-sealed paths would silently resume
 // seq 1,2,3... under the OLD (un-bumped) epoch; any later sealed buildMessage
 // frame in the same boot would then reuse an AEAD nonce already used by
@@ -102,11 +102,11 @@ TEST_F(MeshSimTest, EnrollmentRequestSeqWrapBumpsEpoch) {
   // periodic ENROLLMENT broadcast (not yet approved -- still unenrolled) is
   // the one that must observe and apply the guard.
   sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
-    mesh.testReplay().txSeqNum = 0xFFFF;
+    mesh.testTxState().txSeqNum = 0xFFFF;
     return 0;
   });
   uint32_t epochBefore = sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
-    return mesh.testReplay().bootEpoch;
+    return mesh.testTxState().bootEpoch;
   });
 
   ASSERT_FALSE(sensor->isEnrolled());
@@ -130,7 +130,7 @@ TEST_F(MeshSimTest, EnrollmentRequestSeqWrapBumpsEpoch) {
          "must draw through the same guarded choke point as buildMessage()";
 
   uint32_t epochAfter = sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
-    return mesh.testReplay().bootEpoch;
+    return mesh.testTxState().bootEpoch;
   });
   EXPECT_EQ(epochAfter, epochBefore + 1)
       << "the boot epoch must bump exactly once when the enrollment-request path "
