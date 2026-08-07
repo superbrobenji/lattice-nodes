@@ -60,6 +60,12 @@ task-level implementation detail; each phase gets its own implementation plan
 | C — Repo-wide sweep | nodes | Every other file Phase A flags as excessively large or overloaded (candidates so far: `EepromManager.cpp` 651 lines, `main.cpp` 579 lines — final list from Phase A, not capped to these) plus cross-cutting encapsulation/OOP items. |
 | D — Docs rewrite | nodes | README + `docs/*.md` rewritten to describe the post-A/B/C architecture, covering the history through Phase J/TLS-follow-up that current docs predate entirely. |
 
+**Phase list is not closed.** If Phase A surfaces a finding large enough to
+warrant its own dedicated implementation plan — same bar `Mesh.cpp` cleared
+for Phase B — it gets its own new phase (E, F, ...) instead of being crammed
+into Phase C. C is for the sweep of everything else, not a dumping ground for
+anything oversized.
+
 ## Dependency graph & sequencing
 
 ```
