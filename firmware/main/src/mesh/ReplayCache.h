@@ -27,9 +27,7 @@ struct ReplayCache {
 
   Entry cache[config::LATTICE_REPLAY_MAX_ORIGINS]{};
 
-  void init() {
-    memset(cache, 0, sizeof(cache));
-  }
+  void init() { memset(cache, 0, sizeof(cache)); }
 
   // Return true if msg is a replay (drop it). Per-origin high-water:
   // accept iff strictly newer (epoch, seq) than the stored tuple.
@@ -105,8 +103,8 @@ struct OutboundSequenceState {
   }
 
   bool wasRelayedBefore(uint32_t epoch, uint16_t seq) const {
-    bool isNewer = (epoch > lastRelayedEpoch) ||
-                   (epoch == lastRelayedEpoch && seq > lastRelayedSeqNum);
+    bool isNewer =
+        (epoch > lastRelayedEpoch) || (epoch == lastRelayedEpoch && seq > lastRelayedSeqNum);
     return !isNewer;
   }
 };
