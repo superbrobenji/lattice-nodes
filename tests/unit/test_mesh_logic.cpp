@@ -1738,7 +1738,7 @@ TEST_F(EnrollmentTest, SendsSingleEspNowMessage) {
 // FRESH seq so a legitimate re-request is not permanently suppressed.
 TEST_F(EnrollmentTest, EnrollmentRequestCarriesReplayFieldsWithFreshSeqPerRetry) {
   Mesh mesh;
-  mesh.replay.init(5); // bootEpoch = 5 (> 0, so the drainRecvQueue replay gate applies)
+  mesh.txState.init(5); // bootEpoch = 5 (> 0, so the drainRecvQueue replay gate applies)
 
   mesh.sendEnrollmentRequest();
   mesh.sendEnrollmentRequest(); // next retry round

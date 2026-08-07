@@ -140,7 +140,11 @@ private:
   // Replay protection (composed)
   ReplayCache replay;
 
-  // Single choke point for drawing a tx sequence number from replay.txSeqNum.
+  // This node's own outbound sequence + relay-dedup bookkeeping (finding 15
+  // split — was fields directly on ReplayCache).
+  OutboundSequenceState txState;
+
+  // Single choke point for drawing a tx sequence number from txState.txSeqNum.
   // ALL sites that need a fresh (epoch, seq) pair for a message we originate
   // MUST go through this — it is the only place that guards against the
   // 0xFFFF -> 0 wrap (spec §2): a reused (epoch, seq) pair after a silent
@@ -165,6 +169,7 @@ private:
 
 #ifdef UNIT_TEST
   ReplayCache& testReplay() { return replay; }
+  OutboundSequenceState& testTxState() { return txState; }
   NeighborTable& testNeighbors() { return neighbors; }
   RouteTable* testRoutes() { return routes.get(); }
   // Exposes the node's mocked clock to tests. Phase I Task 6 (FF): return
@@ -452,13 +457,13 @@ public:
   void sendEnrollmentRequest() {
     // Pass proto_version + a fresh (epoch, seq) so ReplayCache can dedup relayed
     // copies of this request while still allowing the deliberate 10s retry.
-    // Draw seq via the guarded choke point FIRST (it may bump replay.bootEpoch
+    // Draw seq via the guarded choke point FIRST (it may bump txState.bootEpoch
     // on wrap), then read bootEpoch — reading it as a separate statement after
-    // the draw (rather than in the same call as replay.nextSeq()) avoids
+    // the draw (rather than in the same call as txState.nextSeq()) avoids
     // depending on unspecified argument evaluation order for a possibly-mutated
     // member.
     uint16_t seq = nextSeqGuarded();
-    enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, replay.bootEpoch, seq);
+    enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, txState.bootEpoch, seq);
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
   void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);

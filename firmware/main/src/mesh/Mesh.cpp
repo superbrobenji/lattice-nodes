@@ -194,17 +194,17 @@ void Mesh::registerDownlinkPeer(const uint8_t* mac) {
 }
 
 uint16_t Mesh::nextSeqGuarded() {
-  uint16_t seq = replay.nextSeq();
+  uint16_t seq = txState.nextSeq();
   if (seq == 0) {
     // seq wrapped (spec §2): a reused (epoch, seq) pair would reuse an AEAD nonce.
-    // Advance the persisted epoch and restart the sequence. replay.bootEpoch is
+    // Advance the persisted epoch and restart the sequence. txState.bootEpoch is
     // already the currently active epoch (kept in sync with EEPROM by init()
     // and by this method), so bump from it directly rather than re-reading
     // EEPROM.
-    uint32_t epoch = replay.bootEpoch + 1;
+    uint32_t epoch = txState.bootEpoch + 1;
     lattice::eeprom::saveBootEpoch(epoch);
-    replay.bootEpoch = epoch;
-    seq = replay.nextSeq();
+    txState.bumpEpoch(epoch);
+    seq = txState.nextSeq();
   }
   return seq;
 }
@@ -225,7 +225,7 @@ mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMes
     memcpy(msg.data, data, sizeof(msg.data));
   msg.hop_count = 0;
   msg.seq_num = nextSeqGuarded();
-  msg.epoch_num = replay.bootEpoch;
+  msg.epoch_num = txState.bootEpoch;
   return msg;
 }
 
@@ -242,8 +242,9 @@ bool Mesh::init() {
   // 2. Increment and save boot epoch (replay protection)
   uint32_t epoch = lattice::eeprom::loadBootEpoch() + 1;
   lattice::eeprom::saveBootEpoch(epoch);
-  replay.init(epoch);
-  LATTICE_LOGF("MESH", LogLevel::LOG_INFO, "Boot epoch: %lu", (unsigned long)replay.bootEpoch);
+  replay.init();
+  txState.init(epoch);
+  LATTICE_LOGF("MESH", LogLevel::LOG_INFO, "Boot epoch: %lu", (unsigned long)txState.bootEpoch);
 
   // Phase D (#42): DEV_MODE bypasses the beacon origin-MAC pin (dev firmware
   // regenerates a fresh keypair/MAC each boot, so pinning would reject the
@@ -877,15 +878,11 @@ void Mesh::processMasterBeacon(const mesh_message& msg) {
 
   if (!isMaster) {
     // C10 fix: only relay if this beacon is newer than the last one we relayed
-    bool isNewer =
-        (msg.epoch_num > replay.lastRelayedEpoch) ||
-        (msg.epoch_num == replay.lastRelayedEpoch && msg.seq_num > replay.lastRelayedSeqNum);
-    if (!isNewer) {
+    if (txState.wasRelayedBefore(msg.epoch_num, msg.seq_num)) {
       LATTICE_LOGLN("MESH", "Duplicate beacon relay suppressed", LogLevel::LOG_DEBUG);
       return;
     }
-    replay.lastRelayedEpoch = msg.epoch_num;
-    replay.lastRelayedSeqNum = msg.seq_num;
+    txState.markRelayed(msg.epoch_num, msg.seq_num);
 
     // Defer relay with random jitter to stagger transmissions across all non-master
     // nodes and eliminate the collision burst that occurs when all nodes relay
@@ -1165,11 +1162,11 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint
   // given JOIN_ACK at most once (the reflected copy is dropped by isReplay before
   // processJoinAck), preventing combinatorial broadcast amplification.
   ack.proto_version = PROTO_VERSION;
-  // Draw seq via the guarded choke point FIRST — it may bump replay.bootEpoch
+  // Draw seq via the guarded choke point FIRST — it may bump txState.bootEpoch
   // on wrap — then stamp epoch_num from the (possibly just-bumped) value so
   // the ACK's epoch always matches the epoch its seq_num was drawn under.
   ack.seq_num = nextSeqGuarded();
-  ack.epoch_num = replay.bootEpoch;
+  ack.epoch_num = txState.bootEpoch;
   ack.message_type = MESH_TYPE_JOIN_ACK;
   ack.data_type = adapter_types::UNKNOWN_ADAPTER;
   memcpy(ack.origin_mac_address, deviceMacAddress, 6);
