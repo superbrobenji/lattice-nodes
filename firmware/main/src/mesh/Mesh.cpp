@@ -129,62 +129,6 @@ PeerInfo* Mesh::findNextHopToMaster() {
   return &nextHopScratch;
 }
 
-void Mesh::registerDownlinkPeer(const uint8_t* mac) {
-  // Enrolled peers and the current master are managed exclusively by their
-  // own paths (PeerRegistry / enrollment) — just register (idempotent) and
-  // never track or evict them via this LRU.
-  bool isCurrentMaster = currentMaster.distance != 0xFF && lattice::mac::eq(mac, currentMaster.mac);
-  if (peers.find(mac) || isCurrentMaster) {
-    // Defense-in-depth (issue #47 item 5): if this MAC was already parked in
-    // the downlink forwarding-peer LRU from earlier churn (before it became
-    // enrolled or the current master), evict it here — its peering is now
-    // owned by PeerRegistry/enrollment, not this LRU. This branch is taken on
-    // every call once a MAC is enrolled/master (it short-circuits ahead of
-    // the LRU-touch loop below), so without this eviction a stale entry
-    // would sit in downlinkPeerLru indefinitely instead of freeing its slot.
-    for (size_t i = 0; i < downlinkPeerLruCount; ++i) {
-      if (lattice::mac::eq(downlinkPeerLru[i], mac)) {
-        for (size_t j = i; j + 1 < downlinkPeerLruCount; ++j)
-          memcpy(downlinkPeerLru[j], downlinkPeerLru[j + 1], 6);
-        downlinkPeerLruCount--;
-        break;
-      }
-    }
-    MeshTransport::registerPeerWithEspNow(mac);
-    return;
-  }
-
-  // Already tracked: touch (move to front) and ensure still registered.
-  for (size_t i = 0; i < downlinkPeerLruCount; ++i) {
-    if (lattice::mac::eq(downlinkPeerLru[i], mac)) {
-      uint8_t touched[6];
-      memcpy(touched, downlinkPeerLru[i], 6);
-      for (size_t j = i; j > 0; --j)
-        memcpy(downlinkPeerLru[j], downlinkPeerLru[j - 1], 6);
-      memcpy(downlinkPeerLru[0], touched, 6);
-      MeshTransport::registerPeerWithEspNow(mac);
-      return;
-    }
-  }
-
-  // Not tracked. Evict the oldest (LRU) entry from ESP-NOW first if at
-  // capacity (spec §2: "20-peer cap, LRU-evicted") — otherwise an RF attacker
-  // crafting downlink frames with fresh distinct next-hop MACs on every frame
-  // would grow this set unbounded and eventually exhaust the ESP-NOW peer
-  // table (no self-heal, no reboot).
-  if (downlinkPeerLruCount >= lattice::config::LATTICE_DOWNLINK_PEER_MAX) {
-    uint8_t* oldest = downlinkPeerLru[downlinkPeerLruCount - 1];
-    if (esp_now_is_peer_exist(oldest))
-      esp_now_del_peer(oldest);
-  } else {
-    ++downlinkPeerLruCount;
-  }
-  for (size_t j = downlinkPeerLruCount - 1; j > 0; --j)
-    memcpy(downlinkPeerLru[j], downlinkPeerLru[j - 1], 6);
-  memcpy(downlinkPeerLru[0], mac, 6);
-  MeshTransport::registerPeerWithEspNow(mac);
-}
-
 uint16_t Mesh::nextSeqGuarded() {
   uint16_t seq = txState.nextSeq();
   if (seq == 0) {
@@ -565,8 +509,8 @@ void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const 
     // so esp_now_send can unicast to it — real ESP-NOW requires the peer to be
     // registered first (VirtualBus doesn't enforce this, but the Phase-2 lesson
     // was that skipping it here is a real-hardware bug). Bounded via the
-    // downlink forwarding-peer LRU (spec §2) — see registerDownlinkPeer().
-    registerDownlinkPeer(msg.route_path);
+    // downlink forwarding-peer LRU (spec §2) — see DownlinkRouter::registerDownlinkPeer().
+    router.registerDownlinkPeer(msg.route_path, peers, currentMaster);
     transport.sendMessage(msg.route_path, msg, deviceMacAddress);
     return;
   }
@@ -622,43 +566,49 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   bool addressedToMaster =
       enrollment.hasMasterMac && (lattice::mac::eq(msg.target_mac_address, currentMaster.mac));
 
-  if (!isMaster && !addressedToSelf && !isBroadcastTarget) {
-    if (addressedToMaster) {
-      // Uplink: relay toward master via routing table
-      if (msg.hop_count >= lattice::config::MAX_HOPS)
-        return;
-      mesh_message relay = msg;
-      relay.hop_count++;
-      memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-      transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ADAPTER_DATA,
-                   &relay);
-      return;
-    }
-    // Downlink toward a specific node. If the frame carries a source route and
-    // we are on it, forward to the next hop (stateless — spec §4); otherwise
-    // fall back to the flood.
-    if (msg.route_len > 0 && msg.route_len <= lattice::config::MAX_HOPS) {
-      for (uint8_t i = 0; i < msg.route_len; ++i) {
-        if (lattice::mac::eq(&msg.route_path[static_cast<size_t>(i) * 6], deviceMacAddress)) {
-          if (msg.hop_count >= lattice::config::MAX_HOPS)
-            return;
-          mesh_message fwd = msg;
-          fwd.hop_count++;
-          const uint8_t* next = (i + 1 < msg.route_len)
-                                    ? &msg.route_path[static_cast<size_t>(i + 1) * 6]
-                                    : msg.target_mac_address;
-          // Bounded via the downlink forwarding-peer LRU (spec §2) — `next` is
-          // attacker-controlled plaintext (this relay never opens the sealed
-          // frame), so an unbounded registerPeerWithEspNow here would let an RF
-          // attacker exhaust the ESP-NOW peer table one entry per crafted frame.
-          registerDownlinkPeer(next);
-          transport.sendMessage(next, fwd, deviceMacAddress);
-          return;
-        }
-      }
-    }
-    relayDownlink(msg); // not on the route / no route -> existing flood fallback
+  // Downlink/uplink routing decision (Phase B Task 6, finding 1 job 4
+  // narrowed; finding 2's routing half) — delegated to DownlinkRouter, which
+  // is crypto-free and read-only here. Every check below is unchanged from
+  // the original inline block; only which class owns the classification
+  // logic changed. The relay-toward-master case still executes here (not in
+  // DownlinkRouter) because transmitCore needs masterE2EKeys/
+  // _checkEpochRollback, which live on Mesh.
+  uint8_t nextHop[6];
+  switch (router.classify(msg, deviceMacAddress, isMaster, addressedToSelf, isBroadcastTarget,
+                          addressedToMaster, nextHop)) {
+  case RouteDecision::DropHopLimitExceeded:
+    // Matches the original's unconditional `return;` on hop-limit-exceeded —
+    // drop the frame outright, do NOT fall through to the security gate
+    // below (see DownlinkRouter.h's classify() doc comment).
     return;
+  case RouteDecision::RelayTowardMaster: {
+    // Uplink: relay toward master via routing table
+    mesh_message relay = msg;
+    relay.hop_count++;
+    memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+    transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ADAPTER_DATA,
+                 &relay);
+    return;
+  }
+  case RouteDecision::ForwardOnRoute: {
+    // Downlink toward a specific node, on this node's source route — forward
+    // to the next hop (stateless — spec §4).
+    mesh_message fwd = msg;
+    fwd.hop_count++;
+    // Bounded via the downlink forwarding-peer LRU (spec §2) — `nextHop` is
+    // attacker-controlled plaintext (this relay never opens the sealed
+    // frame), so an unbounded registerPeerWithEspNow here would let an RF
+    // attacker exhaust the ESP-NOW peer table one entry per crafted frame.
+    router.registerDownlinkPeer(nextHop, peers, currentMaster);
+    transport.sendMessage(nextHop, fwd, deviceMacAddress);
+    return;
+  }
+  case RouteDecision::Flood:
+    router.relayDownlink(msg, peers, deviceMacAddress,
+                         transport); // not on the route / no route -> existing flood fallback
+    return;
+  case RouteDecision::NotRouted:
+    break; // fall through to the security gate below, unchanged
   }
 
   // Security gate: at the master, a sealed-type frame (ADAPTER_DATA/ROUTE_REPORT)
@@ -741,20 +691,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
 
   // Broadcast: also relay so multi-hop nodes receive it (Task 3 test covers this)
   if (isBroadcastTarget && !isMaster) {
-    relayDownlink(msg);
-  }
-}
-
-void Mesh::relayDownlink(const mesh_message& msg) {
-  if (msg.hop_count >= lattice::config::MAX_HOPS)
-    return;
-  mesh_message relay = msg;
-  relay.hop_count++;
-  memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-  for (const auto& p : peers) {
-    if (lattice::mac::eq(p.mac, deviceMacAddress))
-      continue;
-    transport.sendMessage(p.mac, relay, deviceMacAddress);
+    router.relayDownlink(msg, peers, deviceMacAddress, transport);
   }
 }
 
@@ -784,7 +721,7 @@ void Mesh::processJoinAck(const mesh_message& msg) {
   // downlink counterpart). The target node is still mid-enrollment and is NOT
   // yet a registered unicast peer of ours, so — exactly as the master does when
   // it first emits the ACK (see enrollPeer: broadcast via the FF:FF peer) — we
-  // RE-BROADCAST rather than unicast to known peers via relayDownlink(). Loop
+  // RE-BROADCAST rather than unicast to known peers via router.relayDownlink(). Loop
   // safety: never re-broadcast a JOIN_ACK we originated (only masters originate
   // them, so this stops the master looping on its own echo), and bound depth by
   // MAX_HOPS as a backstop for cyclic topologies.

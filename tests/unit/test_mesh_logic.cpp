@@ -355,7 +355,7 @@ TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1, /*hopCount=*/1);
 
-  mesh.relayDownlink(msg);
+  mesh.router.relayDownlink(msg, mesh.peers, mesh.deviceMacAddress, mesh.transport);
 
   // 2 peers → 2 sends
   EXPECT_EQ(espNowSentPackets.size(), 2u);
@@ -378,7 +378,7 @@ TEST_F(RelayDownlinkTest, DropsAtMaxHops) {
   auto msg = makeDataMsg(kOriginMac, kPeer1Mac, 1, 1,
                          /*hopCount=*/lattice::config::MAX_HOPS);
 
-  mesh.relayDownlink(msg);
+  mesh.router.relayDownlink(msg, mesh.peers, mesh.deviceMacAddress, mesh.transport);
 
   EXPECT_EQ(espNowSentPackets.size(), 0u);
 }
@@ -397,7 +397,7 @@ TEST_F(RelayDownlinkTest, SkipsSelf_WhenSelfInPeerList) {
   mesh.peers.append(self);
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1);
-  mesh.relayDownlink(msg);
+  mesh.router.relayDownlink(msg, mesh.peers, mesh.deviceMacAddress, mesh.transport);
 
   // Only 1 peer (kPeer1Mac) — self skipped
   EXPECT_EQ(espNowSentPackets.size(), 1u);
@@ -1174,8 +1174,8 @@ TEST(RegisterDownlinkPeer, LRUEntryBecomesEnrolled_EvictsOnTouch) {
   uint8_t mac[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
 
   // 1. Register mac into the LRU (not yet enrolled/master).
-  m.registerDownlinkPeer(mac);
-  EXPECT_EQ(m.downlinkPeerLruCount, 1u);
+  m.router.registerDownlinkPeer(mac, m.peers, m.currentMaster);
+  EXPECT_EQ(m.router.downlinkPeerLruCount, 1u);
 
   // 2. mac becomes enrolled. PeerRegistry::peerMacs/peerCount/append() are
   //    all public (see PeerRegistry.h) — no addForTest hook exists or is
@@ -1187,10 +1187,10 @@ TEST(RegisterDownlinkPeer, LRUEntryBecomesEnrolled_EvictsOnTouch) {
   ASSERT_TRUE(m.peers.append(enrolled));
 
   // 3. Call registerDownlinkPeer(mac) again.
-  m.registerDownlinkPeer(mac);
+  m.router.registerDownlinkPeer(mac, m.peers, m.currentMaster);
 
   // 4. LRU no longer contains mac — it was evicted, not just left untouched.
-  EXPECT_EQ(m.downlinkPeerLruCount, 0u);
+  EXPECT_EQ(m.router.downlinkPeerLruCount, 0u);
 }
 
 // ─── enrollPeer: secondary-master identity stamped into JOIN_ACK ────────────

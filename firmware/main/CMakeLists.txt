@@ -27,6 +27,7 @@ idf_component_register(
     "src/mesh/Mesh.cpp"
     "src/mesh/MeshTransport.cpp"
     "src/mesh/MasterBeacon.cpp"
+    "src/mesh/DownlinkRouter.cpp"
     "src/mesh/Enrollment.cpp"
     "src/mesh/PeerRegistry.cpp"
     "src/mesh/serialization/mesh.pb.c"
