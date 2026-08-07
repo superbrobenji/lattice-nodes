@@ -143,36 +143,100 @@ tracking via `NeighborTable`, TOFU master-MAC learning via `Enrollment`'s new
 `learnMasterMac`/`learnSecondaryMasterMac` from Task 2). `Mesh` holds one as
 a member.
 
-### Task 6 — Extract `DownlinkRouter` (finding 1, job 4; finding 2's routing half)
+### Task 6 — Extract `DownlinkRouter` (finding 1, job 4 — narrowed; finding 2's routing half)
 
-**Where:** `Mesh.cpp` — `relayDownlink:1042`, `sendRouteReport:1209`,
-`processRouteReport:1221`, `registerDownlinkPeer:140`, plus
-`processAdapterData`'s routing-decision block (lines 919-956): relay-toward-
-master when addressed to master and not self/broadcast; source-route
-forwarding when the frame carries a route path we're on; flood fallback via
-`relayDownlink` otherwise.
+**Scope narrowed during implementation planning.** The design's first pass
+(this section, originally) put `sendRouteReport`/`processRouteReport` in
+scope alongside `relayDownlink`/`registerDownlinkPeer`, following finding
+1's job-4 grouping literally. Reading both functions in full for the
+implementation plan showed they're not routing in the same sense —
+`processRouteReport`'s master branch does E2E open (`peerE2EKeys`,
+`openPayload`), reconstructs and verifies a per-hop chain-MAC
+(`routemac::buildHopContext`/`chainStep` against `msg.auth_path`), and only
+*then* touches `RouteTable::record`; `sendRouteReport` seals via
+`transmitCore`. Both are exactly the kind of security-critical, heavily
+cross-referenced (issue #44, chain-MAC) crypto+routing hybrid that
+`processAdapterData`'s security half already established shouldn't be split
+casually. **`sendRouteReport` and `processRouteReport` stay on `Mesh`** —
+same reasoning as `processAdapterData`'s security sequence, not a new
+exception.
 
-**Fix:** new `DownlinkRouter` class owning downlink relay, route-report
-send/process, and the routing *decision* (not the security/E2E half —
-see below). `Mesh::processAdapterData` keeps its current shape for lines
-958-1039 (security gate → E2E open → config-opcode authorization → local
-delivery — **do not split this further**, it's one atomic, heavily-commented
-security check sequence with specific attack scenarios documented inline)
-and delegates the routing decision (currently lines 919-956) to
-`DownlinkRouter` with an early return, e.g.:
+**Where:** `Mesh.cpp` — `relayDownlink:1042`, `registerDownlinkPeer:140`,
+plus `processAdapterData`'s routing-decision block (lines 919-956):
+relay-toward-master when addressed to master and not self/broadcast;
+source-route forwarding when the frame carries a route path we're on; flood
+fallback via `relayDownlink` otherwise.
+
+**Fix:** new `DownlinkRouter` class owning downlink relay,
+auto-peer-registration for forwarding, and the routing *decision* (not the
+security/E2E half — see below). `Mesh::processAdapterData` keeps its current
+shape for lines 958-1039 (security gate → E2E open → config-opcode
+authorization → local delivery — **do not split this further**, it's one
+atomic, heavily-commented security check sequence with specific attack
+scenarios documented inline) and delegates the routing decision (currently
+lines 919-956) to `DownlinkRouter` with an early return, e.g.:
+
+**Concrete design** (resolved during implementation planning, replaces the
+earlier placeholder `tryRouteAway` sketch): `DownlinkRouter` stays crypto-free
+— it *classifies* what should happen to a frame; `Mesh` executes the
+crypto-touching action itself, since `transmitCore` (used by the
+relay-toward-master case) needs `masterE2EKeys`/`_checkEpochRollback`, which
+live on `Mesh`. This mirrors how `NeighborTable`/`RouteTable`/`E2EKeyStore`
+already work in this codebase — passive data+logic classes `Mesh` calls into
+with whatever external state they need as parameters, never holding a
+back-reference to `Mesh` itself.
 
 ```cpp
-void Mesh::processAdapterData(const mesh_message& msg) {
-  if (downlinkRouter.tryRouteAway(msg, /* addressedToSelf, isBroadcastTarget, addressedToMaster */)) {
-    return;
-  }
-  // ... security gate / E2E open / config-auth / deliver, unchanged ...
-}
+// DownlinkRouter.h
+enum class RouteDecision { NotRouted, RelayTowardMaster, ForwardOnRoute, Flood };
+
+class DownlinkRouter {
+public:
+  // Read-only classification — no state mutation, no I/O. nextHopMacOut is
+  // written only when the result is ForwardOnRoute.
+  RouteDecision classify(const mesh_message& msg, const uint8_t* deviceMac, bool isMaster,
+                         bool addressedToSelf, bool isBroadcastTarget, bool addressedToMaster,
+                         uint8_t nextHopMacOut[6]) const;
+
+  void relayDownlink(const mesh_message& msg, const PeerRegistry& peers, const uint8_t* deviceMac,
+                     MeshTransport& transport);
+  void registerDownlinkPeer(const uint8_t* mac, const PeerRegistry& peers,
+                            const MasterInfo& currentMaster);
+
+private:
+  uint8_t downlinkPeerLru[lattice::config::LATTICE_DOWNLINK_PEER_MAX][6]{};
+  size_t downlinkPeerLruCount{0};
+};
 ```
 
-The exact signature of `tryRouteAway` (what it needs passed in vs. computes
-itself) is an implementation-plan decision, not locked here — the boundary
-that **is** locked is: routing decision moves, security sequence does not.
+```cpp
+// Mesh::processAdapterData's routing block, replacing lines 919-956
+uint8_t nextHop[6];
+switch (downlinkRouter.classify(msg, deviceMacAddress, isMaster, addressedToSelf,
+                                isBroadcastTarget, addressedToMaster, nextHop)) {
+case RouteDecision::RelayTowardMaster: {
+  if (msg.hop_count >= lattice::config::MAX_HOPS) return;
+  mesh_message relay = msg;
+  relay.hop_count++;
+  memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
+  transmitCore(static_cast<adapter_types>(relay.data_type), relay.data, MESH_TYPE_ADAPTER_DATA, &relay);
+  return;
+}
+case RouteDecision::ForwardOnRoute: {
+  if (msg.hop_count >= lattice::config::MAX_HOPS) return;
+  mesh_message fwd = msg;
+  fwd.hop_count++;
+  downlinkRouter.registerDownlinkPeer(nextHop, peers, currentMaster);
+  transport.sendMessage(nextHop, fwd);
+  return;
+}
+case RouteDecision::Flood:
+  downlinkRouter.relayDownlink(msg, peers, deviceMacAddress, transport);
+  return;
+case RouteDecision::NotRouted:
+  break; // fall through to the security gate / local delivery, unchanged
+}
+```
 
 ### Task 7 — `Mesh` becomes thin orchestrator (finding 1, jobs 2 + 5 + 6)
 
