@@ -399,8 +399,8 @@ public:
   // Peer management API (optional, can be used in your app/UI)
   void addPeer(const uint8_t* mac);
   void removePeer(const uint8_t* mac) { peers.removeAndPersist(mac); }
-  const PeerInfo* getPeerList() const { return peers.peerMacs; }
-  size_t getPeerCount() const { return peers.peerCount; }
+  const PeerInfo* getPeerList() const { return peers.begin(); }
+  size_t getPeerCount() const { return peers.count(); }
 
   // Broadcast adapter data to all peers.
   // deliverLocally: also hand the built message to externalRecvCallback, the
