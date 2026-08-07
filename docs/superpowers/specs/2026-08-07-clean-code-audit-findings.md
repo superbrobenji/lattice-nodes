@@ -310,10 +310,30 @@ files and may flag additional files if they find something during the deep look.
   *Outcome: finding 7 — delete.*
 
 All other sub-150-line files were skimmed (first ~15-25 lines and any suspicious neighbors,
-e.g. the `network/` MAC-helper cluster and the `mesh/*Crypto*.h` cluster) and found to be
-single-purpose, several explicitly documented as prior de-duplication work (post-Phase-G,
-Phase H2). They're left unflagged; Tasks 2-4 remained free to flag any of them if a closer read
-turned up something that pass missed — none did.
+e.g. the `network/` MAC-helper cluster and the `mesh/*Crypto*.h` cluster) rather than read in
+full, and were left unflagged — several explicitly documented as prior de-duplication work
+(post-Phase-G, Phase H2). Tasks 2-4 remained free to flag any of them if a closer read turned up
+something the skim missed, **and several did.** Twelve of the 27 findings (44%) take a
+sub-150-line *unflagged* file as their subject:
+
+- **Actionable:** 5 (`PeerRegistry.h`, 57), 6 (`Enrollment.h`, 89), 8 (`Error.h`, 103),
+  9 (`Button.cpp`, 42), 11 (`Adapter.h`, 140), 12 (`GpioInput.h`/`GpioOutput.h`, 32/28),
+  15 (`ReplayCache.h`, 92), 17 (`Logger.h`/`Logger.cpp`, 117/79).
+- **Opportunistic or considered-and-rejected:** 19 (`MeshCrypto.h`, 47),
+  20 (`SerialFraming.h`, 46), 23 (`mac_table.h`, 81), 26 (`PirAdapter.h`, 68).
+
+Four further findings (7, 16, 22, 27) take a flagged file as their subject but also reach into an
+unflagged sub-150-line header. And both clusters named above as skimmed-and-clean drew findings on
+the closer read: `MeshCrypto.h` (finding 19) *is* the `mesh/*Crypto*.h` cluster, and `mac_table.h`
+(finding 23) *is* the `network/` MAC-helper cluster — though finding 23's verdict is "considered,
+rejected", so the skim's judgment did hold there even though a row exists.
+
+**The `Flag` column was a triage aid, not a scope cap** — as Task 1's own preamble above states
+("This is not a hard-cutoff rule … Tasks 2-4 should still use their own judgment"). **All three**
+of the audit's real encapsulation breaks (findings 5, 6, 15 — the only rows with
+`Category = encapsulation`) and its single largest quantified win (finding 17) live in files the
+census left unflagged. A future audit of this repo should read `Flag = investigate` as
+"start here", not as "the rest is fine".
 
 ## Session provenance
 
