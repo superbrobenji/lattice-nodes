@@ -186,14 +186,37 @@ already work in this codebase — passive data+logic classes `Mesh` calls into
 with whatever external state they need as parameters, never holding a
 back-reference to `Mesh` itself.
 
+**Post-implementation correction (Task 6):** the sketch below originally
+shipped with a 3-value `RouteDecision` (`NotRouted`, `RelayTowardMaster`,
+`ForwardOnRoute`, `Flood` — no hop-limit case), with the per-case
+`if (msg.hop_count >= MAX_HOPS) return;` check left inline in
+`processAdapterData`'s switch cases. That's wrong: the original code's
+hop-limit check is an unconditional early-return from the *whole*
+`processAdapterData` function (drop the frame outright, never reach the
+security gate below), not a per-case concern local to the switch. A 4th/5th
+distinction was needed because `NotRouted` is defined to *fall through* to
+the security gate — collapsing the hop-limit case into it would have let a
+hop-limit-exceeded frame wrongly reach local delivery. `RouteDecision` grew a
+5th value, `DropHopLimitExceeded`, and `classify()` itself now performs the
+hop-limit check (it has `msg` in scope already) rather than leaving it to the
+caller. The blocks below reflect what actually shipped, including the
+`DownlinkRouter router;` member name (`Mesh.h`) and the real 3-argument
+`MeshTransport::sendMessage(target, msg, deviceMac)` signature Task 4
+concretized after this sketch was first drafted.
+
 ```cpp
 // DownlinkRouter.h
-enum class RouteDecision { NotRouted, RelayTowardMaster, ForwardOnRoute, Flood };
+enum class RouteDecision { NotRouted, RelayTowardMaster, ForwardOnRoute, Flood,
+                           DropHopLimitExceeded };
 
 class DownlinkRouter {
 public:
   // Read-only classification — no state mutation, no I/O. nextHopMacOut is
-  // written only when the result is ForwardOnRoute.
+  // written only when the result is ForwardOnRoute. DropHopLimitExceeded is
+  // NOT the same as NotRouted: it means this WAS a routing case (addressed
+  // to master, or on the frame's source route) but hop_count is already at
+  // MAX_HOPS, so the caller must drop the frame outright rather than fall
+  // through to the security gate (see NotRouted's fall-through contract).
   RouteDecision classify(const mesh_message& msg, const uint8_t* deviceMac, bool isMaster,
                          bool addressedToSelf, bool isBroadcastTarget, bool addressedToMaster,
                          uint8_t nextHopMacOut[6]) const;
@@ -212,10 +235,11 @@ private:
 ```cpp
 // Mesh::processAdapterData's routing block, replacing lines 919-956
 uint8_t nextHop[6];
-switch (downlinkRouter.classify(msg, deviceMacAddress, isMaster, addressedToSelf,
-                                isBroadcastTarget, addressedToMaster, nextHop)) {
+switch (router.classify(msg, deviceMacAddress, isMaster, addressedToSelf,
+                        isBroadcastTarget, addressedToMaster, nextHop)) {
+case RouteDecision::DropHopLimitExceeded:
+  return; // drop the whole frame — matches the original's unconditional return
 case RouteDecision::RelayTowardMaster: {
-  if (msg.hop_count >= lattice::config::MAX_HOPS) return;
   mesh_message relay = msg;
   relay.hop_count++;
   memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
@@ -223,15 +247,14 @@ case RouteDecision::RelayTowardMaster: {
   return;
 }
 case RouteDecision::ForwardOnRoute: {
-  if (msg.hop_count >= lattice::config::MAX_HOPS) return;
   mesh_message fwd = msg;
   fwd.hop_count++;
-  downlinkRouter.registerDownlinkPeer(nextHop, peers, currentMaster);
-  transport.sendMessage(nextHop, fwd);
+  router.registerDownlinkPeer(nextHop, peers, currentMaster);
+  transport.sendMessage(nextHop, fwd, deviceMacAddress);
   return;
 }
 case RouteDecision::Flood:
-  downlinkRouter.relayDownlink(msg, peers, deviceMacAddress, transport);
+  router.relayDownlink(msg, peers, deviceMacAddress, transport);
   return;
 case RouteDecision::NotRouted:
   break; // fall through to the security gate / local delivery, unchanged
