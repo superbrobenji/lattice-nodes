@@ -28,11 +28,6 @@ Enrollment::Enrollment() {
   memset(devicePublicKey, 0, 32);
   memset(knownMasterMac, 0xFF, 6);
   memset(knownMasterMacSecondary, 0xFF, 6);
-  // Phase I Task 8 (item OO): static ring buffer over
-  // _pendingRelayQueueStorage — heap-free, matching the array it replaces.
-  _pendingRelayQueue =
-      xRingbufferCreateStatic(sizeof(_pendingRelayQueueStorage), RINGBUF_TYPE_NOSPLIT,
-                              _pendingRelayQueueStorage, &_pendingRelayQueueStruct);
 }
 
 // NOTE: Enrollment::init() and Enrollment::enrollPeer() are crypto-heavy (X25519
@@ -87,21 +82,21 @@ void Enrollment::sendRequest(const uint8_t* deviceMac, uint8_t protoVersion, uin
 }
 
 void Enrollment::processRequest(const mesh_message& msg) {
-  enqueuePendingRelay(msg.origin_mac_address, msg.enrollment_public_key);
+  _relayQueue.push(msg.origin_mac_address, msg.enrollment_public_key);
   LATTICE_LOGLN("MESH", "Enrollment request received, deferring relay to loop()",
                 LogLevel::LOG_INFO);
 }
 
-void Enrollment::enqueuePendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
-  PendingRelay entry;
-  memcpy(entry.mac, mac, 6);
-  memcpy(entry.pubKey, pubKey, 32);
-  // Non-blocking send (0 ticks) — this runs from Mesh::drainRecvQueue() in
-  // task context (not ISR), so the LOG_WARN below is safe here, unlike
-  // Mesh::onDataRecvCallback's silent ISR-context drop.
-  if (xRingbufferSend(_pendingRelayQueue, &entry, sizeof(entry), 0) != pdTRUE) {
-    LATTICE_LOGLN("MESH", "Enrollment relay queue full — dropping request", LogLevel::LOG_WARN);
-  }
+void Enrollment::learnMasterMac(const uint8_t* mac) {
+  memcpy(knownMasterMac, mac, 6);
+  hasMasterMac = true;
+  lattice::eeprom::saveKnownMasterMac(knownMasterMac);
+}
+
+void Enrollment::learnSecondaryMasterMac(const uint8_t* mac) {
+  memcpy(knownMasterMacSecondary, mac, 6);
+  hasMasterMacSecondary = true;
+  lattice::eeprom::saveKnownMasterMacSecondary(knownMasterMacSecondary);
 }
 
 void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*deviceMac*/,
@@ -158,9 +153,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
   if (!hasMasterMac) {
-    memcpy(knownMasterMac, msg.origin_mac_address, 6);
-    hasMasterMac = true;
-    lattice::eeprom::saveKnownMasterMac(knownMasterMac);
+    learnMasterMac(msg.origin_mac_address);
     LATTICE_LOGLN("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
   }
 
@@ -182,9 +175,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   if (hasSecondary) {
     bool secondaryRegistered = registerFn && registerFn(secondaryMasterMac, secondaryPublicKey);
     if (secondaryRegistered && !hasMasterMacSecondary) {
-      memcpy(knownMasterMacSecondary, secondaryMasterMac, 6);
-      hasMasterMacSecondary = true;
-      lattice::eeprom::saveKnownMasterMacSecondary(knownMasterMacSecondary);
+      learnSecondaryMasterMac(secondaryMasterMac);
     }
   }
 }
@@ -204,20 +195,12 @@ void Enrollment::setRelayFn(EnrollmentRelayFn fn) {
 }
 
 void Enrollment::setPendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
-  enqueuePendingRelay(mac, pubKey);
+  _relayQueue.push(mac, pubKey);
 }
 
 void Enrollment::drainPendingRelay() {
   // Drain EVERY queued entry per call so concurrent enrollments are not starved.
-  size_t itemSize = 0;
-  PendingRelay* entryPtr;
-  while ((entryPtr = static_cast<PendingRelay*>(
-              xRingbufferReceive(_pendingRelayQueue, &itemSize, 0))) != nullptr) {
-    if (itemSize == sizeof(PendingRelay) && _enrollmentRelayFn) {
-      _enrollmentRelayFn(entryPtr->mac, entryPtr->pubKey);
-    }
-    vRingbufferReturnItem(_pendingRelayQueue, entryPtr);
-  }
+  _relayQueue.drainTo(_enrollmentRelayFn);
 }
 
 } // namespace mesh
