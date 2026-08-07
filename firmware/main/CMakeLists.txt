@@ -29,6 +29,7 @@ idf_component_register(
     "src/mesh/MasterBeacon.cpp"
     "src/mesh/DownlinkRouter.cpp"
     "src/mesh/Enrollment.cpp"
+    "src/mesh/PendingRelayQueue.cpp"
     "src/mesh/PeerRegistry.cpp"
     "src/mesh/serialization/mesh.pb.c"
     "src/mesh/serialization/nanopb/pb_encode.c"
