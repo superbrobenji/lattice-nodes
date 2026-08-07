@@ -8,8 +8,6 @@
 #include "src/persistence/EepromManager.h"
 // Error.h already provides ERROR_CHECK macros
 #include <esp_now.h>
-#include <esp_netif.h>
-#include <esp_event.h>
 #include <esp_timer.h>
 #include <cstring>
 #include <cstdio>
@@ -443,12 +441,9 @@ void Mesh::loadMeshKeyFromEEPROM() {
   if (unset) {
     LATTICE_LOGLN("MESH", "Mesh key unset, loading default from config", LogLevel::LOG_INFO);
     memcpy(meshKey, lattice::config::DEFAULT_MESH_KEY, MESH_KEY_SIZE);
-    saveMeshKeyToEEPROM(meshKey); // Will be skipped automatically in dev mode
+    // Will be skipped automatically in dev mode (lattice::eeprom::saveMeshKey no-ops there).
+    lattice::eeprom::saveMeshKey(meshKey, MESH_KEY_SIZE);
   }
-}
-
-void Mesh::saveMeshKeyToEEPROM(const uint8_t* key) {
-  lattice::eeprom::saveMeshKey(key, MESH_KEY_SIZE);
 }
 
 void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally) {

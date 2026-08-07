@@ -40,8 +40,9 @@ public:
   void drainPendingRelay();
 
   // Owns the memcpy + flag-set + EEPROM-persist triple for TOFU-learning the
-  // (primary/secondary) master MAC — replaces 3 duplicated inline sites in
-  // Mesh.cpp and 2 in this file's own processJoinAck() (finding 6).
+  // (primary/secondary) master MAC — replaces 3 duplicated inline sites that
+  // were in Mesh.cpp (2 later relocated to MasterBeacon.cpp, Phase B Task 5)
+  // and 2 in this file's own processJoinAck() (finding 6).
   void learnMasterMac(const uint8_t* mac);
   void learnSecondaryMasterMac(const uint8_t* mac);
 

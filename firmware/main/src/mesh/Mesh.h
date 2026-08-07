@@ -5,8 +5,6 @@
 #include <esp_now.h>
 #include <esp_attr.h>
 #include <esp_wifi.h>
-#include <esp_netif.h>
-#include <esp_event.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/ringbuf.h>
@@ -112,7 +110,6 @@ private:
   void transmitDispatch(const adapter_types type, const uint8_t* data, bool selfOriginated);
 
   void loadMeshKeyFromEEPROM();
-  void saveMeshKeyToEEPROM(const uint8_t* key);
 
   // --- Tiger Style refactor helpers ---
   void processAdapterData(const mesh_message& msg);

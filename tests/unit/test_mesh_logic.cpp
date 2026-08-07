@@ -1278,8 +1278,9 @@ TEST(MeshDownlinkClamp, OversizedRouteLen_Drops) {
 // LRU-touch loop further down — so that loop is unreachable for an
 // already-enrolled MAC. The eviction of a stale LRU entry therefore has to
 // happen inside the short-circuit branch itself (see the comment at
-// Mesh.cpp::registerDownlinkPeer); this test asserts that actually happens,
-// not just that the short-circuit continues to skip re-touching the LRU.
+// DownlinkRouter.cpp::registerDownlinkPeer); this test asserts that actually
+// happens, not just that the short-circuit continues to skip re-touching the
+// LRU.
 TEST(RegisterDownlinkPeer, LRUEntryBecomesEnrolled_EvictsOnTouch) {
   resetEspNowMock();
   lattice::mesh::Mesh m;
