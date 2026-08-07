@@ -25,6 +25,7 @@ idf_component_register(
     "src/hardware/output/SevenSegDisplay.cpp"
     "src/logging/Logger.cpp"
     "src/mesh/Mesh.cpp"
+    "src/mesh/MeshTransport.cpp"
     "src/mesh/Enrollment.cpp"
     "src/mesh/PeerRegistry.cpp"
     "src/mesh/serialization/mesh.pb.c"

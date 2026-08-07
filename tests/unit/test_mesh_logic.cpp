@@ -918,7 +918,7 @@ TEST_F(JoinAckRelayTest, MultiHopForwardingPeer_BoundToOne_EvictsStaleRelayOnSwi
   // Mirror what setupEspNow()/addPeer() do for a real enrolled peer at boot:
   // register it as an ESP-NOW peer. The fixture's plain peers.append() above
   // only populates the PeerRegistry, not the ESP-NOW peer table.
-  lattice::mesh::crypto::registerPeerWithEspNow(kPeerMac);
+  MeshTransport::registerPeerWithEspNow(kPeerMac);
 
   const uint8_t r1Mac[6] = {0x01, 0, 0, 0, 0, 0x01};
   const uint8_t r2Mac[6] = {0x02, 0, 0, 0, 0, 0x02};
@@ -1097,7 +1097,7 @@ TEST_F(JoinAckRelayTest, DownlinkRelayForward_BoundsAutoRegisteredPeers_NeverEvi
   Mesh mesh = makeIntermediateNode(); // kPeerMac is an ENROLLED peer — must never be evicted
   // Mirror what setupEspNow()/addPeer() do for a real enrolled peer at boot
   // (the fixture's peers.append() above only populates the PeerRegistry).
-  lattice::mesh::crypto::registerPeerWithEspNow(kPeerMac);
+  MeshTransport::registerPeerWithEspNow(kPeerMac);
 
   const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
   const int kFloodCount = static_cast<int>(lattice::config::LATTICE_DOWNLINK_PEER_MAX) + 6;
@@ -1526,10 +1526,12 @@ TEST_F(JoinAckForgeryTest, MasterNode_IgnoresJoinAckAddressedToItself) {
   EXPECT_FALSE(mesh.enrollment.isEnrolled()) << "masters never enroll via JOIN_ACK";
 }
 
-// ─── drainRecvQueue: replay protection ───────────────────────────────────────
-// Relay dedup is drainRecvQueue's responsibility; relay paths no longer call
-// isReplay directly. These tests verify that the production path (drainRecvQueue
-// → dispatch) correctly drops replayed messages before handlers are invoked.
+// ─── drain(): replay protection ──────────────────────────────────────────────
+// Relay dedup is Mesh::handleReceivedMessage's responsibility (reached via
+// transport.drain(), Phase B Task 4 — formerly Mesh::drainRecvQueue's inline
+// body); relay paths no longer call isReplay directly. These tests verify
+// that the production path (drain() → handleReceivedMessage → dispatch)
+// correctly drops replayed messages before handlers are invoked.
 
 class DrainRecvQueueTest : public ::testing::Test {
 protected:
@@ -1543,11 +1545,11 @@ protected:
   static constexpr uint8_t kOriginMac[6] = {0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC};
 
   void injectAndDrain(Mesh& mesh, const mesh_message& msg) {
-    Mesh::RecvQueueEntry entry;
+    MeshTransport::RecvQueueEntry entry;
     memcpy(&entry.msg, &msg, sizeof(msg));
     memcpy(entry.srcMac, msg.origin_mac_address, 6);
-    xRingbufferSend(mesh.recvQueue, &entry, sizeof(entry), 0);
-    mesh.drainRecvQueue();
+    xRingbufferSend(mesh.transport.recvQueue, &entry, sizeof(entry), 0);
+    mesh.drain();
   }
 };
 
@@ -1590,7 +1592,7 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   injectAndDrain(mesh, msg); // first: not replay — delivered
   EXPECT_EQ(deliveredCount, 1);
 
-  injectAndDrain(mesh, msg);    // replay: drainRecvQueue drops before dispatch
+  injectAndDrain(mesh, msg);    // replay: handleReceivedMessage drops before dispatch
   EXPECT_EQ(deliveredCount, 1); // callback not invoked again
 }
 
@@ -1738,7 +1740,7 @@ TEST_F(EnrollmentTest, SendsSingleEspNowMessage) {
 // FRESH seq so a legitimate re-request is not permanently suppressed.
 TEST_F(EnrollmentTest, EnrollmentRequestCarriesReplayFieldsWithFreshSeqPerRetry) {
   Mesh mesh;
-  mesh.txState.init(5); // bootEpoch = 5 (> 0, so the drainRecvQueue replay gate applies)
+  mesh.txState.init(5); // bootEpoch = 5 (> 0, so the handleReceivedMessage replay gate applies)
 
   mesh.sendEnrollmentRequest();
   mesh.sendEnrollmentRequest(); // next retry round

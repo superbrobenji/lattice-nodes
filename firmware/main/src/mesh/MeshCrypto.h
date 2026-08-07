@@ -1,7 +1,6 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include <esp_now.h>
 #include "src/crypto/Crypto.h"
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
@@ -10,19 +9,8 @@ namespace lattice {
 namespace mesh {
 namespace crypto {
 
-// Register an ESP-NOW peer WITHOUT link-layer encryption (spec §2, proto v3):
-// payload confidentiality/integrity is end-to-end (E2ECrypto.h), and unencrypted
-// slots raise the ESP-NOW peer cap from ~6 to 20. The shared PMK stays set.
-inline void registerPeerWithEspNow(const uint8_t mac[6]) {
-  if (esp_now_is_peer_exist(mac))
-    return;
-  esp_now_peer_info_t info = {};
-  memcpy(info.peer_addr, mac, 6);
-  info.channel = 0;
-  info.encrypt = false;
-  lattice::err::checkEsp(esp_now_add_peer(&info), lattice::utils::ErrorType::COMMUNICATION_FAIL,
-                         "registerPeerWithEspNow: add_peer failed");
-}
+// registerPeerWithEspNow moved to MeshTransport (Phase B Task 4, finding 19
+// — it's peering, not crypto). See MeshTransport::registerPeerWithEspNow.
 
 // Extract ONLY the key generation branch from Mesh::loadOrGenerateKeypair().
 // The load-from-EEPROM branch and EEPROM save remain in loadOrGenerateKeypair().

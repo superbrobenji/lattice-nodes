@@ -15,7 +15,6 @@
 #include <cstdio>
 #include "../../project_config.h"
 #include "lib/lattice-protocol/c/opcodes.h"
-#include "MeshCrypto.h"
 #include "E2ECrypto.h"
 #include "RouteMac.h"
 #include "broadcast_mac.h"
@@ -40,12 +39,6 @@ Mesh::Mesh()
   memset(lastSeenMasterMac, 0, 6);
   memset(deviceMacAddress, 0, 6);
   memset(&relayPendingMsg, 0, sizeof(relayPendingMsg));
-  // Phase I Task 8 (item OO): static ring buffer over _recvQueueStorage —
-  // heap-free, matching the array it replaces. Storage is a Mesh member so
-  // its lifetime matches the instance; safe to create unconditionally here
-  // (doesn't depend on WiFi/ESP-NOW being up yet).
-  recvQueue = xRingbufferCreateStatic(sizeof(_recvQueueStorage), RINGBUF_TYPE_NOSPLIT,
-                                      _recvQueueStorage, &_recvQueueStruct);
 }
 
 // Seal-time AEAD nonce-reuse guard — see declaration comment in Mesh.h. Must
@@ -130,7 +123,7 @@ PeerInfo* Mesh::findNextHopToMaster() {
 
   // Auto-register the chosen next hop as an unencrypted ESP-NOW peer (spec §3).
   // Idempotent — registerPeerWithEspNow no-ops if the peer already exists.
-  lattice::mesh::crypto::registerPeerWithEspNow(hopMac);
+  MeshTransport::registerPeerWithEspNow(hopMac);
   memcpy(forwardingPeer, hopMac, 6);
 
   memcpy(nextHopScratch.mac, hopMac, 6);
@@ -158,7 +151,7 @@ void Mesh::registerDownlinkPeer(const uint8_t* mac) {
         break;
       }
     }
-    lattice::mesh::crypto::registerPeerWithEspNow(mac);
+    MeshTransport::registerPeerWithEspNow(mac);
     return;
   }
 
@@ -170,7 +163,7 @@ void Mesh::registerDownlinkPeer(const uint8_t* mac) {
       for (size_t j = i; j > 0; --j)
         memcpy(downlinkPeerLru[j], downlinkPeerLru[j - 1], 6);
       memcpy(downlinkPeerLru[0], touched, 6);
-      lattice::mesh::crypto::registerPeerWithEspNow(mac);
+      MeshTransport::registerPeerWithEspNow(mac);
       return;
     }
   }
@@ -190,7 +183,7 @@ void Mesh::registerDownlinkPeer(const uint8_t* mac) {
   for (size_t j = downlinkPeerLruCount - 1; j > 0; --j)
     memcpy(downlinkPeerLru[j], downlinkPeerLru[j - 1], 6);
   memcpy(downlinkPeerLru[0], mac, 6);
-  lattice::mesh::crypto::registerPeerWithEspNow(mac);
+  MeshTransport::registerPeerWithEspNow(mac);
 }
 
 uint16_t Mesh::nextSeqGuarded() {
@@ -255,7 +248,7 @@ bool Mesh::init() {
   }
 
   // 3. Configure Wi-Fi
-  if (!setupWiFi())
+  if (!setupRadio())
     return false;
 
   // 3a. Apply TX power preset from EEPROM (deployment-specific)
@@ -271,28 +264,18 @@ bool Mesh::init() {
   }
 
   // 4. Init ESP-NOW
-  if (!setupEspNow())
+  if (!transport.setupEspNow(meshKey, peers))
     return false;
 
   return true;
 }
 
-bool Mesh::setupWiFi() {
-  // Phase I Task 3 (BB + ZZ): raw ESP-IDF WiFi bring-up, replacing the
-  // arduino-esp32 WiFi.mode(WIFI_STA) wrapper. ESP-NOW is our only WiFi use
-  // (no AP association, no persisted creds) so STA mode + WIFI_STORAGE_RAM
-  // (making CONFIG_ESP_WIFI_NVS_ENABLED=n fully effective) is sufficient.
-  ESP_ERROR_CHECK(esp_netif_init());
-  ESP_ERROR_CHECK(esp_event_loop_create_default());
-  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-  ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-  ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-  ESP_ERROR_CHECK(esp_wifi_start());
-
-  lattice::err::checkEsp(esp_wifi_set_channel(lattice::config::WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE),
-                         lattice::utils::ErrorType::HARDWARE_FAILURE, "Failed to set WiFi channel");
-
+bool Mesh::setupRadio() {
+  // Wi-Fi bring-up moved to MeshTransport::setup() (Phase B Task 4). MAC
+  // address ownership stays here — readMacAddress()/peers.setDeviceMac()
+  // need deviceMacAddress, which many other Mesh methods also depend on.
+  if (!transport.setup())
+    return false;
   readMacAddress();
   peers.setDeviceMac(deviceMacAddress);
   return true;
@@ -310,180 +293,57 @@ void Mesh::loadPersistentState() {
   }
 }
 
-bool Mesh::setupEspNow() {
-  esp_err_t res = esp_now_init();
-  if (res != ESP_OK) {
-    // Phase I Task 7 (TT): String() temporary eliminated.
-    char errBuf[80];
-    snprintf(errBuf, sizeof(errBuf), "MESH: esp_now_init failed: %s", esp_err_to_name(res));
-    lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 3,
-                       errBuf);
-    return false;
-  }
-  lattice::err::checkEsp(esp_now_set_pmk(meshKey), lattice::utils::ErrorType::HARDWARE_FAILURE,
-                         "Failed to set ESP-NOW PMK");
-
-  // Register the broadcast MAC so esp_now_send(BROADCAST_MAC, ...) reaches all
-  // nodes — including unregistered ones. esp_now_send(nullptr, ...) only delivers
-  // to already-registered peers; using the explicit FF:FF:… MAC is required for a
-  // true 802.11 broadcast frame.
-  if (!esp_now_is_peer_exist(BROADCAST_MAC)) {
-    esp_now_peer_info_t broadcast = {};
-    memset(broadcast.peer_addr, 0xFF, 6);
-    broadcast.channel = 0;
-    broadcast.encrypt = false;
-    esp_now_add_peer(&broadcast);
-  }
-
-  for (const auto& p : peers) {
-    lattice::mesh::crypto::registerPeerWithEspNow(p.mac);
-  }
-  esp_now_register_send_cb(onDataSentCallback);
-  esp_now_register_recv_cb(Mesh::dataRecvTrampoline);
-  LATTICE_LOGLN("MESH", "ESP-NOW initialized successfully", LogLevel::LOG_INFO);
-  return true;
-}
 // ------------------------------------------------
 
-void Mesh::onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status) {
-  // Inlined into the LATTICE_LOGF call (rather than a local `statusStr`) so that
-  // under LOG_NONE, where the whole call folds to ((void)0), there's no
-  // now-unused local left behind to warn about.
-  LATTICE_LOGF("MESH", LogLevel::LOG_DEBUG, "Last Packet Send Status: %s",
-               (status == ESP_NOW_SEND_SUCCESS) ? "Delivery Success" : "Delivery Fail");
-}
-
-void IRAM_ATTR Mesh::onDataRecvCallback(const esp_now_recv_info* info, const uint8_t* incomingData,
-                                        int len) {
-  if (!instance || !info || !incomingData)
+// Dispatch for one message dequeued by transport.drain() (Phase B Task 4).
+// Reached via handleReceivedMessageTrampoline. Body is the old
+// Mesh::drainRecvQueue's post-pop logic, unchanged: proto-version check,
+// replay check, peers.updateLastSeen, then the message-type switch into
+// Mesh-owned handlers.
+void Mesh::handleReceivedMessage(const uint8_t srcMac[6], const mesh_message& msg) {
+  // Proto version check: drop anything that isn't exactly the current wire
+  // version. There is no legitimate proto_version==0 case — buildMessage(),
+  // Enrollment::sendRequest(), and the JOIN_ACK path all stamp PROTO_VERSION
+  // unconditionally — so a zero value only ever means a forged/malformed
+  // frame that would otherwise bypass both this flag-day drop and the replay
+  // gate below (which is itself keyed on proto_version == PROTO_VERSION).
+  if (msg.proto_version != PROTO_VERSION) {
+    LATTICE_LOGLN("MESH", "Unsupported proto version, dropping", LogLevel::LOG_WARN);
     return;
-  if (static_cast<size_t>(len) < sizeof(mesh_message))
-    return;
-
-  RecvQueueEntry entry;
-  memcpy(entry.srcMac, info->src_addr, 6);
-  memcpy(&entry.msg, incomingData, sizeof(mesh_message));
-
-  BaseType_t woken = pdFALSE;
-  // Queue full — xRingbufferSendFromISR returns pdFALSE and the packet is
-  // silently dropped, matching the old array's "Queue full — drop" behavior
-  // (no logging here: this runs in WiFi task/ISR context, and Serial writes
-  // are not safe from that context — see loop()'s comment on
-  // drainPendingRelay).
-  xRingbufferSendFromISR(instance->recvQueue, &entry, sizeof(entry), &woken);
-
-  // Phase I Task 9 (item EE): wake the dedicated mesh-drain task instead of
-  // leaving drain() to be discovered by a polling loop() iteration — this is
-  // what lets loop() (and therefore the FreeRTOS idle task) go idle between
-  // real work instead of busy-checking recvQueue every tick, which is a
-  // prerequisite for tickless idle / light sleep to pay off. Null handle
-  // (host/SimNode builds, or a real boot before setDrainNotifyHandle() has
-  // run yet) is a no-op here — the item just waits in recvQueue for the next
-  // explicit drain() call.
-  BaseType_t woken2 = pdFALSE;
-  if (instance->drainNotifyHandle_ != nullptr) {
-    vTaskNotifyGiveFromISR(instance->drainNotifyHandle_, &woken2);
   }
-  if (woken || woken2)
-    portYIELD_FROM_ISR();
-}
 
-void Mesh::drainRecvQueue() {
-  size_t itemSize = 0;
-  RecvQueueEntry* entryPtr;
-  while ((entryPtr = static_cast<RecvQueueEntry*>(xRingbufferReceive(recvQueue, &itemSize, 0))) !=
-         nullptr) {
-    if (itemSize != sizeof(RecvQueueEntry)) {
-      // Should never happen (NOSPLIT items are always sent whole) — guard
-      // against a corrupt/short item rather than reading past it.
-      vRingbufferReturnItem(recvQueue, entryPtr);
-      continue;
-    }
-    RecvQueueEntry entry = *entryPtr;
-    vRingbufferReturnItem(recvQueue, entryPtr);
-
-    const mesh_message& msg = entry.msg;
-
-    // Proto version check: drop anything that isn't exactly the current wire
-    // version. There is no legitimate proto_version==0 case — buildMessage(),
-    // Enrollment::sendRequest(), and the JOIN_ACK path all stamp PROTO_VERSION
-    // unconditionally — so a zero value only ever means a forged/malformed
-    // frame that would otherwise bypass both this flag-day drop and the replay
-    // gate below (which is itself keyed on proto_version == PROTO_VERSION).
-    if (msg.proto_version != PROTO_VERSION) {
-      LATTICE_LOGLN("MESH", "Unsupported proto version, dropping", LogLevel::LOG_WARN);
-      continue;
-    }
-
-    // Replay check
-    if (msg.proto_version == PROTO_VERSION && msg.epoch_num > 0) {
-      if (replay.isReplay(msg, static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL)) {
-        LATTICE_LOGLN("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
-        continue;
-      }
-    }
-
-    // Update last-seen for known peers only (no EEPROM write — see Task 4)
-    peers.updateLastSeen(entry.srcMac);
-
-    switch (msg.message_type) {
-    case MESH_TYPE_ENROLLMENT:
-      if (isMaster)
-        enrollment.processRequest(msg);
-      else
-        relayEnrollmentUplink(msg);
-      break;
-    case MESH_TYPE_JOIN_ACK:
-      processJoinAck(msg);
-      break;
-    case MESH_TYPE_MASTER_BEACON:
-      processMasterBeacon(msg);
-      break;
-    case MESH_TYPE_ADAPTER_DATA:
-      processAdapterData(msg);
-      break;
-    case MESH_TYPE_ROUTE_REPORT:
-      processRouteReport(msg);
-      break;
-    default:
-      LATTICE_LOGLN("MESH", "Unknown message type, dropping", LogLevel::LOG_WARN);
+  // Replay check
+  if (msg.proto_version == PROTO_VERSION && msg.epoch_num > 0) {
+    if (replay.isReplay(msg, static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL)) {
+      LATTICE_LOGLN("MESH", "Replayed message dropped", LogLevel::LOG_DEBUG);
+      return;
     }
   }
-}
 
-void IRAM_ATTR Mesh::dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data,
-                                        int len) {
-  if (!instance)
-    return;
-  instance->onDataRecvCallback(mac_addr, data, len);
-}
+  // Update last-seen for known peers only (no EEPROM write — see Task 4)
+  peers.updateLastSeen(srcMac);
 
-void Mesh::sendMessage(const uint8_t* target, const mesh_message& msg) {
-  if (lattice::mac::eq(target, deviceMacAddress)) {
-    LATTICE_LOGLN("MESH", "Not sending to self. Skipped.", LogLevel::LOG_DEBUG);
-    return;
-  }
-  esp_err_t result = esp_now_send(target, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
-  if (result == ESP_OK) {
-    LATTICE_LOGLN("MESH", "Message sent to peer", LogLevel::LOG_DEBUG);
-  } else {
-    // Phase I Task 7 (TT): String() temporary eliminated.
-    char errBuf[80];
-    snprintf(errBuf, sizeof(errBuf), "MESH: Error sending message: %s", esp_err_to_name(result));
-    lattice::err::fail(lattice::core::ErrorTypeDigit::COMM, lattice::core::ModuleDigit::MESH, 5,
-                       errBuf);
-  }
-}
-
-void Mesh::broadcastToAllPeers(const mesh_message& msg) {
-  if (peers.count() == 0) {
-    LATTICE_LOGLN("MESH", "WARNING: No peers to broadcast to!", LogLevel::LOG_WARN);
-    return;
-  }
-  for (const auto& p : peers) {
-    if (lattice::mac::eq(p.mac, deviceMacAddress))
-      continue; // Skip self
-    sendMessage(p.mac, msg);
+  switch (msg.message_type) {
+  case MESH_TYPE_ENROLLMENT:
+    if (isMaster)
+      enrollment.processRequest(msg);
+    else
+      relayEnrollmentUplink(msg);
+    break;
+  case MESH_TYPE_JOIN_ACK:
+    processJoinAck(msg);
+    break;
+  case MESH_TYPE_MASTER_BEACON:
+    processMasterBeacon(msg);
+    break;
+  case MESH_TYPE_ADAPTER_DATA:
+    processAdapterData(msg);
+    break;
+  case MESH_TYPE_ROUTE_REPORT:
+    processRouteReport(msg);
+    break;
+  default:
+    LATTICE_LOGLN("MESH", "Unknown message type, dropping", LogLevel::LOG_WARN);
   }
 }
 
@@ -558,7 +418,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
   // Routing: always use next hop if possible
   PeerInfo* nextHop = findNextHopToMaster();
   if (nextHop && !lattice::mac::eq(nextHop->mac, deviceMacAddress)) {
-    sendMessage(nextHop->mac, msg);
+    transport.sendMessage(nextHop->mac, msg, deviceMacAddress);
   } else {
     // No route to master is a routine, self-healing transient: a node that has
     // just booted (or whose master went stale) legitimately has no next hop
@@ -615,7 +475,7 @@ void Mesh::broadcastMasterBeacon() {
   // Broadcast-only: send to the registered FF:FF:… broadcast peer so the frame
   // reaches all nodes — including those not yet individually registered.
   // esp_now_send(nullptr, …) only delivers to already-registered unicast peers.
-  (void)sendBroadcast(beacon); // sendBroadcast already logs on failure
+  (void)transport.sendBroadcast(beacon); // sendBroadcast already logs on failure
 }
 
 void Mesh::loadMeshKeyFromEEPROM() {
@@ -654,7 +514,7 @@ void Mesh::saveMeshKeyToEEPROM(const uint8_t* key) {
 void Mesh::broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally) {
   mesh_message msg = buildMessage(type, data, MESH_TYPE_ADAPTER_DATA);
   memset(msg.target_mac_address, 0xFF, 6); // broadcast indicator — relayed by intermediate nodes
-  broadcastToAllPeers(msg);
+  transport.broadcastToAllPeers(msg, peers, deviceMacAddress);
   if (deliverLocally && externalRecvCallback) {
     externalRecvCallback(msg);
   }
@@ -711,13 +571,13 @@ void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const 
     // was that skipping it here is a real-hardware bug). Bounded via the
     // downlink forwarding-peer LRU (spec §2) — see registerDownlinkPeer().
     registerDownlinkPeer(msg.route_path);
-    sendMessage(msg.route_path, msg);
+    transport.sendMessage(msg.route_path, msg, deviceMacAddress);
     return;
   }
   // No known multi-hop route: fall back to broadcast flood (still sealed).
   // Direct/adjacent nodes and unknown-route nodes are reached this way.
   msg.route_len = 0;
-  broadcastToAllPeers(msg);
+  transport.broadcastToAllPeers(msg, peers, deviceMacAddress);
 }
 
 void Mesh::broadcastAdapterDataStatic(adapter_types type, const uint8_t* data) {
@@ -729,15 +589,6 @@ void Mesh::sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
                                     const uint8_t* data) {
   if (instance)
     instance->sendDownlinkToNode(destMac, type, data);
-}
-
-bool Mesh::sendBroadcast(const mesh_message& msg) {
-  esp_err_t err = esp_now_send(BROADCAST_MAC, reinterpret_cast<const uint8_t*>(&msg), sizeof(msg));
-  if (err != ESP_OK) {
-    LATTICE_LOGF("MESH", LogLevel::LOG_WARN, "Broadcast send failed: %s", esp_err_to_name(err));
-    return false;
-  }
-  return true;
 }
 
 void Mesh::debugDumpRadio() {
@@ -938,7 +789,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
           // frame), so an unbounded registerPeerWithEspNow here would let an RF
           // attacker exhaust the ESP-NOW peer table one entry per crafted frame.
           registerDownlinkPeer(next);
-          sendMessage(next, fwd);
+          transport.sendMessage(next, fwd, deviceMacAddress);
           return;
         }
       }
@@ -1040,7 +891,7 @@ void Mesh::relayDownlink(const mesh_message& msg) {
   for (const auto& p : peers) {
     if (lattice::mac::eq(p.mac, deviceMacAddress))
       continue;
-    sendMessage(p.mac, relay);
+    transport.sendMessage(p.mac, relay, deviceMacAddress);
   }
 }
 
@@ -1082,7 +933,7 @@ void Mesh::processJoinAck(const mesh_message& msg) {
     mesh_message relay = msg;
     relay.hop_count++;
     memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-    sendBroadcast(relay);
+    transport.sendBroadcast(relay);
     return;
   }
   // Masters issue JOIN_ACKs; they never enroll via one. Without this guard a
@@ -1103,7 +954,7 @@ void Mesh::addPeer(const uint8_t* mac) {
   size_t before = peers.count();
   peers.addAndPersist(mac);
   if (peers.count() > before) {
-    lattice::mesh::crypto::registerPeerWithEspNow(peers.at(peers.count() - 1).mac);
+    MeshTransport::registerPeerWithEspNow(peers.at(peers.count() - 1).mac);
   }
 }
 
@@ -1193,7 +1044,7 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint
   }
   // Broadcast via the registered FF:FF:… peer so the new node receives the ACK
   // even before it is individually registered as a unicast peer.
-  sendBroadcast(ack);
+  transport.sendBroadcast(ack);
   LATTICE_LOGLN("MESH", "JOIN_ACK sent to newly enrolled node", LogLevel::LOG_INFO);
 }
 // --------------------------------------------------------
@@ -1361,7 +1212,7 @@ void Mesh::loop() {
   // err::fail every beacon interval on any node without a route (e.g. pre-enrollment).
   if (relayPending && static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL >= relayPendingAt) {
     relayPending = false;
-    sendBroadcast(relayPendingMsg);
+    transport.sendBroadcast(relayPendingMsg);
   }
 
   // Master beacon — broadcastMasterBeacon() guards timing internally via lastBeaconMillis

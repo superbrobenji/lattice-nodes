@@ -25,6 +25,7 @@
 #include "E2EKeyStore.h"
 #include "NeighborTable.h"
 #include "RouteTable.h"
+#include "MeshTransport.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -67,13 +68,12 @@ private:
 
   PeerRegistry peers; // Peer list management (no heap alloc)
 
-  void readMacAddress();
+  // ESP-NOW radio setup, RX ring buffer + trampoline + drain, and send
+  // primitives (Phase B Task 4, finding 1 job 1; finding 19). Mesh delegates
+  // all radio I/O to this instead of owning it directly.
+  MeshTransport transport;
 
-  static void onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status);
-  void IRAM_ATTR onDataRecvCallback(const esp_now_recv_info* mac, const uint8_t* incomingData,
-                                    int len);
-  static void IRAM_ATTR dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data,
-                                           int len);
+  void readMacAddress();
 
   mesh_message buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType);
 
@@ -91,9 +91,6 @@ private:
 
   // Peer routing (uses currentMaster — stays in Mesh)
   PeerInfo* findNextHopToMaster();
-
-  void sendMessage(const uint8_t* target, const mesh_message& msg);
-  void broadcastToAllPeers(const mesh_message& msg);
 
   void transmitCore(const adapter_types type, const uint8_t* data,
                     MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA,
@@ -114,8 +111,10 @@ private:
   void relayEnrollmentUplink(const mesh_message& msg);
 
   // Setup helpers (Tiger Style refactor)
-  bool setupWiFi();
-  bool setupEspNow();
+  // Wraps transport.setup() (Wi-Fi bring-up) plus this node's own MAC-address
+  // ownership (readMacAddress()/peers.setDeviceMac()) — MAC address stays on
+  // Mesh (Phase B Task 4) since many other things beyond transport need it.
+  bool setupRadio();
   void loadPersistentState();
 
   // Enrollment helper (relay dispatch only — "addressed to us" branch is in Enrollment)
@@ -186,53 +185,23 @@ private:
 
   bool _dualMasterMode;
 
-  // --- ESP-NOW receive ring buffer (lock-free SPSC) ---
-  // (Phase G §4) Trimmed 8 -> 4: observed fan-in during Phase A + B testing never
-  // exceeded 3 concurrent frames; 4-deep gives a 1-slot margin. Raise back if real
-  // deployments show queue-full drops.
-  static constexpr size_t RECV_QUEUE_SIZE = 4;
+  // Dispatch for one message dequeued by transport.drain() (Phase B Task 4).
+  // Reproduces the old Mesh::drainRecvQueue's post-pop body exactly: proto-
+  // version check, replay check, peers.updateLastSeen, then the message-type
+  // switch into Mesh-owned handlers (enrollment.processRequest,
+  // processMasterBeacon, processAdapterData, etc.) — this dispatch stays on
+  // Mesh because MeshTransport has no visibility into those collaborators.
+  void handleReceivedMessage(const uint8_t srcMac[6], const mesh_message& msg);
 
-  // Phase G §7: CompactMessage (src/mesh/CompactMessage.h) was evaluated for
-  // recvQueue's element type but is NOT used here — see task-3-report.md.
-  // Every message type that flows through this queue (ADAPTER_DATA downlink
-  // relay, ROUTE_REPORT verify/relay, JOIN_ACK, ENROLLMENT relay) needs at
-  // least one wire-only field CompactMessage cannot carry without matching
-  // the wire message's own size (route_path/auth_tag/auth_path/
-  // enrollment_public_key are load-bearing everywhere; secondary_master_mac/
-  // secondary_public_key turned out to be load-bearing too — confirmed by
-  // DualMasterTest.UplinkReachesSecondaryMasterAfterFailover and
-  // ConfigSetFromSecondaryMasterIsHonoredAfterFailover failing when they were
-  // dropped). RECV_QUEUE_SIZE below (8 -> 4) is this bundle's actual queue
-  // RAM lever.
-  struct RecvQueueEntry {
-    uint8_t srcMac[6];
-    mesh_message msg;
-  };
+  // Static trampoline binding handleReceivedMessage to
+  // MeshTransport::MessageHandler's plain-function-pointer signature — routes
+  // through the singleton `instance` the same way dataRecvTrampoline used to.
+  // Used only by drain() below.
+  static void handleReceivedMessageTrampoline(const uint8_t srcMac[6], const mesh_message& msg) {
+    if (instance)
+      instance->handleReceivedMessage(srcMac, msg);
+  }
 
-  // Phase I Task 8 (item OO): static FreeRTOS ring buffer replaces the
-  // hand-rolled head/tail/count SPSC array above. RINGBUF_TYPE_NOSPLIT keeps
-  // each xRingbufferReceive() call returning a contiguous pointer to one
-  // whole RecvQueueEntry (never split across the wrap boundary), matching
-  // the old array's per-slot semantics. Storage is a static member array —
-  // xRingbufferCreateStatic() places the ring entirely inside it, so this
-  // stays heap-free like the array it replaces. The +128 pads for the ring's
-  // internal per-item header overhead (a few bytes/item); real usage is
-  // RECV_QUEUE_SIZE * (sizeof(RecvQueueEntry) + ~8).
-  RingbufHandle_t recvQueue = nullptr;
-  StaticRingbuffer_t _recvQueueStruct;
-  uint8_t _recvQueueStorage[RECV_QUEUE_SIZE * sizeof(RecvQueueEntry) + 128];
-
-  // Phase I Task 9 (item EE): handle of the dedicated mesh-drain task (owned by
-  // main.cpp — see mesh_task_fn / setDrainNotifyHandle()). The RX-ISR
-  // trampoline (onDataRecvCallback) notifies this task via
-  // vTaskNotifyGiveFromISR immediately after enqueueing into recvQueue, so the
-  // task wakes to drain instead of a polling loop discovering the item on its
-  // next tick. Null (never set) is a valid state — the host unit-test /
-  // SimNode harness has no real FreeRTOS task and calls drain() directly, and
-  // onDataRecvCallback null-checks before notifying.
-  TaskHandle_t drainNotifyHandle_ = nullptr;
-
-  void drainRecvQueue();
   bool sendRouteReport();
   void processRouteReport(const mesh_message& msg);
 
@@ -375,7 +344,7 @@ public:
   // Public (unlike drainRecvQueue) so main.cpp's task body and the host
   // unit-test / SimNode harness — which has no real FreeRTOS task — can both
   // call it directly.
-  void drain() { drainRecvQueue(); }
+  void drain() { transport.drain(&Mesh::handleReceivedMessageTrampoline); }
 
   // Registers the dedicated mesh task's handle so onDataRecvCallback's ISR
   // trampoline can wake it via vTaskNotifyGiveFromISR after enqueueing into
@@ -384,7 +353,7 @@ public:
   // is valid — onDataRecvCallback null-checks before notifying, so the ISR
   // path simply skips the notify and drain() must instead be driven directly
   // (as it is by SimNode::tick() and the unit tests).
-  void setDrainNotifyHandle(TaskHandle_t handle) { drainNotifyHandle_ = handle; }
+  void setDrainNotifyHandle(TaskHandle_t handle) { transport.setDrainNotifyHandle(handle); }
 
   // Node role config
   // Re-evaluates the RouteTable allocation (issue #51) on every role change,
@@ -431,19 +400,6 @@ public:
   static void sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
                                        const uint8_t* data);
 
-  // Single choke point for esp_now_send(BROADCAST_MAC, ...) (post-Phase-G
-  // audit item U): every broadcast site (master beacon, JOIN_ACK broadcast,
-  // beacon relay, enrollment request) now funnels through here instead of
-  // hand-rolling the reinterpret_cast<>/sizeof() call + its own error
-  // handling. Returns true on ESP_OK; on failure, logs (LOG_WARN) and returns
-  // false — callers that previously ignored the esp_now_send() result may
-  // keep doing so (this still logs internally), and callers that previously
-  // added their own success/fail message keep that message, now driven off
-  // this return value instead of a raw esp_err_t. Static (no instance state
-  // needed) so Enrollment::sendRequest() — which does not hold a Mesh* — can
-  // call it directly.
-  static bool sendBroadcast(const mesh_message& msg);
-
   // Debug helper
   void debugDumpRadio();
 
@@ -482,14 +438,11 @@ public:
   uint8_t getHopCount() const { return isMaster ? 0 : currentMaster.distance; }
 
 #if SIMULATE_MODE
-  // Inject a message directly into the receive queue (bypasses radio — for dev/test only)
+  // Inject a message directly into the receive queue (bypasses radio — for
+  // dev/test only). Forwards to MeshTransport, which owns recvQueue (Phase B
+  // Task 4).
   void injectReceivedMessage(const uint8_t* srcMac, const mesh_message& msg) {
-    RecvQueueEntry entry;
-    memcpy(entry.srcMac, srcMac, 6);
-    entry.msg = msg;
-    // Non-blocking send (0 ticks); silently dropped if full, matching the
-    // old array-based "Queue full — drop" behavior.
-    xRingbufferSend(recvQueue, &entry, sizeof(entry), 0);
+    transport.injectReceivedMessage(srcMac, msg);
   }
 #endif
 };

@@ -4,6 +4,7 @@
 #include "Arduino.h"
 #include "esp_wifi_mock.h"
 #include "src/mesh/Mesh.h"
+#include "src/mesh/MeshTransport.h"
 #include "src/adapter/pir/PirAdapter.h"
 #include "src/adapter/serial/SerialAdapter.h"
 #include "src/persistence/EepromManager.h"
@@ -68,6 +69,7 @@ void swapIn(NodeContext& ctx) {
   memcpy(mockDeviceMac, ctx.mac, 6);
   ESP._restartRequested = ctx.espRestartRequested;
   lattice::mesh::Mesh::instance = ctx.meshInstance;
+  lattice::mesh::MeshTransport::instance = ctx.transportInstance;
   lattice::adapter::PirAdapter::instance = ctx.pirInstance;
   loadImage(lattice::eeprom::debugStateForTest(), ctx.eepromManagerImage);
   loadImage(lattice::err_core::debugStateForTest(), ctx.errorCoreImage);
@@ -86,6 +88,7 @@ void swapOut(NodeContext& ctx) {
   memcpy(ctx.mac, mockDeviceMac, 6);
   ctx.espRestartRequested = ESP._restartRequested;
   ctx.meshInstance = lattice::mesh::Mesh::instance;
+  ctx.transportInstance = lattice::mesh::MeshTransport::instance;
   ctx.pirInstance = lattice::adapter::PirAdapter::instance;
   saveImage(lattice::eeprom::debugStateForTest(), ctx.eepromManagerImage);
   saveImage(lattice::err_core::debugStateForTest(), ctx.errorCoreImage);

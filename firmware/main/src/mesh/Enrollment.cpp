@@ -9,11 +9,12 @@
 #include "src/network/mem.h"
 #include "config/master_pubkey_pin_wrapper.h"
 #include "project_config.h"
-// Mesh.h (post-Phase-G audit item U): only for the static Mesh::sendBroadcast
-// choke point below — Enrollment has no Mesh* of its own (see Enrollment.h),
-// so it calls the static overload directly rather than going through an
-// instance.
-#include "Mesh.h"
+// MeshTransport.h (post-Phase-G audit item U; Phase B Task 4): only for the
+// static MeshTransport::sendBroadcast/registerPeerWithEspNow choke points
+// below — Enrollment has no Mesh*/MeshTransport* of its own (see
+// Enrollment.h), so it calls the static overloads directly rather than going
+// through an instance.
+#include "MeshTransport.h"
 #include <esp_now.h>
 #include <cstring>
 
@@ -77,7 +78,7 @@ void Enrollment::sendRequest(const uint8_t* deviceMac, uint8_t protoVersion, uin
   msg.hop_count = 0;
   memcpy(msg.enrollment_public_key, devicePublicKey, 32);
 
-  Mesh::sendBroadcast(msg);
+  MeshTransport::sendBroadcast(msg);
   LATTICE_LOGLN("MESH", "Enrollment request sent", LogLevel::LOG_INFO);
 }
 
@@ -185,7 +186,7 @@ void Enrollment::enrollPeer(const uint8_t* mac, const uint8_t* pubKey32, Registe
   if (esp_now_is_peer_exist(mac)) {
     esp_now_del_peer(mac);
   }
-  crypto::registerPeerWithEspNow(mac);
+  MeshTransport::registerPeerWithEspNow(mac);
   if (registerFn)
     registerFn(mac, pubKey32);
 }
