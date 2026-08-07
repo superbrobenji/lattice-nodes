@@ -25,6 +25,9 @@ Task 2 (Enrollment)    ─┼── independent of each other; land first so Tas
 Task 3 (ReplayCache)   ─┘   write each new call site once, not twice
 Task 4 (MeshTransport) ── needs Task 1 (PeerRegistry's new iteration API in setupEspNow)
 Task 5 (MasterBeacon)  ── needs Task 2 (learnMasterMac/learnSecondaryMasterMac) + Task 3 (txState)
+                           + Task 4 (Task 5 Step 4 dispatches through the handleReceivedMessage/
+                           MessageHandler skeleton Task 4 creates — Task 5 cannot start until
+                           Task 4 is merged, not just Tasks 2-3)
 Task 6 (DownlinkRouter)── needs Task 4 (MeshTransport::sendMessage, referenced by classify()'s caller)
 Task 7 (Mesh thin orchestrator) ── needs Tasks 4-6 done
 ```
@@ -880,7 +883,7 @@ delegates all radio I/O to it."
 
 **Interfaces:**
 - Produces: `MasterBeacon` — `void broadcast(const mesh_message& beaconTemplate)` (Mesh builds the message via `buildMessage`, `MasterBeacon` just times + sends it — keeps `MasterBeacon` from needing `buildMessage`'s crypto/sequencing dependencies), `void checkTimeout(bool isMaster, MasterInfo& currentMaster, uint8_t lastSeenMasterMac[6])`, `void process(const mesh_message& msg, const uint8_t* deviceMac, bool isMaster, bool dualMasterMode, Enrollment& enrollment, NeighborTable& neighbors, MasterInfo& currentMaster, OutboundSequenceState& txState, mesh_message& relayPendingMsgOut, uint64_t& relayPendingAtOut, bool& relayPendingOut, uint8_t lastSeenMasterMac[6], uint64_t& lastMasterBeaconReceivedMsOut)`.
-- Consumes: Task 2's `Enrollment::learnMasterMac`/`learnSecondaryMasterMac`, Task 3's `OutboundSequenceState::wasRelayedBefore`/`markRelayed`.
+- Consumes: Task 2's `Enrollment::learnMasterMac`/`learnSecondaryMasterMac`, Task 3's `OutboundSequenceState::wasRelayedBefore`/`markRelayed`, **and Task 4's `handleReceivedMessage`/`MessageHandler` skeleton** (Step 4 below wires `beacon.process(...)` into the `MESH_TYPE_MASTER_BEACON` case of the switch Task 4 creates — this task cannot start until Task 4 is merged).
 
 **Step-by-step:**
 
