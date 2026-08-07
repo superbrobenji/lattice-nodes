@@ -334,8 +334,8 @@ bool Mesh::setupEspNow() {
     esp_now_add_peer(&broadcast);
   }
 
-  for (size_t i = 0; i < peers.peerCount; ++i) {
-    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[i].mac);
+  for (const auto& p : peers) {
+    lattice::mesh::crypto::registerPeerWithEspNow(p.mac);
   }
   esp_now_register_send_cb(onDataSentCallback);
   esp_now_register_recv_cb(Mesh::dataRecvTrampoline);
@@ -475,14 +475,14 @@ void Mesh::sendMessage(const uint8_t* target, const mesh_message& msg) {
 }
 
 void Mesh::broadcastToAllPeers(const mesh_message& msg) {
-  if (peers.peerCount == 0) {
+  if (peers.count() == 0) {
     LATTICE_LOGLN("MESH", "WARNING: No peers to broadcast to!", LogLevel::LOG_WARN);
     return;
   }
-  for (size_t i = 0; i < peers.peerCount; ++i) {
-    if (lattice::mac::eq(peers.peerMacs[i].mac, deviceMacAddress))
+  for (const auto& p : peers) {
+    if (lattice::mac::eq(p.mac, deviceMacAddress))
       continue; // Skip self
-    sendMessage(peers.peerMacs[i].mac, msg);
+    sendMessage(p.mac, msg);
   }
 }
 
@@ -1045,10 +1045,10 @@ void Mesh::relayDownlink(const mesh_message& msg) {
   mesh_message relay = msg;
   relay.hop_count++;
   memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-  for (size_t i = 0; i < peers.peerCount; ++i) {
-    if (lattice::mac::eq(peers.peerMacs[i].mac, deviceMacAddress))
+  for (const auto& p : peers) {
+    if (lattice::mac::eq(p.mac, deviceMacAddress))
       continue;
-    sendMessage(peers.peerMacs[i].mac, relay);
+    sendMessage(p.mac, relay);
   }
 }
 
@@ -1108,10 +1108,10 @@ bool Mesh::registerPeerWithKeyTrampoline(const uint8_t* mac, const uint8_t* publ
 }
 
 void Mesh::addPeer(const uint8_t* mac) {
-  size_t before = peers.peerCount;
+  size_t before = peers.count();
   peers.addAndPersist(mac);
-  if (peers.peerCount > before) {
-    lattice::mesh::crypto::registerPeerWithEspNow(peers.peerMacs[peers.peerCount - 1].mac);
+  if (peers.count() > before) {
+    lattice::mesh::crypto::registerPeerWithEspNow(peers.at(peers.count() - 1).mac);
   }
 }
 
@@ -1137,7 +1137,7 @@ bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, b
     memcpy(p->publicKey, publicKey32, 32);
     p->lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   } else {
-    if (peers.peerCount >= MAX_PEERS) {
+    if (peers.count() >= MAX_PEERS) {
       LATTICE_LOGLN("MESH", "Peer list full, cannot enroll", LogLevel::LOG_WARN);
       return false;
     }

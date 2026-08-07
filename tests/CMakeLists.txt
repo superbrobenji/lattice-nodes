@@ -117,6 +117,7 @@ add_unit_test(test_mem                unit/test_mem.cpp)
 add_unit_test(test_compact_message    unit/test_compact_message.cpp)
 add_unit_test(test_button             unit/test_button.cpp)
 add_unit_test(test_display_manager    unit/test_display_manager.cpp)
+add_unit_test(test_peer_registry      unit/test_peer_registry.cpp)
 
 add_unit_test(test_mbedtls_kat        unit/test_mbedtls_kat.cpp)
 
