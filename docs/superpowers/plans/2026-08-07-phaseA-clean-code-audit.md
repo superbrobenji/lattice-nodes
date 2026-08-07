@@ -4,7 +4,7 @@
 
 **Goal:** Produce a ranked findings ledger auditing every file in `firmware/main/src` for excessive size, SRP violations, missing encapsulation, real (vs. artificial) inheritance opportunities, and library-replacement candidates — bucketed into Phase B (Mesh.cpp), Phase C (repo-wide sweep), and any new phases large findings warrant.
 
-**Architecture:** Four independent survey tasks (file census, mesh/ subsystem, non-mesh subsystems, library/architecture scan) each write their own section of one ledger document. A fifth synthesis task merges, ranks, assigns final IDs, buckets into phases, and updates the umbrella spec. Tasks 1-4 are read-only — zero code changes in this phase.
+**Architecture:** Task 1 (file census) creates the ledger doc and gates everything else. Tasks 2-4 (mesh/ subsystem, non-mesh subsystems, library/architecture scan) are fully independent of each other — each reads its own file set and writes its own standalone fragment file under `docs/superpowers/specs/.audit-fragments/`, so they touch no file in common and can run in parallel worktrees with zero merge risk. Task 5 (synthesis) reads all three fragments plus the census, merges everything into the final ledger, and deletes the fragments. Tasks 1-4 are read-only — zero source-code changes in this phase.
 
 **Tech Stack:** Markdown ledger doc (mirrors `docs/superpowers/specs/2026-08-04-post-phaseG-audit-findings.md` format), `wc`/`grep`/`find` for verification, no build/test toolchain needed since no source is modified.
 
@@ -23,7 +23,7 @@
 ### Task 1: File-size & responsibility census
 
 **Files:**
-- Create: `docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md` (new ledger doc — this task creates it; Tasks 2-4 append sections; Task 5 finalizes it)
+- Create: `docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md` (new ledger doc — this task creates it with the census section; Tasks 2-4 write independent fragment files, not this file; Task 5 merges the fragments into this file and finalizes it)
 
 **Interfaces:**
 - Produces: a `## File census` section with one markdown table, columns `File | Lines | Flag`, covering every file in scope. `Flag` is `investigate` (this file gets a deep look in Task 2/3) or `-` (small/simple, no deep look needed). This table is the input Tasks 2-4 read to decide where to look closely, and Task 5 reads to sanity-check nothing large was skipped.
@@ -82,8 +82,10 @@ git commit -m "docs(phaseA): file census"
 
 ### Task 2: mesh/ subsystem audit
 
+**Runs in parallel with Task 3 and Task 4** (independent file sets, independent output file — safe to dispatch in a separate worktree).
+
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md` (append `## Mesh subsystem findings` section)
+- Create: `docs/superpowers/specs/.audit-fragments/mesh-findings.md` (standalone fragment — do not touch the main ledger doc; Task 5 merges this in)
 - Read (in scope, exclude `serialization/nanopb/` and `mesh.pb.h`):
   - `firmware/main/src/mesh/Mesh.{h,cpp}`
   - `firmware/main/src/mesh/Enrollment.{h,cpp}`
@@ -99,8 +101,8 @@ git commit -m "docs(phaseA): file census"
   - `firmware/main/src/mesh/broadcast_mac.h`
 
 **Interfaces:**
-- Consumes: Task 1's census table (`Flag = investigate` rows under `mesh/`).
-- Produces: a `## Mesh subsystem findings` table, columns `ID | File:line | Category | Description | Suggested direction | Effort`, IDs prefixed `MESH-` (`MESH-1`, `MESH-2`, ...). `Category` is one of `size/SRP`, `encapsulation`, `inheritance`, `library`. Task 5 consumes these rows for the master ranking.
+- Consumes: nothing from other tasks — the file list above is exhaustive and hardcoded, no need to read Task 1's census output to know what to read.
+- Produces: `docs/superpowers/specs/.audit-fragments/mesh-findings.md`, containing one markdown table headed `## Mesh subsystem findings`, columns `ID | File:line | Category | Description | Suggested direction | Effort`, IDs prefixed `MESH-` (`MESH-1`, `MESH-2`, ...). `Category` is one of `size/SRP`, `encapsulation`, `inheritance`, `library`. Task 5 reads this fragment for the master ranking.
 
 - [ ] **Step 1: Read every flagged file, per-class responsibility breakdown**
 
@@ -119,9 +121,9 @@ grep -rn "\.downlinkPeerLru\b\|->downlinkPeerLru\b" firmware/main/src --include=
 
 The only existing inheritance in this subsystem is implicit (none — `mesh/` classes are all concrete, non-derived). Note explicitly for each class whether a base class would remove real duplication (e.g. the shared "linear-scan-by-MAC" skeleton `NeighborTable`/`RouteTable`/`E2EKeyStore`/`ReplayCache`/`PeerRegistry` already partially dedup via `mac_table::` free functions per Phase H2 item Y — check whether that's a case for a shared base class instead, or whether the free-function form is already the right call per this effort's "inheritance sparingly" constraint) — and say so if the answer is "no, free functions are already correct" rather than omitting it.
 
-- [ ] **Step 4: Write the findings table into the ledger, verify every citation**
+- [ ] **Step 4: Write the findings table into the fragment file, verify every citation**
 
-Append the `## Mesh subsystem findings` table. For every `File:line` cited, grep-confirm the line number is still current:
+Write the `## Mesh subsystem findings` table as the full content of `docs/superpowers/specs/.audit-fragments/mesh-findings.md`. For every `File:line` cited, grep-confirm the line number is still current:
 
 ```bash
 sed -n '<line>p' firmware/main/src/mesh/<File>
@@ -130,7 +132,7 @@ sed -n '<line>p' firmware/main/src/mesh/<File>
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md
+git add docs/superpowers/specs/.audit-fragments/mesh-findings.md
 git commit -m "docs(phaseA): mesh subsystem findings"
 ```
 
@@ -138,8 +140,10 @@ git commit -m "docs(phaseA): mesh subsystem findings"
 
 ### Task 3: Non-mesh subsystem audit
 
+**Runs in parallel with Task 2 and Task 4** (independent file sets, independent output file — safe to dispatch in a separate worktree).
+
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md` (append `## Non-mesh subsystem findings` section)
+- Create: `docs/superpowers/specs/.audit-fragments/nonmesh-findings.md` (standalone fragment — do not touch the main ledger doc or Task 2's fragment; Task 5 merges this in)
 - Read:
   - `firmware/main/src/adapter/{Adapter,AdapterFactory}.{h,cpp}`, `firmware/main/src/adapter/pir/PirAdapter.{h,cpp}`, `firmware/main/src/adapter/serial/{SerialAdapter,SerialFraming}.{h,cpp}`
   - `firmware/main/src/hardware/input/{Button,GpioInput,Pir}.{h,cpp}`, `firmware/main/src/hardware/output/{GpioOutput,Led,SevenSegDisplay}.{h,cpp}`
@@ -152,8 +156,8 @@ git commit -m "docs(phaseA): mesh subsystem findings"
   - `firmware/main/main.cpp`, `firmware/main/project_config.h`
 
 **Interfaces:**
-- Consumes: Task 1's census table (`Flag = investigate` rows outside `mesh/`).
-- Produces: a `## Non-mesh subsystem findings` table, same schema as Task 2 (`ID | File:line | Category | Description | Suggested direction | Effort`), IDs prefixed `SYS-`. Task 5 consumes these rows.
+- Consumes: nothing from other tasks — the file list above is exhaustive and hardcoded.
+- Produces: `docs/superpowers/specs/.audit-fragments/nonmesh-findings.md`, same table schema as Task 2 (`ID | File:line | Category | Description | Suggested direction | Effort`), IDs prefixed `SYS-`. Task 5 reads this fragment.
 
 - [ ] **Step 1: Read every flagged file, per-class/per-file responsibility breakdown**
 
@@ -169,14 +173,14 @@ Two things to look for here, since this is the subsystem most likely to have bot
 1. **Missing inheritance**: `GpioInput`/`GpioOutput` and their concrete users (`Button`, `Pir`, `Led`) — is there duplication a shared base would remove, and if so is it a *real* need or would it just add a vtable (Phase G item I already removed `virtual` from these because it was never dispatched polymorphically — check whether that reasoning still holds before proposing to re-add it).
 2. **Misused/artificial inheritance**: anywhere a base class exists but its derived classes don't actually get treated polymorphically (called only through their concrete type, never through a base pointer) — that's inheritance for no behavioral gain and is itself a finding (simplify to composition or free functions).
 
-- [ ] **Step 4: Write the findings table into the ledger, verify every citation**
+- [ ] **Step 4: Write the findings table into the fragment file, verify every citation**
 
-Same verification method as Task 2 Step 4.
+Write the `## Non-mesh subsystem findings` table as the full content of `docs/superpowers/specs/.audit-fragments/nonmesh-findings.md`. Same citation-verification method as Task 2 Step 4.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md
+git add docs/superpowers/specs/.audit-fragments/nonmesh-findings.md
 git commit -m "docs(phaseA): non-mesh subsystem findings"
 ```
 
@@ -184,14 +188,16 @@ git commit -m "docs(phaseA): non-mesh subsystem findings"
 
 ### Task 4: Library-replacement candidates + architecture-boundary reference
 
+**Runs in parallel with Task 2 and Task 3** (independent scope, independent output file — safe to dispatch in a separate worktree). Unlike a typical Task 4, this one does **not** wait on Tasks 2-3: it's a fresh repo-wide grep sweep plus a structural comparison against `lattice-hub`, neither of which needs Task 2/3's findings. (The keep-as-is list, which does need cross-referencing against what Tasks 2-3 found, is compiled in Task 5 instead — see that task's Step 1a.)
+
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md` (append `## Library candidates`, `## Architecture-boundary reference`, `## Keep-as-is` sections)
-- Read: findings from Task 2 + Task 3 tables (this task runs after both, or in parallel and reads their committed output before writing its own — either way it needs their IDs to cross-reference)
+- Create: `docs/superpowers/specs/.audit-fragments/library-findings.md` (standalone fragment — do not touch the main ledger doc or Tasks 2-3's fragments; Task 5 merges this in)
+- Read (repo-wide grep, not a fixed file list — see Step 1): `firmware/main/src/**/*.{h,cpp}`
 - Read (for the architecture-boundary comparison, structure only, not line-by-line): `lattice-hub/server/` top-level package layout (`orchestrator`, `sidecar`, `dashboard`, `artist-portal`) if the sibling repo is available at `/Users/benji/projects/personal/lattice-hub`; if not available, skip this section and note it as skipped rather than guessing at hub's structure from memory.
 
 **Interfaces:**
-- Consumes: `MESH-*` and `SYS-*` IDs from Tasks 2-3 (to cross-reference which findings have a plausible library substitute).
-- Produces: `## Library candidates` table (`ID | Hand-rolled code | Candidate library | Est. flash/RAM delta | Verdict`, IDs prefixed `LIB-`), `## Architecture-boundary reference` (prose, no IDs), `## Keep-as-is` table (`Item | Why it's already correct`, no IDs — mirrors the prior audit's format). Task 5 consumes `LIB-*` rows for the master ranking; the other two sections are informational and copied into the ledger as-is.
+- Consumes: nothing from other tasks.
+- Produces: `docs/superpowers/specs/.audit-fragments/library-findings.md`, containing `## Library candidates` table (`ID | Hand-rolled code | Candidate library | Est. flash/RAM delta | Verdict`, IDs prefixed `LIB-`) and `## Architecture-boundary reference` (prose, no IDs). Task 5 reads this fragment.
 
 - [ ] **Step 1: Scan for library-replacement candidates**
 
@@ -211,34 +217,46 @@ ls /Users/benji/projects/personal/lattice-hub/server/ 2>/dev/null
 
 If present, note in 3-5 sentences whether nodes' subsystem split (`mesh/`, `adapter/`, `hardware/`, `persistence/`, `app/`) already mirrors hub's boundary discipline (each package owns its own concerns, talks to others through narrow interfaces) or where nodes' boundaries are muddier (e.g. `Mesh.cpp` reaching directly into `EepromManager` rather than through a narrower persistence interface). If the hub repo isn't present at that path, write `Architecture-boundary reference: skipped — lattice-hub not available locally` and move on.
 
-- [ ] **Step 3: Compile the keep-as-is list**
+- [ ] **Step 3: Write both sections into the fragment file, verify citations**
 
-For anything Task 2/3 flagged as `investigate` in the census but that turned out, on reading, to already be correct for the embedded constraints (mirrors the prior audit's "Keep-as-is" section) — list it here with the one-line reason, so Task 5 and future readers don't re-litigate it.
+Write `## Library candidates` and `## Architecture-boundary reference` as the full content of `docs/superpowers/specs/.audit-fragments/library-findings.md`.
 
-- [ ] **Step 4: Write all three sections into the ledger, verify citations**
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md
-git commit -m "docs(phaseA): library candidates + architecture reference + keep-as-is"
+git add docs/superpowers/specs/.audit-fragments/library-findings.md
+git commit -m "docs(phaseA): library candidates + architecture reference"
 ```
 
 ---
 
 ### Task 5: Synthesis — rank, assign final IDs, bucket into phases, update umbrella spec
 
+**Runs after Tasks 1-4 all complete** (only sequential task besides Task 1 — reads every fragment).
+
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md` (add `## Bucket assignments` section at the top, below the header, per the prior audit's format; renumber `MESH-*`/`SYS-*`/`LIB-*` into one final sequential ID space)
+- Modify: `docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md` (merge in the three fragments' content; add `## Bucket assignments` and `## Keep-as-is` sections per the prior audit's format; renumber `MESH-*`/`SYS-*`/`LIB-*` into one final sequential ID space)
+- Read: `docs/superpowers/specs/.audit-fragments/mesh-findings.md`, `nonmesh-findings.md`, `library-findings.md`
+- Delete: `docs/superpowers/specs/.audit-fragments/` (whole directory, once its contents are folded into the main ledger)
 - Modify: `docs/superpowers/specs/2026-08-07-clean-code-refactor-umbrella-design.md` (only if a finding is large enough to warrant a new phase per the "phase list is not closed" note — add the new phase row + update the dependency graph)
 
 **Interfaces:**
-- Consumes: every row from Tasks 2-4's tables.
+- Consumes: every row from the three fragment files, plus the `## File census` table already in the main ledger from Task 1.
 - Produces: final ledger with one merged table, IDs `1`, `2`, `3`, ... in descending priority order (highest maintainability-impact-for-effort first, same convention as the prior audit's flash-savings-first order). Each row tagged with its bucket: `Phase B` (Mesh.cpp-specific), `Phase C` (repo-wide sweep), `Phase <new letter>` (its own phase — only for findings at or near the size/complexity of the known Mesh.cpp case), or `Keep-as-is`.
 
 - [ ] **Step 1: Merge and renumber**
 
-Pull every row from the `Mesh subsystem findings`, `Non-mesh subsystem findings`, and `Library candidates` tables into one list. Assign final sequential IDs in priority order — judge priority by (maintainability impact) ÷ (effort), same heuristic the prior audit used for flash savings. Add a `## Bucket assignments` section listing which ID range/set went to which bucket (mirrors `2026-08-04-post-phaseG-audit-findings.md`'s bucket-assignments section).
+Pull every row from the three fragment files' tables (`Mesh subsystem findings`, `Non-mesh subsystem findings`, `Library candidates`) into one list, and append the `Architecture-boundary reference` prose from the library fragment as its own section. Assign final sequential IDs in priority order — judge priority by (maintainability impact) ÷ (effort), same heuristic the prior audit used for flash savings. Add a `## Bucket assignments` section listing which ID range/set went to which bucket (mirrors `2026-08-04-post-phaseG-audit-findings.md`'s bucket-assignments section).
+
+- [ ] **Step 1a: Compile the keep-as-is list**
+
+Cross-reference the `## File census` table's `investigate`-flagged rows against the merged findings: any flagged file with zero rows pointing at it was read by Task 2 or 3, judged, and found to already be correct for the embedded constraints. List each one in a `## Keep-as-is` section with a one-line reason (pull the reason from context if the fragment's per-file breakdown already stated one; otherwise this step's implementer reads the file directly to write an accurate one-liner) — mirrors the prior audit's "Keep-as-is" format.
+
+- [ ] **Step 1b: Delete the fragments directory**
+
+```bash
+git rm -r docs/superpowers/specs/.audit-fragments/
+```
 
 - [ ] **Step 2: Decide if any finding needs its own new phase**
 
@@ -256,7 +274,7 @@ Read the complete merged ledger doc top to bottom. Confirm: every ID cited in th
 
 ```bash
 git add docs/superpowers/specs/2026-08-07-clean-code-audit-findings.md docs/superpowers/specs/2026-08-07-clean-code-refactor-umbrella-design.md
-git commit -m "docs(phaseA): synthesis — ranked findings, phase bucket assignments"
+git commit -m "docs(phaseA): synthesis — ranked findings, phase bucket assignments, fragment cleanup"
 git push -u origin docs/clean-code-refactor-umbrella-spec
 gh pr create --title "docs(phaseA): Clean-Code audit findings" --body "$(cat <<'EOF'
 ## Summary
@@ -277,3 +295,4 @@ EOF
 - **Spec coverage:** Task 1 covers the umbrella spec's "no line-count threshold, every file sized" requirement. Tasks 2-3 cover the subsystem list from the umbrella spec's Phase A row (`mesh/`, `adapter/`, `hardware/`, `app/`, `persistence/`, `error/`, `logging/`, `network/`, `crypto/`) plus `main.cpp`/`project_config.h`. Task 4 covers library-replacement candidates and the hub architecture-boundary reference, both named in the umbrella spec. Task 5 covers the "phase list is not closed" requirement and the Phase B/C bucketing.
 - **Placeholder scan:** every step names exact files, exact commands, or exact table schemas rather than "note findings" — the specific finding *content* is necessarily produced during execution (this is an investigation phase, not a code-change phase), but the deliverable shape, scope, and verification method are fully specified.
 - **Type/schema consistency:** all three subsystem tasks use the same table schema (`ID | File:line | Category | Description | Suggested direction | Effort`) so Task 5's merge step doesn't need to reconcile mismatched columns.
+- **Parallelism:** Tasks 2-4 were restructured to write independent fragment files instead of appending to a shared ledger, specifically so they can be dispatched in parallel worktrees without merge conflicts (three branches each adding one new, distinct file merge cleanly; three branches each appending to the end of the same file do not). Task 4's dependency on Tasks 2-3's IDs was removed by moving keep-as-is compilation to Task 5, which already reads everything.
