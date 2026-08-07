@@ -56,7 +56,7 @@ task-level implementation detail; each phase gets its own implementation plan
 | Phase | Scope | One-line |
 |---|---|---|
 | A — Audit | nodes | Survey every file under `firmware/main/src` (`mesh/`, `adapter/`, `hardware/`, `app/`, `persistence/`, `error/`, `logging/`, `network/`, `crypto/`) for excessive size, SRP violations, God-objects, missing encapsulation, real inheritance opportunities, library-replacement candidates. No line-count threshold — every file gets sized and judged on responsibility count, not just the ones already known to be big. Ranked findings doc. |
-| B — Mesh.cpp decomposition | nodes | Extract collaborator classes out of `Mesh` via composition (transport, beacon, downlink-router are the known candidates); `Mesh` becomes a thin orchestrator. Boundaries finalized from Phase A findings. Dedicated phase because it's the confirmed worst offender (1382 lines, 8-9 jobs) — not because it's assumed to be the only one. |
+| B — Mesh subsystem cleanup | nodes | Extract collaborator classes out of `Mesh` via composition (transport, beacon, downlink-router are the known candidates); `Mesh` becomes a thin orchestrator. Headlined by `Mesh.cpp` decomposition but scoped to the whole `mesh/` directory — boundaries finalized in the Phase A ledger. Dedicated phase because `Mesh.cpp` is the confirmed worst offender (1382 lines, 8-9 jobs) — not because it's assumed to be the only file touched. |
 | C — Repo-wide sweep | nodes | Every other file Phase A flags as excessively large or overloaded (candidates so far: `EepromManager.cpp` 651 lines, `main.cpp` 579 lines — final list from Phase A, not capped to these) plus cross-cutting encapsulation/OOP items. |
 | D — Docs rewrite | nodes | README + `docs/*.md` rewritten to describe the post-A/B/C architecture, covering the history through Phase J/TLS-follow-up that current docs predate entirely. |
 
@@ -71,8 +71,8 @@ anything oversized.
 ```
 Phase A (audit)  ──┬── gates Phase B (boundaries come from findings)
                     └── gates Phase C (sweep scope comes from findings)
-Phase B ────────────── Mesh.cpp specifically; can start once A's Mesh-relevant
-                        findings land, doesn't need to wait for all of A
+Phase B ────────────── the mesh/ subsystem, headlined by Mesh.cpp; can start once
+                        A's mesh-relevant findings land, doesn't need to wait for all of A
 Phase C ────────────── everything else A finds; independent of B
 Phase D ────────────── strictly last — documents the end state, not a moving target
 ```
@@ -110,8 +110,9 @@ to a single ledger doc. Axes to survey for, per subsystem:
   This is a pattern reference only — no code reuse, hub is Go and nodes is
   C++.
 
-Output: a ranked findings doc, bucketed into Phase B (Mesh.cpp-specific) and
-Phase C (everything else).
+Output: a ranked findings doc, bucketed into Phase B (mesh/ subsystem, headlined
+by Mesh.cpp) and Phase C (everything else) — the exact partition is drawn on
+directory rather than file-literal grounds; see the ledger's bucket rule.
 
 ### Phase B — Mesh.cpp decomposition
 
