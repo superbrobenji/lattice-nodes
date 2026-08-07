@@ -86,6 +86,7 @@ set(FIRMWARE_SOURCES
   ../firmware/main/src/mesh/PeerRegistry.cpp
   ../firmware/main/src/mesh/Mesh.cpp
   ../firmware/main/src/mesh/MeshTransport.cpp
+  ../firmware/main/src/mesh/MasterBeacon.cpp
   ../firmware/main/src/mesh/Enrollment.cpp
   ../firmware/main/src/mesh/PendingRelayQueue.cpp
   ../firmware/main/src/mesh/CompactMessage.cpp

@@ -26,6 +26,7 @@
 #include "NeighborTable.h"
 #include "RouteTable.h"
 #include "MeshTransport.h"
+#include "MasterBeacon.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -81,13 +82,13 @@ private:
 
   MasterInfo currentMaster;
   bool isMaster;
-  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
-  // millis() -> esp_timer_get_time()/1000ULL swap. lastBeaconMillis is NOT
-  // renamed to lastBeaconMs to avoid colliding with the (separate, unrelated)
-  // lastBeaconMs field further down this class.
-  uint64_t lastBeaconMillis;
-  uint64_t lastMasterBeaconReceivedMs;
-  static constexpr uint32_t STALE_MASTER_THRESHOLD_MS = lattice::config::STALE_MASTER_THRESHOLD_MS;
+
+  // Master-role beacon broadcast timing, master-timeout detection, and
+  // incoming-beacon processing (TOFU master-MAC learning, dual-master
+  // failover, duplicate-beacon-relay suppression) — Phase B Task 5 (finding 1
+  // job 3). Owns what were lastBeaconMillis/lastMasterBeaconReceivedMs/
+  // STALE_MASTER_THRESHOLD_MS as its own private members.
+  MasterBeacon beacon;
 
   // Peer routing (uses currentMaster — stays in Mesh)
   PeerInfo* findNextHopToMaster();
@@ -103,7 +104,6 @@ private:
   void saveMeshKeyToEEPROM(const uint8_t* key);
 
   // --- Tiger Style refactor helpers ---
-  void processMasterBeacon(const mesh_message& msg);
   void processAdapterData(const mesh_message& msg);
   void relayDownlink(const mesh_message& msg);
   // Relay an enrollment (JOIN_REQUEST) broadcast one hop toward the master so a
@@ -189,8 +189,8 @@ private:
   // Reproduces the old Mesh::drainRecvQueue's post-pop body exactly: proto-
   // version check, replay check, peers.updateLastSeen, then the message-type
   // switch into Mesh-owned handlers (enrollment.processRequest,
-  // processMasterBeacon, processAdapterData, etc.) — this dispatch stays on
-  // Mesh because MeshTransport has no visibility into those collaborators.
+  // beacon.process, processAdapterData, etc.) — this dispatch stays on Mesh
+  // because MeshTransport has no visibility into those collaborators.
   void handleReceivedMessage(const uint8_t srcMac[6], const mesh_message& msg);
 
   // Static trampoline binding handleReceivedMessage to

@@ -48,7 +48,7 @@ TEST_F(MeshLogicTest, TOFU_FirstBeacon_LearnsMasterMAC) {
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   auto beacon = makeBeacon(masterMac, 1, 1);
 
-  mesh.processMasterBeacon(beacon);
+  mesh.beacon.process(beacon, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_TRUE(mesh.enrollment.hasMasterMac);
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, masterMac, 6), 0);
@@ -57,13 +57,13 @@ TEST_F(MeshLogicTest, TOFU_FirstBeacon_LearnsMasterMAC) {
 TEST_F(MeshLogicTest, TOFU_SecondBeaconFromSameMAC_Accepted) {
   Mesh mesh;
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 1));
+  mesh.beacon.process(makeBeacon(masterMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Second beacon from same MAC — should update lastMasterSeenMs, not reject
   advanceMillis(3000);
   auto beacon2 = makeBeacon(masterMac, 1, 2);
   // No assertion — just verify no crash and relay fires
-  mesh.processMasterBeacon(beacon2);
+  mesh.beacon.process(beacon2, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_TRUE(mesh.enrollment.hasMasterMac);
 }
 
@@ -73,11 +73,11 @@ TEST_F(MeshLogicTest, TOFU_BeaconFromImpostorMAC_Rejected_WhenMasterAlive) {
   const uint8_t impostorMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x99};
 
   // Learn real master
-  mesh.processMasterBeacon(makeBeacon(realMaster, 1, 1));
+  mesh.beacon.process(makeBeacon(realMaster, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Impostor beacon arrives while real master is still fresh
   size_t sendsBefore = espNowSentPackets.size();
-  mesh.processMasterBeacon(makeBeacon(impostorMac, 1, 2));
+  mesh.beacon.process(makeBeacon(impostorMac, 1, 2), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Impostor should NOT be accepted as master
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, realMaster, 6), 0);
@@ -96,12 +96,12 @@ TEST_F(MeshLogicTest, TOFU_NewMasterAccepted_AfterStaleTimeout) {
   const uint8_t oldMaster[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t newMaster[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
-  mesh.processMasterBeacon(makeBeacon(oldMaster, 1, 1));
+  mesh.beacon.process(makeBeacon(oldMaster, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Advance past STALE_MASTER_THRESHOLD_MS (9000ms)
   advanceMillis(9001);
 
-  mesh.processMasterBeacon(makeBeacon(newMaster, 2, 1));
+  mesh.beacon.process(makeBeacon(newMaster, 2, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, newMaster, 6), 0);
 }
 
@@ -114,7 +114,7 @@ TEST_F(MeshLogicTest, BeaconRelay_SameEpochSeq_SuppressedRelay) {
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
 
   // First beacon — sets relay pending
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 5));
+  mesh.beacon.process(makeBeacon(masterMac, 1, 5), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_TRUE(mesh.relayPending);
 
   // Drain relay (simulate loop)
@@ -122,7 +122,7 @@ TEST_F(MeshLogicTest, BeaconRelay_SameEpochSeq_SuppressedRelay) {
 
   size_t sendsBefore = espNowSentPackets.size();
   // Same beacon arrives again (duplicate path, e.g. multi-hop echo)
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 5));
+  mesh.beacon.process(makeBeacon(masterMac, 1, 5), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   // Relay should NOT fire — same epoch+seq
   EXPECT_FALSE(mesh.relayPending);
   EXPECT_EQ(espNowSentPackets.size(), sendsBefore);
@@ -133,10 +133,10 @@ TEST_F(MeshLogicTest, BeaconRelay_NewerSeq_AllowsRelay) {
   mesh.isMaster = false;
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
 
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 5));
+  mesh.beacon.process(makeBeacon(masterMac, 1, 5), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   mesh.relayPending = false; // Drain
 
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 6)); // Newer seq
+  mesh.beacon.process(makeBeacon(masterMac, 1, 6), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac); // Newer seq
   EXPECT_TRUE(mesh.relayPending);
 }
 
@@ -156,11 +156,11 @@ TEST_F(MeshLogicTest, DualMaster_SecondBeaconFromNewMAC_LearnedAsSecondary) {
   const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
   // Learn primary via first beacon
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));
+  mesh.beacon.process(makeBeacon(primaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   ASSERT_TRUE(mesh.enrollment.hasMasterMac);
 
   // Second beacon from different MAC — must be learned as secondary
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1));
+  mesh.beacon.process(makeBeacon(secondaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_TRUE(mesh.enrollment.hasMasterMacSecondary);
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMacSecondary, secondaryMac, 6), 0);
@@ -174,13 +174,13 @@ TEST_F(MeshLogicTest, DualMaster_BeaconFromPrimaryMAC_Accepted) {
   const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));   // learn primary
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1)); // learn secondary
+  mesh.beacon.process(makeBeacon(primaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);   // learn primary
+  mesh.beacon.process(makeBeacon(secondaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac); // learn secondary
 
   // Beacon from primary — must not be rejected and relayPending must fire
   mesh.isMaster = false;
   mesh.relayPending = false;
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 2, 1));
+  mesh.beacon.process(makeBeacon(primaryMac, 2, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_TRUE(mesh.relayPending) << "Beacon from known primary must set relayPending";
 }
@@ -197,13 +197,13 @@ TEST_F(MeshLogicTest, DualMaster_BeaconFromSecondaryMAC_Accepted) {
   const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));   // learn primary
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1)); // learn secondary
+  mesh.beacon.process(makeBeacon(primaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);   // learn primary
+  mesh.beacon.process(makeBeacon(secondaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac); // learn secondary
 
   // Beacon from secondary — must not be rejected and relayPending must fire
   mesh.isMaster = false;
   mesh.relayPending = false;
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 2, 1));
+  mesh.beacon.process(makeBeacon(secondaryMac, 2, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_TRUE(mesh.relayPending) << "Beacon from known secondary must set relayPending";
 }
@@ -221,12 +221,12 @@ TEST_F(MeshLogicTest, DualMaster_ImpostorMAC_Rejected_WhenBothMastersKnown) {
   const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   const uint8_t impostorMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x99};
 
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));   // learn primary
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1)); // learn secondary
+  mesh.beacon.process(makeBeacon(primaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);   // learn primary
+  mesh.beacon.process(makeBeacon(secondaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac); // learn secondary
 
   // Third distinct MAC while both masters fresh — must be rejected
   size_t sendsBefore = espNowSentPackets.size();
-  mesh.processMasterBeacon(makeBeacon(impostorMac, 1, 2));
+  mesh.beacon.process(makeBeacon(impostorMac, 1, 2), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Neither primary nor secondary should have changed
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, primaryMac, 6), 0);
@@ -240,11 +240,11 @@ TEST_F(MeshLogicTest, SingleMaster_SecondBeaconFromNewMAC_Rejected_WhenMasterAli
   const uint8_t knownMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t unknownMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
-  mesh.processMasterBeacon(makeBeacon(knownMac, 1, 1));
+  mesh.beacon.process(makeBeacon(knownMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Second distinct MAC while single master still fresh — must be rejected
   size_t sendsBefore = espNowSentPackets.size();
-  mesh.processMasterBeacon(makeBeacon(unknownMac, 1, 2));
+  mesh.beacon.process(makeBeacon(unknownMac, 1, 2), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, knownMac, 6), 0)
       << "Known master MAC must not change";
@@ -253,8 +253,9 @@ TEST_F(MeshLogicTest, SingleMaster_SecondBeaconFromNewMAC_Rejected_WhenMasterAli
 }
 
 // ─── MeshBeaconPinTest ───────────────────────────────────────────────────────
-// Phase D (#42): Mesh::processMasterBeacon now requires the beacon's
-// origin_mac_address to match the compile-time-pinned
+// Phase D (#42): beacon processing (MasterBeacon::process, Phase B Task 5 —
+// was Mesh::processMasterBeacon) requires the beacon's origin_mac_address to
+// match the compile-time-pinned
 // lattice::mesh::pin::MASTER_MAC before any TOFU learn/accept logic runs.
 // Weaker guarantee than the JOIN_ACK pubkey pin (WiFi MACs are spoofable),
 // but rejects naive attackers before any state mutation.
@@ -277,7 +278,7 @@ TEST_F(MeshBeaconPinTest, ProcessMasterBeacon_ValidOriginMac_Learns) {
   memcpy(b.last_hop_mac_address, lattice::mesh::pin::MASTER_MAC, 6);
   b.message_type = MESH_TYPE_MASTER_BEACON;
   b.hop_count = 0;
-  m.processMasterBeacon(b);
+  m.beacon.process(b, m.deviceMacAddress, m.isMaster, m._dualMasterMode, m.enrollment, m.neighbors, m.currentMaster, m.txState, m.relayPendingMsg, m.relayPendingAt, m.relayPending, m.lastSeenMasterMac);
   EXPECT_TRUE(m.enrollment.hasMasterMac);
 }
 
@@ -288,7 +289,7 @@ TEST_F(MeshBeaconPinTest, ProcessMasterBeacon_WrongOriginMac_Drops) {
   b.origin_mac_address[0] ^= 0xFF;
   memcpy(b.last_hop_mac_address, b.origin_mac_address, 6);
   b.message_type = MESH_TYPE_MASTER_BEACON;
-  m.processMasterBeacon(b);
+  m.beacon.process(b, m.deviceMacAddress, m.isMaster, m._dualMasterMode, m.enrollment, m.neighbors, m.currentMaster, m.txState, m.relayPendingMsg, m.relayPendingAt, m.relayPending, m.lastSeenMasterMac);
   EXPECT_FALSE(m.enrollment.hasMasterMac);
 }
 
@@ -300,7 +301,7 @@ TEST_F(MeshBeaconPinTest, ProcessMasterBeacon_TestBypass_SkipsCheck) {
   b.origin_mac_address[0] ^= 0xFF;
   memcpy(b.last_hop_mac_address, b.origin_mac_address, 6);
   b.message_type = MESH_TYPE_MASTER_BEACON;
-  m.processMasterBeacon(b);
+  m.beacon.process(b, m.deviceMacAddress, m.isMaster, m._dualMasterMode, m.enrollment, m.neighbors, m.currentMaster, m.txState, m.relayPendingMsg, m.relayPendingAt, m.relayPending, m.lastSeenMasterMac);
   EXPECT_TRUE(m.enrollment.hasMasterMac);
 }
 
@@ -2024,7 +2025,7 @@ TEST_F(MeshDistanceDerivationTest, DirectBeacon_DistanceIs1) {
   // Set enrollment.knownMasterMac so the TOFU fromPrimary branch accepts.
   memcpy(mesh.enrollment.knownMasterMac, master, 6);
   mesh.enrollment.hasMasterMac = true;
-  mesh.processMasterBeacon(m);
+  mesh.beacon.process(m, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1);
 }
 
@@ -2042,7 +2043,7 @@ TEST_F(MeshDistanceDerivationTest, SinglePathAgeOut_DistanceRises) {
   memcpy(direct.last_hop_mac_address, master, 6);
   direct.message_type = MESH_TYPE_MASTER_BEACON;
   direct.hop_count = 0;
-  mesh.processMasterBeacon(direct);
+  mesh.beacon.process(direct, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   ASSERT_EQ(mesh.currentMaster.distance, 1);
 
   // Advance clock past STALE_PEER_THRESHOLD_MS — the direct master neighbor
@@ -2056,7 +2057,7 @@ TEST_F(MeshDistanceDerivationTest, SinglePathAgeOut_DistanceRises) {
   memcpy(relayed.last_hop_mac_address, relay, 6);
   relayed.message_type = MESH_TYPE_MASTER_BEACON;
   relayed.hop_count = 2;
-  mesh.processMasterBeacon(relayed);
+  mesh.beacon.process(relayed, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 3);
 }
 
@@ -2083,19 +2084,19 @@ TEST_F(MeshDistanceDerivationTest, TwoPathsDifferentLength_NoOscillation) {
   // Interleave direct + relayed beacons while both neighbor entries stay
   // fresh — the direct (distance-0) neighbor always wins minFreshDistance,
   // so currentMaster.distance must stay 1 throughout. No oscillation.
-  mesh.processMasterBeacon(direct);
+  mesh.beacon.process(direct, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1);
 
   advanceMillis(10);
-  mesh.processMasterBeacon(relayed);
+  mesh.beacon.process(relayed, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1) << "shorter path still fresh — must not rise";
 
   advanceMillis(10);
-  mesh.processMasterBeacon(direct);
+  mesh.beacon.process(direct, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1);
 
   advanceMillis(10);
-  mesh.processMasterBeacon(relayed);
+  mesh.beacon.process(relayed, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1) << "must not oscillate";
 }
 

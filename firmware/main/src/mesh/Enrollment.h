@@ -45,6 +45,16 @@ public:
   void learnMasterMac(const uint8_t* mac);
   void learnSecondaryMasterMac(const uint8_t* mac);
 
+  // Read accessors for the 4 TOFU fields below (Phase B Task 5, finding 1 job
+  // 3). Unlike `Mesh` (granted `friend class Mesh;` above for its own
+  // permanent read needs), `MasterBeacon` is new code with no such
+  // friendship — these give it a real API for the reads its moved
+  // processMasterBeacon body needs, instead of growing the friend list.
+  bool hasKnownMaster() const { return hasMasterMac; }
+  const uint8_t* knownMaster() const { return knownMasterMac; }
+  bool hasKnownSecondaryMaster() const { return hasMasterMacSecondary; }
+  const uint8_t* knownSecondaryMaster() const { return knownMasterMacSecondary; }
+
 #ifdef UNIT_TEST
 public:
 #else
