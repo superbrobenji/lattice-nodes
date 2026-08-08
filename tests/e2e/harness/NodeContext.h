@@ -12,7 +12,8 @@
 namespace lattice {
 namespace mesh {
 class Mesh;
-}
+class MeshTransport;
+} // namespace mesh
 } // namespace lattice
 namespace lattice {
 namespace adapter {
@@ -39,6 +40,12 @@ struct NodeContext {
   bool espRestartRequested = false;
   // Firmware statics
   lattice::mesh::Mesh* meshInstance = nullptr;
+  // Phase B Task 4: MeshTransport's own RX-trampoline singleton, separate
+  // from Mesh::instance (MeshTransport is a Mesh member, not Mesh itself) —
+  // needs the same per-node swap or onDataRecvCallback/dataRecvTrampoline
+  // dispatch into whichever node's transport was constructed last instead of
+  // the currently-swapped-in node's.
+  lattice::mesh::MeshTransport* transportInstance = nullptr;
   lattice::adapter::PirAdapter* pirInstance = nullptr;
   // Phase H2 item W: the health-report interval timer moved from a
   // SerialAdapter-static (process-global, needed swapping here) to a plain

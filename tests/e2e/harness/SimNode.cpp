@@ -27,6 +27,7 @@ SimNode::~SimNode() {
   // effects land in this node's context, then capture.
   swapIn(ctx_);
   lattice::mesh::Mesh::instance = nullptr;
+  lattice::mesh::MeshTransport::instance = nullptr;
   lattice::adapter::PirAdapter::instance = nullptr;
   adapter_.reset();
   mesh_.reset();
@@ -146,6 +147,7 @@ void SimNode::tick() {
 void SimNode::reboot() {
   swapIn(ctx_);
   lattice::mesh::Mesh::instance = nullptr;
+  lattice::mesh::MeshTransport::instance = nullptr;
   lattice::adapter::PirAdapter::instance = nullptr;
   adapter_.reset();
   mesh_.reset();

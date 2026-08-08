@@ -4,6 +4,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/ringbuf.h>
 #include "../../lib/lattice-protocol/c/mesh_message.h"
+#include "PendingRelayQueue.h"
 
 namespace lattice {
 namespace mesh {
@@ -17,13 +18,9 @@ using EnrollmentRelayFn = void (*)(const uint8_t* mac, const uint8_t* pubKey);
 using RegisterPeerFn = bool (*)(const uint8_t* mac, const uint8_t* pubKey32);
 
 class Enrollment {
-public:
-  // TOFU state (read by Mesh for beacon/config processing)
-  bool hasMasterMac{false};
-  uint8_t knownMasterMac[6]{};
-  bool hasMasterMacSecondary{false};
-  uint8_t knownMasterMacSecondary[6]{};
+  friend class Mesh;
 
+public:
   Enrollment();
   void init(); // loads or generates keypair; loads enrolled flag + TOFU MACs from EEPROM
 
@@ -42,6 +39,23 @@ public:
   void setPendingRelay(const uint8_t* mac, const uint8_t* pubKey);
   void drainPendingRelay();
 
+  // Owns the memcpy + flag-set + EEPROM-persist triple for TOFU-learning the
+  // (primary/secondary) master MAC — replaces 3 duplicated inline sites that
+  // were in Mesh.cpp (2 later relocated to MasterBeacon.cpp, Phase B Task 5)
+  // and 2 in this file's own processJoinAck() (finding 6).
+  void learnMasterMac(const uint8_t* mac);
+  void learnSecondaryMasterMac(const uint8_t* mac);
+
+  // Read accessors for the 4 TOFU fields below (Phase B Task 5, finding 1 job
+  // 3). Unlike `Mesh` (granted `friend class Mesh;` above for its own
+  // permanent read needs), `MasterBeacon` is new code with no such
+  // friendship — these give it a real API for the reads its moved
+  // processMasterBeacon body needs, instead of growing the friend list.
+  bool hasKnownMaster() const { return hasMasterMac; }
+  const uint8_t* knownMaster() const { return knownMasterMac; }
+  bool hasKnownSecondaryMaster() const { return hasMasterMacSecondary; }
+  const uint8_t* knownSecondaryMaster() const { return knownMasterMacSecondary; }
+
 #ifdef UNIT_TEST
 public:
 #else
@@ -49,6 +63,10 @@ private:
 #endif
   uint8_t devicePrivateKey[32]{};
   uint8_t devicePublicKey[32]{};
+  bool hasMasterMac{false};
+  uint8_t knownMasterMac[6]{};
+  bool hasMasterMacSecondary{false};
+  uint8_t knownMasterMacSecondary[6]{};
 
   // Cached mirror of the NVS "enrolled" flag (post-Phase-G audit item G).
   // isEnrolled() used to call EepromManager::loadEnrolledFlag() -> NVS read
@@ -63,26 +81,12 @@ private:
   // loop() AFTER draining its ESP-NOW receive ring, so the enrollment requests from
   // one drain pass accumulate here before being relayed in a batch. A single-slot
   // latch (the previous design) silently dropped all but the last when two nodes
-  // enrolled concurrently — see Task 9b Bug #6.
-  static constexpr size_t PENDING_RELAY_QUEUE_SIZE = 4;
-  struct PendingRelay {
-    uint8_t mac[6];
-    uint8_t pubKey[32];
-  };
-
-  // Phase I Task 8 (item OO): static FreeRTOS ring buffer replaces the old
-  // head/count array above — same heap-free storage, FreeRTOS-native
-  // primitive instead of hand-rolled wraparound bookkeeping. See Mesh.h's
-  // recvQueue comment for the general rationale; the +128 pad is the same
-  // per-item header-overhead margin.
-  RingbufHandle_t _pendingRelayQueue = nullptr;
-  StaticRingbuffer_t _pendingRelayQueueStruct;
-  uint8_t _pendingRelayQueueStorage[PENDING_RELAY_QUEUE_SIZE * sizeof(PendingRelay) + 128];
+  // enrolled concurrently — see Task 9b Bug #6. Extracted into its own
+  // PendingRelayQueue type (finding 16) — see PendingRelayQueue.h for the
+  // ring-buffer plumbing.
+  PendingRelayQueue _relayQueue;
 
   EnrollmentRelayFn _enrollmentRelayFn{nullptr};
-
-  // Append one pending relay; drops (with a LOG_WARN, never err::fail) if full.
-  void enqueuePendingRelay(const uint8_t* mac, const uint8_t* pubKey);
 };
 
 } // namespace mesh

@@ -82,8 +82,8 @@ constexpr int NUM_DEFAULT_PEERS = lattice::config::NUM_DEFAULT_PEERS;
 // Phase I Task 9 (item EE): dedicated mesh-drain task. Static stack + TCB
 // (xTaskCreateStaticPinnedToCore below) — no heap allocation, per this task's
 // "no new dynamic alloc" constraint. Woken via xTaskNotifyWait() by
-// onDataRecvCallback's ISR trampoline (Mesh.cpp) after it enqueues into
-// recvQueue, instead of loop() polling for work every tick — this is what
+// onDataRecvCallback's ISR trampoline (MeshTransport.cpp) after it enqueues
+// into recvQueue, instead of loop() polling for work every tick — this is what
 // lets the FreeRTOS idle task (and therefore tickless idle / light sleep)
 // actually go idle between mesh RX events.
 static StackType_t mesh_task_stack[4096];
@@ -470,7 +470,7 @@ extern "C" void app_main(void) {
   }
 
   // Phase I Task 9 (item EE): create the dedicated mesh-drain task and hand
-  // its handle to Mesh so the RX-ISR trampoline (Mesh.cpp's
+  // its handle to Mesh so the RX-ISR trampoline (MeshTransport.cpp's
   // onDataRecvCallback) can wake it via vTaskNotifyGiveFromISR. Pinned to
   // core 0 alongside the WiFi/ESP-NOW stack that delivers the RX callback;
   // priority above tskIDLE_PRIORITY so it preempts idle immediately on
