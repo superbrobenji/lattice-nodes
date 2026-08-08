@@ -85,8 +85,17 @@ set(FIRMWARE_SOURCES
   mocks/WiFi.cpp
   ../firmware/main/src/mesh/PeerRegistry.cpp
   ../firmware/main/src/mesh/Mesh.cpp
+  ../firmware/main/src/mesh/MeshTransport.cpp
+  ../firmware/main/src/mesh/MasterBeacon.cpp
+  ../firmware/main/src/mesh/DownlinkRouter.cpp
   ../firmware/main/src/mesh/Enrollment.cpp
+  ../firmware/main/src/mesh/PendingRelayQueue.cpp
   ../firmware/main/src/mesh/CompactMessage.cpp
+  ../firmware/main/src/mesh/PeerEnrollment.cpp
+  ../firmware/main/src/mesh/UplinkRouter.cpp
+  ../firmware/main/src/mesh/MeshMessenger.cpp
+  ../firmware/main/src/mesh/RouteReportHandler.cpp
+  ../firmware/main/src/mesh/FrameAuthorizer.cpp
 )
 
 enable_testing()
@@ -103,13 +112,16 @@ add_unit_test(test_smoke              unit/test_smoke.cpp)
 add_unit_test(test_eeprom_manager     unit/test_eeprom_manager.cpp)
 add_unit_test(test_serial_framing     unit/test_serial_framing.cpp)
 add_unit_test(test_replay_cache       unit/test_replay_cache.cpp)
+add_unit_test(test_outbound_sequence_state unit/test_outbound_sequence_state.cpp)
 add_unit_test(test_mesh_logic         unit/test_mesh_logic.cpp)
 add_unit_test(test_pir_adapter        unit/test_pir_adapter.cpp)
 add_unit_test(test_route_report       unit/test_route_report.cpp)
+add_unit_test(test_pending_relay_queue unit/test_pending_relay_queue.cpp)
 add_unit_test(test_route_mac          unit/test_route_mac.cpp)
 add_unit_test(test_mocks              unit/test_mocks.cpp)
 add_unit_test(test_e2e_crypto         unit/test_e2e_crypto.cpp)
 add_unit_test(test_e2e_keystore       unit/test_e2e_keystore.cpp)
+add_unit_test(test_e2e_key_lookup     unit/test_e2e_key_lookup.cpp)
 add_unit_test(test_neighbor_table     unit/test_neighbor_table.cpp)
 add_unit_test(test_route_table        unit/test_route_table.cpp)
 add_unit_test(test_mac_table          unit/test_mac_table.cpp)
@@ -117,6 +129,10 @@ add_unit_test(test_mem                unit/test_mem.cpp)
 add_unit_test(test_compact_message    unit/test_compact_message.cpp)
 add_unit_test(test_button             unit/test_button.cpp)
 add_unit_test(test_display_manager    unit/test_display_manager.cpp)
+add_unit_test(test_peer_registry      unit/test_peer_registry.cpp)
+add_unit_test(test_peer_enrollment    unit/test_peer_enrollment.cpp)
+add_unit_test(test_uplink_router      unit/test_uplink_router.cpp)
+add_unit_test(test_frame_authorizer   unit/test_frame_authorizer.cpp)
 
 add_unit_test(test_mbedtls_kat        unit/test_mbedtls_kat.cpp)
 

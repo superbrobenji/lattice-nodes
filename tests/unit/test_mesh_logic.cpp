@@ -48,7 +48,7 @@ TEST_F(MeshLogicTest, TOFU_FirstBeacon_LearnsMasterMAC) {
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   auto beacon = makeBeacon(masterMac, 1, 1);
 
-  mesh.processMasterBeacon(beacon);
+  mesh.beacon.process(beacon, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_TRUE(mesh.enrollment.hasMasterMac);
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, masterMac, 6), 0);
@@ -57,13 +57,13 @@ TEST_F(MeshLogicTest, TOFU_FirstBeacon_LearnsMasterMAC) {
 TEST_F(MeshLogicTest, TOFU_SecondBeaconFromSameMAC_Accepted) {
   Mesh mesh;
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 1));
+  mesh.beacon.process(makeBeacon(masterMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Second beacon from same MAC — should update lastMasterSeenMs, not reject
   advanceMillis(3000);
   auto beacon2 = makeBeacon(masterMac, 1, 2);
   // No assertion — just verify no crash and relay fires
-  mesh.processMasterBeacon(beacon2);
+  mesh.beacon.process(beacon2, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_TRUE(mesh.enrollment.hasMasterMac);
 }
 
@@ -73,11 +73,11 @@ TEST_F(MeshLogicTest, TOFU_BeaconFromImpostorMAC_Rejected_WhenMasterAlive) {
   const uint8_t impostorMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x99};
 
   // Learn real master
-  mesh.processMasterBeacon(makeBeacon(realMaster, 1, 1));
+  mesh.beacon.process(makeBeacon(realMaster, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Impostor beacon arrives while real master is still fresh
   size_t sendsBefore = espNowSentPackets.size();
-  mesh.processMasterBeacon(makeBeacon(impostorMac, 1, 2));
+  mesh.beacon.process(makeBeacon(impostorMac, 1, 2), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Impostor should NOT be accepted as master
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, realMaster, 6), 0);
@@ -96,12 +96,12 @@ TEST_F(MeshLogicTest, TOFU_NewMasterAccepted_AfterStaleTimeout) {
   const uint8_t oldMaster[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t newMaster[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
-  mesh.processMasterBeacon(makeBeacon(oldMaster, 1, 1));
+  mesh.beacon.process(makeBeacon(oldMaster, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Advance past STALE_MASTER_THRESHOLD_MS (9000ms)
   advanceMillis(9001);
 
-  mesh.processMasterBeacon(makeBeacon(newMaster, 2, 1));
+  mesh.beacon.process(makeBeacon(newMaster, 2, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, newMaster, 6), 0);
 }
 
@@ -114,7 +114,7 @@ TEST_F(MeshLogicTest, BeaconRelay_SameEpochSeq_SuppressedRelay) {
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
 
   // First beacon — sets relay pending
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 5));
+  mesh.beacon.process(makeBeacon(masterMac, 1, 5), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_TRUE(mesh.relayPending);
 
   // Drain relay (simulate loop)
@@ -122,7 +122,7 @@ TEST_F(MeshLogicTest, BeaconRelay_SameEpochSeq_SuppressedRelay) {
 
   size_t sendsBefore = espNowSentPackets.size();
   // Same beacon arrives again (duplicate path, e.g. multi-hop echo)
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 5));
+  mesh.beacon.process(makeBeacon(masterMac, 1, 5), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   // Relay should NOT fire — same epoch+seq
   EXPECT_FALSE(mesh.relayPending);
   EXPECT_EQ(espNowSentPackets.size(), sendsBefore);
@@ -133,10 +133,10 @@ TEST_F(MeshLogicTest, BeaconRelay_NewerSeq_AllowsRelay) {
   mesh.isMaster = false;
   const uint8_t masterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
 
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 5));
+  mesh.beacon.process(makeBeacon(masterMac, 1, 5), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   mesh.relayPending = false; // Drain
 
-  mesh.processMasterBeacon(makeBeacon(masterMac, 1, 6)); // Newer seq
+  mesh.beacon.process(makeBeacon(masterMac, 1, 6), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac); // Newer seq
   EXPECT_TRUE(mesh.relayPending);
 }
 
@@ -156,11 +156,11 @@ TEST_F(MeshLogicTest, DualMaster_SecondBeaconFromNewMAC_LearnedAsSecondary) {
   const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
   // Learn primary via first beacon
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));
+  mesh.beacon.process(makeBeacon(primaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   ASSERT_TRUE(mesh.enrollment.hasMasterMac);
 
   // Second beacon from different MAC — must be learned as secondary
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1));
+  mesh.beacon.process(makeBeacon(secondaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_TRUE(mesh.enrollment.hasMasterMacSecondary);
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMacSecondary, secondaryMac, 6), 0);
@@ -174,13 +174,13 @@ TEST_F(MeshLogicTest, DualMaster_BeaconFromPrimaryMAC_Accepted) {
   const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));   // learn primary
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1)); // learn secondary
+  mesh.beacon.process(makeBeacon(primaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);   // learn primary
+  mesh.beacon.process(makeBeacon(secondaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac); // learn secondary
 
   // Beacon from primary — must not be rejected and relayPending must fire
   mesh.isMaster = false;
   mesh.relayPending = false;
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 2, 1));
+  mesh.beacon.process(makeBeacon(primaryMac, 2, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_TRUE(mesh.relayPending) << "Beacon from known primary must set relayPending";
 }
@@ -197,13 +197,13 @@ TEST_F(MeshLogicTest, DualMaster_BeaconFromSecondaryMAC_Accepted) {
   const uint8_t primaryMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));   // learn primary
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1)); // learn secondary
+  mesh.beacon.process(makeBeacon(primaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);   // learn primary
+  mesh.beacon.process(makeBeacon(secondaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac); // learn secondary
 
   // Beacon from secondary — must not be rejected and relayPending must fire
   mesh.isMaster = false;
   mesh.relayPending = false;
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 2, 1));
+  mesh.beacon.process(makeBeacon(secondaryMac, 2, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_TRUE(mesh.relayPending) << "Beacon from known secondary must set relayPending";
 }
@@ -221,12 +221,12 @@ TEST_F(MeshLogicTest, DualMaster_ImpostorMAC_Rejected_WhenBothMastersKnown) {
   const uint8_t secondaryMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   const uint8_t impostorMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x99};
 
-  mesh.processMasterBeacon(makeBeacon(primaryMac, 1, 1));   // learn primary
-  mesh.processMasterBeacon(makeBeacon(secondaryMac, 1, 1)); // learn secondary
+  mesh.beacon.process(makeBeacon(primaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);   // learn primary
+  mesh.beacon.process(makeBeacon(secondaryMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac); // learn secondary
 
   // Third distinct MAC while both masters fresh — must be rejected
   size_t sendsBefore = espNowSentPackets.size();
-  mesh.processMasterBeacon(makeBeacon(impostorMac, 1, 2));
+  mesh.beacon.process(makeBeacon(impostorMac, 1, 2), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Neither primary nor secondary should have changed
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, primaryMac, 6), 0);
@@ -240,11 +240,11 @@ TEST_F(MeshLogicTest, SingleMaster_SecondBeaconFromNewMAC_Rejected_WhenMasterAli
   const uint8_t knownMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
   const uint8_t unknownMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
-  mesh.processMasterBeacon(makeBeacon(knownMac, 1, 1));
+  mesh.beacon.process(makeBeacon(knownMac, 1, 1), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   // Second distinct MAC while single master still fresh — must be rejected
   size_t sendsBefore = espNowSentPackets.size();
-  mesh.processMasterBeacon(makeBeacon(unknownMac, 1, 2));
+  mesh.beacon.process(makeBeacon(unknownMac, 1, 2), mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
 
   EXPECT_EQ(memcmp(mesh.enrollment.knownMasterMac, knownMac, 6), 0)
       << "Known master MAC must not change";
@@ -253,8 +253,9 @@ TEST_F(MeshLogicTest, SingleMaster_SecondBeaconFromNewMAC_Rejected_WhenMasterAli
 }
 
 // ─── MeshBeaconPinTest ───────────────────────────────────────────────────────
-// Phase D (#42): Mesh::processMasterBeacon now requires the beacon's
-// origin_mac_address to match the compile-time-pinned
+// Phase D (#42): beacon processing (MasterBeacon::process, Phase B Task 5 —
+// was Mesh::processMasterBeacon) requires the beacon's origin_mac_address to
+// match the compile-time-pinned
 // lattice::mesh::pin::MASTER_MAC before any TOFU learn/accept logic runs.
 // Weaker guarantee than the JOIN_ACK pubkey pin (WiFi MACs are spoofable),
 // but rejects naive attackers before any state mutation.
@@ -277,7 +278,7 @@ TEST_F(MeshBeaconPinTest, ProcessMasterBeacon_ValidOriginMac_Learns) {
   memcpy(b.last_hop_mac_address, lattice::mesh::pin::MASTER_MAC, 6);
   b.message_type = MESH_TYPE_MASTER_BEACON;
   b.hop_count = 0;
-  m.processMasterBeacon(b);
+  m.beacon.process(b, m.deviceMacAddress, m.isMaster, m._dualMasterMode, m.enrollment, m.neighbors, m.currentMaster, m.txState, m.relayPendingMsg, m.relayPendingAt, m.relayPending, m.lastSeenMasterMac);
   EXPECT_TRUE(m.enrollment.hasMasterMac);
 }
 
@@ -288,7 +289,7 @@ TEST_F(MeshBeaconPinTest, ProcessMasterBeacon_WrongOriginMac_Drops) {
   b.origin_mac_address[0] ^= 0xFF;
   memcpy(b.last_hop_mac_address, b.origin_mac_address, 6);
   b.message_type = MESH_TYPE_MASTER_BEACON;
-  m.processMasterBeacon(b);
+  m.beacon.process(b, m.deviceMacAddress, m.isMaster, m._dualMasterMode, m.enrollment, m.neighbors, m.currentMaster, m.txState, m.relayPendingMsg, m.relayPendingAt, m.relayPending, m.lastSeenMasterMac);
   EXPECT_FALSE(m.enrollment.hasMasterMac);
 }
 
@@ -300,7 +301,7 @@ TEST_F(MeshBeaconPinTest, ProcessMasterBeacon_TestBypass_SkipsCheck) {
   b.origin_mac_address[0] ^= 0xFF;
   memcpy(b.last_hop_mac_address, b.origin_mac_address, 6);
   b.message_type = MESH_TYPE_MASTER_BEACON;
-  m.processMasterBeacon(b);
+  m.beacon.process(b, m.deviceMacAddress, m.isMaster, m._dualMasterMode, m.enrollment, m.neighbors, m.currentMaster, m.txState, m.relayPendingMsg, m.relayPendingAt, m.relayPending, m.lastSeenMasterMac);
   EXPECT_TRUE(m.enrollment.hasMasterMac);
 }
 
@@ -354,7 +355,7 @@ TEST_F(RelayDownlinkTest, SendsToPeers_IncrementHopCount) {
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1, /*hopCount=*/1);
 
-  mesh.relayDownlink(msg);
+  mesh.router.relayDownlink(msg, mesh.peers, mesh.deviceMacAddress, mesh.transport);
 
   // 2 peers → 2 sends
   EXPECT_EQ(espNowSentPackets.size(), 2u);
@@ -377,7 +378,7 @@ TEST_F(RelayDownlinkTest, DropsAtMaxHops) {
   auto msg = makeDataMsg(kOriginMac, kPeer1Mac, 1, 1,
                          /*hopCount=*/lattice::config::MAX_HOPS);
 
-  mesh.relayDownlink(msg);
+  mesh.router.relayDownlink(msg, mesh.peers, mesh.deviceMacAddress, mesh.transport);
 
   EXPECT_EQ(espNowSentPackets.size(), 0u);
 }
@@ -396,11 +397,99 @@ TEST_F(RelayDownlinkTest, SkipsSelf_WhenSelfInPeerList) {
   mesh.peers.append(self);
 
   auto msg = makeDataMsg(kOriginMac, kPeer2Mac, 1, 1);
-  mesh.relayDownlink(msg);
+  mesh.router.relayDownlink(msg, mesh.peers, mesh.deviceMacAddress, mesh.transport);
 
   // Only 1 peer (kPeer1Mac) — self skipped
   EXPECT_EQ(espNowSentPackets.size(), 1u);
   EXPECT_EQ(memcmp(espNowSentPackets[0].addr, kPeer1Mac, 6), 0);
+}
+
+// ─── DownlinkRouter::classify() — DropHopLimitExceeded ──────────────────────
+// Phase B Task 6 review fix round 1: classify() is the single most
+// correctness-sensitive point in this refactor — collapsing
+// DropHopLimitExceeded back into NotRouted (an easy "these look similar"
+// mistake) would silently let a hop-limit-exceeded frame fall through to the
+// security gate instead of being dropped, with no other test in this file
+// catching it (relayDownlink's own internal hop-limit guard, exercised by
+// RelayDownlinkTest.DropsAtMaxHops above, is a completely different code
+// path). These two tests drive classify() directly, one per branch that can
+// produce DropHopLimitExceeded.
+
+class DownlinkRouterClassifyTest : public ::testing::Test {
+protected:
+  static constexpr uint8_t kMyMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  static constexpr uint8_t kOtherMac[6] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0x01};
+
+  mesh_message makeMsg(uint8_t hopCount) {
+    mesh_message m{};
+    m.proto_version = PROTO_VERSION;
+    m.message_type = MESH_TYPE_ADAPTER_DATA;
+    m.data_type = adapter_types::PIR_ADAPTER;
+    memcpy(m.origin_mac_address, kOtherMac, 6);
+    m.hop_count = hopCount;
+    m.epoch_num = 1;
+    m.seq_num = 1;
+    return m;
+  }
+};
+
+constexpr uint8_t DownlinkRouterClassifyTest::kMyMac[];
+constexpr uint8_t DownlinkRouterClassifyTest::kOtherMac[];
+
+// addressedToMaster branch: hop_count already at MAX_HOPS must classify as
+// DropHopLimitExceeded, NOT RelayTowardMaster — the caller's switch treats
+// these completely differently (unconditional drop vs. relay-and-return).
+TEST_F(DownlinkRouterClassifyTest, AddressedToMaster_HopLimitExceeded_DropsNotRelays) {
+  DownlinkRouter router;
+  auto msg = makeMsg(/*hopCount=*/lattice::config::MAX_HOPS);
+  uint8_t nextHop[6];
+
+  RouteDecision decision =
+      router.classify(msg, kMyMac, /*isMaster=*/false, /*addressedToSelf=*/false,
+                      /*isBroadcastTarget=*/false, /*addressedToMaster=*/true, nextHop);
+
+  EXPECT_EQ(decision, RouteDecision::DropHopLimitExceeded);
+  EXPECT_NE(decision, RouteDecision::RelayTowardMaster);
+
+  // Sanity: same frame one hop under the limit still relays normally — proves
+  // the DropHopLimitExceeded case above is genuinely hop-limit-gated, not a
+  // permanent override of the addressedToMaster branch.
+  auto underLimitMsg = makeMsg(/*hopCount=*/lattice::config::MAX_HOPS - 1);
+  RouteDecision underLimitDecision =
+      router.classify(underLimitMsg, kMyMac, /*isMaster=*/false, /*addressedToSelf=*/false,
+                      /*isBroadcastTarget=*/false, /*addressedToMaster=*/true, nextHop);
+  EXPECT_EQ(underLimitDecision, RouteDecision::RelayTowardMaster);
+}
+
+// Route-path-match branch: this device's own MAC appears in msg.route_path
+// (we are on the frame's source route) and hop_count is already at
+// MAX_HOPS — must classify as DropHopLimitExceeded, NOT ForwardOnRoute.
+TEST_F(DownlinkRouterClassifyTest, RoutePathMatch_HopLimitExceeded_DropsNotForwards) {
+  DownlinkRouter router;
+  auto msg = makeMsg(/*hopCount=*/lattice::config::MAX_HOPS);
+  static constexpr uint8_t kNextHopMac[6] = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0x02};
+  msg.route_len = 2;
+  memcpy(&msg.route_path[0], kMyMac, 6);      // this device is on the route...
+  memcpy(&msg.route_path[6], kNextHopMac, 6); // ...with a next hop after it
+  uint8_t nextHop[6];
+
+  RouteDecision decision =
+      router.classify(msg, kMyMac, /*isMaster=*/false, /*addressedToSelf=*/false,
+                      /*isBroadcastTarget=*/false, /*addressedToMaster=*/false, nextHop);
+
+  EXPECT_EQ(decision, RouteDecision::DropHopLimitExceeded);
+  EXPECT_NE(decision, RouteDecision::ForwardOnRoute);
+
+  // Sanity: same route one hop under the limit still forwards normally.
+  auto underLimitMsg = makeMsg(/*hopCount=*/lattice::config::MAX_HOPS - 1);
+  underLimitMsg.route_len = 2;
+  memcpy(&underLimitMsg.route_path[0], kMyMac, 6);
+  memcpy(&underLimitMsg.route_path[6], kNextHopMac, 6);
+  RouteDecision underLimitDecision =
+      router.classify(underLimitMsg, kMyMac, /*isMaster=*/false, /*addressedToSelf=*/false,
+                      /*isBroadcastTarget=*/false, /*addressedToMaster=*/false, nextHop);
+  EXPECT_EQ(underLimitDecision, RouteDecision::ForwardOnRoute);
+  EXPECT_EQ(memcmp(nextHop, kNextHopMac, 6), 0);
 }
 
 // ─── processAdapterData: uplink relay ────────────────────────────────────────
@@ -466,6 +555,30 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysUplinkTowardMaster) {
   const auto& sent = *reinterpret_cast<const mesh_message*>(espNowSentPackets.back().data.data());
   EXPECT_EQ(sent.hop_count, 2u);                                      // incremented
   EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0); // routed via nextHop
+}
+
+// Phase B Task 6 review fix round 1: end-to-end companion to the classify()
+// unit tests above, driven through the real Mesh::processAdapterData — this
+// is the test that would actually catch a future DropHopLimitExceeded ->
+// NotRouted collapse. If that regression were reintroduced, this hop-limited,
+// addressed-to-master frame would (since this node is neither master nor
+// addressedToSelf nor a broadcast target) fall through the security gate and
+// both E2E-open branches untouched and reach externalRecvCallback with a
+// still-sealed payload — so this test asserts the callback does NOT fire,
+// not just that no relay happens.
+TEST_F(AdapterDataRelayTest, HopLimitExceeded_UplinkToMaster_DropsFrame_NoRelayNoDelivery) {
+  Mesh mesh = makeIntermediateNode();
+  bool callbackFired = false;
+  mesh.linkDataRecvCallback([&](const mesh_message&) { callbackFired = true; });
+
+  auto msg = makeUplinkMsg(1, 1, /*hopCount=*/lattice::config::MAX_HOPS);
+
+  size_t before = espNowSentPackets.size();
+  mesh.processAdapterData(msg);
+
+  EXPECT_EQ(espNowSentPackets.size(), before) << "hop-limit-exceeded frame must not be relayed";
+  EXPECT_FALSE(callbackFired) << "hop-limit-exceeded frame must be dropped outright, not fall "
+                                 "through to the security gate / local delivery";
 }
 
 TEST_F(AdapterDataRelayTest, Master_DoesNotRelayUplink_DeliversLocally) {
@@ -604,7 +717,9 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysEnrollmentTowardMaster) {
   req.hop_count = 0;
 
   size_t before = espNowSentPackets.size();
-  mesh.relayEnrollmentUplink(req);
+  mesh.messenger.relayEnrollmentUplink(req, mesh.deviceMacAddress, mesh.currentMaster, mesh.txState,
+                                       mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.uplinkRouter,
+                                       mesh.neighbors, mesh.transport);
 
   ASSERT_EQ(espNowSentPackets.size(), before + 1) << "must relay one hop toward master";
   EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0)
@@ -627,7 +742,9 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_DoesNotRelayOwnEnrollment) {
   req.hop_count = 0;
 
   size_t before = espNowSentPackets.size();
-  mesh.relayEnrollmentUplink(req);
+  mesh.messenger.relayEnrollmentUplink(req, mesh.deviceMacAddress, mesh.currentMaster, mesh.txState,
+                                       mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.uplinkRouter,
+                                       mesh.neighbors, mesh.transport);
 
   EXPECT_EQ(espNowSentPackets.size(), before) << "must not relay our own request";
 }
@@ -799,7 +916,9 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
   // (nextHop = master, one hop) — the end goal of registering the master.
   memcpy(mesh.currentMaster.mac, kMasterMac, 6);
   mesh.currentMaster.distance = 1;
-  EXPECT_NE(mesh.findNextHopToMaster(), nullptr)
+  EXPECT_NE(mesh.uplinkRouter.findNextHopToMaster(mesh.currentMaster, mesh.peers, mesh.neighbors,
+                                                  mesh.deviceMacAddress, mesh.testMillisNow()),
+            nullptr)
       << "uplink route must resolve through the newly registered master peer";
 }
 
@@ -807,8 +926,8 @@ TEST_F(JoinAckRelayTest, ProcessJoinAckRegistersSecondaryMasterAndKeys) {
   // A JOIN_ACK carrying a non-zero secondary master identity (spec §5 dual
   // master) must register the secondary as a routable/keyable PeerRegistry
   // peer (mac+pubkey, persisted) AND record it as the TOFU secondary — this
-  // is what lets masterE2EKeys() derive keys against the secondary once
-  // currentMaster.mac flips to it after failover.
+  // is what lets lattice::mesh::masterE2EKeys() derive keys against the
+  // secondary once currentMaster.mac flips to it after failover.
   Mesh leaf = makeIntermediateNode(); // non-master, not yet enrolled with anyone
 
   // Primary's key must equal the Phase D (#42) pin: Enrollment::processJoinAck
@@ -848,12 +967,13 @@ TEST_F(JoinAckRelayTest, ProcessJoinAckRegistersSecondaryMasterAndKeys) {
   // Secondary TOFU state set:
   EXPECT_TRUE(leaf.enrollment.hasMasterMacSecondary);
   EXPECT_EQ(0, memcmp(leaf.enrollment.knownMasterMacSecondary, secMac, 6));
-  // And post-failover masterE2EKeys resolves against the secondary:
+  // And post-failover lattice::mesh::masterE2EKeys resolves against the secondary:
   leaf.enrollment.hasMasterMac = true; // enrolled with primary
   memcpy(leaf.currentMaster.mac, secMac, 6); // simulate adoption after failover
   leaf.currentMaster.distance = 1;
   const uint8_t *kUp, *kDown;
-  EXPECT_TRUE(leaf.masterE2EKeys(&kUp, &kDown))
+  EXPECT_TRUE(lattice::mesh::masterE2EKeys(leaf.currentMaster, leaf.peers, leaf.enrollment,
+                                           leaf.e2eKeys, &kUp, &kDown))
       << "keys derivable against the secondary post-failover";
 }
 
@@ -866,7 +986,8 @@ TEST_F(JoinAckRelayTest, NextHopThroughRelayIsRegisteredAsEspNowPeer) {
   mesh.testNeighbors().observe(relayMac, 1, mesh.testMillisNow());
 
   resetEspNowMock(); // clear recorded peers (mirror the mock's reset used elsewhere)
-  PeerInfo* hop = mesh.findNextHopToMaster();
+  PeerInfo* hop = mesh.uplinkRouter.findNextHopToMaster(
+      mesh.currentMaster, mesh.peers, mesh.neighbors, mesh.deviceMacAddress, mesh.testMillisNow());
 
   ASSERT_NE(hop, nullptr) << "distance-2 node must route through the distance-1 relay";
   EXPECT_EQ(memcmp(hop->mac, relayMac, 6), 0);
@@ -897,7 +1018,8 @@ TEST_F(JoinAckRelayTest, DirectMasterStaleFallsBackToNeighborTable) {
   // Master is also a fresh distance-0 neighbor:
   node.testNeighbors().observe(masterMac, 0, node.testMillisNow());
 
-  PeerInfo* hop = node.findNextHopToMaster();
+  PeerInfo* hop = node.uplinkRouter.findNextHopToMaster(
+      node.currentMaster, node.peers, node.neighbors, node.deviceMacAddress, node.testMillisNow());
   ASSERT_NE(hop, nullptr) << "stale direct peer must fall back to the fresh NeighborTable entry";
   EXPECT_EQ(0, memcmp(hop->mac, masterMac, 6));
   // Branch-identity proof: only the NeighborTable fallback branch auto-registers
@@ -918,14 +1040,15 @@ TEST_F(JoinAckRelayTest, MultiHopForwardingPeer_BoundToOne_EvictsStaleRelayOnSwi
   // Mirror what setupEspNow()/addPeer() do for a real enrolled peer at boot:
   // register it as an ESP-NOW peer. The fixture's plain peers.append() above
   // only populates the PeerRegistry, not the ESP-NOW peer table.
-  lattice::mesh::crypto::registerPeerWithEspNow(kPeerMac);
+  MeshTransport::registerPeerWithEspNow(kPeerMac);
 
   const uint8_t r1Mac[6] = {0x01, 0, 0, 0, 0, 0x01};
   const uint8_t r2Mac[6] = {0x02, 0, 0, 0, 0, 0x02};
 
   // R1 observed first, distance 1 from master.
   mesh.testNeighbors().observe(r1Mac, 1, mesh.testMillisNow());
-  PeerInfo* hop1 = mesh.findNextHopToMaster();
+  PeerInfo* hop1 = mesh.uplinkRouter.findNextHopToMaster(
+      mesh.currentMaster, mesh.peers, mesh.neighbors, mesh.deviceMacAddress, mesh.testMillisNow());
   ASSERT_NE(hop1, nullptr);
   EXPECT_EQ(memcmp(hop1->mac, r1Mac, 6), 0);
   EXPECT_TRUE(esp_now_is_peer_exist(r1Mac)) << "R1 must be auto-registered on first forward";
@@ -936,7 +1059,8 @@ TEST_F(JoinAckRelayTest, MultiHopForwardingPeer_BoundToOne_EvictsStaleRelayOnSwi
   advanceMillis(1000);
   mesh.testNeighbors().observe(r2Mac, 1, mesh.testMillisNow());
 
-  PeerInfo* hop2 = mesh.findNextHopToMaster();
+  PeerInfo* hop2 = mesh.uplinkRouter.findNextHopToMaster(
+      mesh.currentMaster, mesh.peers, mesh.neighbors, mesh.deviceMacAddress, mesh.testMillisNow());
   ASSERT_NE(hop2, nullptr);
   EXPECT_EQ(memcmp(hop2->mac, r2Mac, 6), 0) << "freshest relay (R2) must now be selected";
   EXPECT_TRUE(esp_now_is_peer_exist(r2Mac)) << "R2 must be auto-registered as the new next hop";
@@ -1036,8 +1160,10 @@ TEST_F(JoinAckRelayTest, RelayedAdapterDataKeepsOriginTarget) {
   fwd.seq_num = 5;
 
   resetEspNowMock();
-  relay.transmitCore(static_cast<adapter_types>(fwd.data_type), fwd.data, MESH_TYPE_ADAPTER_DATA,
-                     &fwd);
+  relay.messenger.transmitCore(static_cast<adapter_types>(fwd.data_type), fwd.data,
+                               MESH_TYPE_ADAPTER_DATA, &fwd, relay.isMaster, relay.deviceMacAddress,
+                               relay.currentMaster, relay.txState, relay.peers, relay.enrollment,
+                               relay.e2eKeys, relay.uplinkRouter, relay.neighbors, relay.transport);
 
   ASSERT_TRUE(wasSentTo(relaysMaster)) << "relay must forward toward its own next hop";
   mesh_message sent = lastEspNowSentTo(relaysMaster);
@@ -1097,7 +1223,7 @@ TEST_F(JoinAckRelayTest, DownlinkRelayForward_BoundsAutoRegisteredPeers_NeverEvi
   Mesh mesh = makeIntermediateNode(); // kPeerMac is an ENROLLED peer — must never be evicted
   // Mirror what setupEspNow()/addPeer() do for a real enrolled peer at boot
   // (the fixture's peers.append() above only populates the PeerRegistry).
-  lattice::mesh::crypto::registerPeerWithEspNow(kPeerMac);
+  MeshTransport::registerPeerWithEspNow(kPeerMac);
 
   const uint8_t leaf[6] = {0x02, 0, 0, 0, 0, 0x0B};
   const int kFloodCount = static_cast<int>(lattice::config::LATTICE_DOWNLINK_PEER_MAX) + 6;
@@ -1128,9 +1254,10 @@ TEST_F(JoinAckRelayTest, DownlinkRelayForward_BoundsAutoRegisteredPeers_NeverEvi
 // Defense-in-depth items from Phase E (issue #47 items 4 + 5).
 
 // Not declared in any header — it's a plain (external-linkage) helper
-// function defined next to sendDownlinkToNode() in Mesh.cpp, kept out of
-// Mesh.h/RouteTable.h deliberately (this task's file list is Mesh.cpp +
-// this test file only). Forward-declared here so the test below can call it.
+// function defined next to sendDownlinkToNode() in MeshMessenger.cpp (moved
+// there with sendDownlinkToNode, round 2 task 11 — was Mesh.cpp before),
+// kept out of MeshMessenger.h/RouteTable.h deliberately. Forward-declared
+// here so the test below can call it.
 namespace lattice {
 namespace mesh {
 bool downlinkRouteLenExceedsMaxHops(uint8_t pathLen);
@@ -1141,8 +1268,9 @@ bool downlinkRouteLenExceedsMaxHops(uint8_t pathLen);
 // indexing msg.route_path. RouteTable::record() already clamps pathLen to
 // MAX_HOPS at write time (RouteTable.h: `if (pathLen > config::MAX_HOPS)
 // return;`), and route-report processing rejects route_len > MAX_HOPS before
-// it ever reaches RouteTable::record() (Mesh.cpp's processRouteReport, ~line
-// 1175 pre-patch). Between those two guards there is no legitimate call path
+// it ever reaches RouteTable::record() (RouteReportHandler.cpp's
+// processRouteReport, moved from Mesh.cpp's ~line 1175 pre-patch in round 2
+// task 12). Between those two guards there is no legitimate call path
 // — and no public RouteTable API — that can hand routes->lookup() (and
 // therefore sendDownlinkToNode) a pathLen > MAX_HOPS; RouteTable::Entry
 // storage is private with no test hook to poke an oversized value directly,
@@ -1165,16 +1293,17 @@ TEST(MeshDownlinkClamp, OversizedRouteLen_Drops) {
 // LRU-touch loop further down — so that loop is unreachable for an
 // already-enrolled MAC. The eviction of a stale LRU entry therefore has to
 // happen inside the short-circuit branch itself (see the comment at
-// Mesh.cpp::registerDownlinkPeer); this test asserts that actually happens,
-// not just that the short-circuit continues to skip re-touching the LRU.
+// DownlinkRouter.cpp::registerDownlinkPeer); this test asserts that actually
+// happens, not just that the short-circuit continues to skip re-touching the
+// LRU.
 TEST(RegisterDownlinkPeer, LRUEntryBecomesEnrolled_EvictsOnTouch) {
   resetEspNowMock();
   lattice::mesh::Mesh m;
   uint8_t mac[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
 
   // 1. Register mac into the LRU (not yet enrolled/master).
-  m.registerDownlinkPeer(mac);
-  EXPECT_EQ(m.downlinkPeerLruCount, 1u);
+  m.router.registerDownlinkPeer(mac, m.peers, m.currentMaster);
+  EXPECT_EQ(m.router.downlinkPeerLruCount, 1u);
 
   // 2. mac becomes enrolled. PeerRegistry::peerMacs/peerCount/append() are
   //    all public (see PeerRegistry.h) — no addForTest hook exists or is
@@ -1186,10 +1315,10 @@ TEST(RegisterDownlinkPeer, LRUEntryBecomesEnrolled_EvictsOnTouch) {
   ASSERT_TRUE(m.peers.append(enrolled));
 
   // 3. Call registerDownlinkPeer(mac) again.
-  m.registerDownlinkPeer(mac);
+  m.router.registerDownlinkPeer(mac, m.peers, m.currentMaster);
 
   // 4. LRU no longer contains mac — it was evicted, not just left untouched.
-  EXPECT_EQ(m.downlinkPeerLruCount, 0u);
+  EXPECT_EQ(m.router.downlinkPeerLruCount, 0u);
 }
 
 // ─── enrollPeer: secondary-master identity stamped into JOIN_ACK ────────────
@@ -1289,8 +1418,8 @@ protected:
   uint8_t masterPriv[32], masterPub[32];
 
   // A non-master node enrolled under kMasterMac with real Curve25519 keys, so
-  // masterE2EKeys() can derive the same k_down the master would use to seal a
-  // legitimate targeted downlink.
+  // lattice::mesh::masterE2EKeys() can derive the same k_down the master would
+  // use to seal a legitimate targeted downlink.
   Mesh makeEnrolledNode() {
     Mesh mesh;
     memcpy(mesh.deviceMacAddress, kMyMac, 6);
@@ -1370,7 +1499,8 @@ TEST_F(ConfigOpcodeInjectionTest, ForgedBroadcastNodeIdSet_NotDeliveredToExterna
 TEST_F(ConfigOpcodeInjectionTest, TargetedSealedConfigSet_StillDelivered) {
   Mesh mesh = makeEnrolledNode();
   const uint8_t *kUp, *kDown;
-  ASSERT_TRUE(mesh.masterE2EKeys(&kUp, &kDown));
+  ASSERT_TRUE(lattice::mesh::masterE2EKeys(mesh.currentMaster, mesh.peers, mesh.enrollment,
+                                           mesh.e2eKeys, &kUp, &kDown));
 
   mesh_message msg{};
   msg.proto_version = PROTO_VERSION;
@@ -1526,10 +1656,12 @@ TEST_F(JoinAckForgeryTest, MasterNode_IgnoresJoinAckAddressedToItself) {
   EXPECT_FALSE(mesh.enrollment.isEnrolled()) << "masters never enroll via JOIN_ACK";
 }
 
-// ─── drainRecvQueue: replay protection ───────────────────────────────────────
-// Relay dedup is drainRecvQueue's responsibility; relay paths no longer call
-// isReplay directly. These tests verify that the production path (drainRecvQueue
-// → dispatch) correctly drops replayed messages before handlers are invoked.
+// ─── drain(): replay protection ──────────────────────────────────────────────
+// Relay dedup is Mesh::handleReceivedMessage's responsibility (reached via
+// transport.drain(), Phase B Task 4 — formerly Mesh::drainRecvQueue's inline
+// body); relay paths no longer call isReplay directly. These tests verify
+// that the production path (drain() → handleReceivedMessage → dispatch)
+// correctly drops replayed messages before handlers are invoked.
 
 class DrainRecvQueueTest : public ::testing::Test {
 protected:
@@ -1543,11 +1675,11 @@ protected:
   static constexpr uint8_t kOriginMac[6] = {0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC};
 
   void injectAndDrain(Mesh& mesh, const mesh_message& msg) {
-    Mesh::RecvQueueEntry entry;
+    MeshTransport::RecvQueueEntry entry;
     memcpy(&entry.msg, &msg, sizeof(msg));
     memcpy(entry.srcMac, msg.origin_mac_address, 6);
-    xRingbufferSend(mesh.recvQueue, &entry, sizeof(entry), 0);
-    mesh.drainRecvQueue();
+    xRingbufferSend(mesh.transport.recvQueue, &entry, sizeof(entry), 0);
+    mesh.drain();
   }
 };
 
@@ -1590,7 +1722,7 @@ TEST_F(DrainRecvQueueTest, DropsReplayedAdapterData) {
   injectAndDrain(mesh, msg); // first: not replay — delivered
   EXPECT_EQ(deliveredCount, 1);
 
-  injectAndDrain(mesh, msg);    // replay: drainRecvQueue drops before dispatch
+  injectAndDrain(mesh, msg);    // replay: handleReceivedMessage drops before dispatch
   EXPECT_EQ(deliveredCount, 1); // callback not invoked again
 }
 
@@ -1650,9 +1782,9 @@ TEST_F(DrainRecvQueueTest, DropsReplayedEnrollmentRequestBeforeRelay) {
   msg.seq_num = 7;
 
   injectAndDrain(mesh, msg); // first: enqueued for relay-to-server
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 1u);
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 1u);
   injectAndDrain(mesh, msg); // duplicate (same epoch/seq): dropped before processRequest
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 1u)
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 1u)
       << "duplicate must not enqueue a second relay";
 }
 
@@ -1673,7 +1805,7 @@ TEST_F(DrainRecvQueueTest, ForwardsEnrollmentRetryWithFreshSeq) {
   injectAndDrain(mesh, msg);
   msg.seq_num = 8; // next 10s retry round — distinct seq
   injectAndDrain(mesh, msg);
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 2u) << "retry must still be forwarded";
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 2u) << "retry must still be forwarded";
 }
 
 // Task 9c R2: a node re-broadcasts a given JOIN_ACK at most once. A reflected copy
@@ -1738,7 +1870,7 @@ TEST_F(EnrollmentTest, SendsSingleEspNowMessage) {
 // FRESH seq so a legitimate re-request is not permanently suppressed.
 TEST_F(EnrollmentTest, EnrollmentRequestCarriesReplayFieldsWithFreshSeqPerRetry) {
   Mesh mesh;
-  mesh.replay.init(5); // bootEpoch = 5 (> 0, so the drainRecvQueue replay gate applies)
+  mesh.txState.init(5); // bootEpoch = 5 (> 0, so the handleReceivedMessage replay gate applies)
 
   mesh.sendEnrollmentRequest();
   mesh.sendEnrollmentRequest(); // next retry round
@@ -1768,9 +1900,9 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
 
   mesh.enrollment.processRequest(msg);
 
-  ASSERT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 1u);
-  const auto& e = *reinterpret_cast<const Enrollment::PendingRelay*>(
-      mesh.enrollment._pendingRelayQueue->items.front().data());
+  ASSERT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 1u);
+  const auto& e = *reinterpret_cast<const PendingRelayQueue::Entry*>(
+      mesh.enrollment._relayQueue._queue->items.front().data());
   EXPECT_EQ(memcmp(e.mac, kMac, 6), 0);
   EXPECT_EQ(memcmp(e.pubKey, kKey, 32), 0)
       << "Full 32-byte key must be copied without chunk reassembly";
@@ -1897,7 +2029,7 @@ TEST_F(EnrollmentRelayCallbackTest, DrainCallsRegisteredCallback) {
 
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 0u) << "queue must be empty after drain";
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 0u) << "queue must be empty after drain";
   ASSERT_TRUE(g_captured) << "callback was not called";
   EXPECT_EQ(memcmp(g_capturedMac, kMac, 6), 0) << "wrong MAC passed to callback";
   EXPECT_EQ(memcmp(g_capturedKey, kKey, 32), 0) << "wrong pubKey passed to callback";
@@ -1913,7 +2045,7 @@ TEST_F(EnrollmentRelayCallbackTest, DrainWithNoCallbackClearsFlag) {
   mesh.enrollment.setPendingRelay(kMac, kKey);
   mesh.enrollment.drainPendingRelay();
 
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 0u)
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 0u)
       << "queue must clear even with no callback";
   EXPECT_FALSE(g_captured) << "callback must not fire when unregistered";
 }
@@ -1947,51 +2079,59 @@ TEST_F(EnrollmentRelayCallbackTest, QueueHoldsAndDrainsMultipleConcurrentRelays)
 
   mesh.enrollment.processRequest(reqA);
   mesh.enrollment.processRequest(reqB); // second request must NOT overwrite the first
-  ASSERT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 2u);
+  ASSERT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 2u);
 
   mesh.enrollment.drainPendingRelay();
 
   ASSERT_EQ(drained.size(), 2u) << "both queued relays must fire (Bug #6 starvation)";
   EXPECT_EQ(memcmp(drained[0].data(), kMacA, 6), 0) << "FIFO order: A first";
   EXPECT_EQ(memcmp(drained[1].data(), kMacB, 6), 0) << "FIFO order: B second";
-  EXPECT_EQ(mesh.enrollment._pendingRelayQueue->items.size(), 0u);
+  EXPECT_EQ(mesh.enrollment._relayQueue._queue->items.size(), 0u);
 }
 
 // --- Seal-time AEAD epoch-rollback guard (Phase A Task 3) ---
+//
+// Round 2 Task 8: the guard itself moved from Mesh::_checkEpochRollback to
+// OutboundSequenceState::checkEpochRollback (see ReplayCache.h and
+// tests/unit/test_outbound_sequence_state.cpp, which now carries the
+// canonical unit coverage for the method in isolation). These tests stay
+// here, driven through mesh.testTxState() like the other UNIT_TEST-only
+// accessors below, as a regression check that Mesh's call sites still reach
+// the guard via txState.
 
 class MeshEpochRollbackTest : public ::testing::Test {
 protected:
   lattice::mesh::Mesh mesh;
-  void SetUp() override { /* mesh default-constructed; _lastSealedEpoch = UINT32_MAX */ }
+  void SetUp() override { /* mesh default-constructed; txState's sealed epoch = UINT32_MAX */ }
 };
 
 TEST_F(MeshEpochRollbackTest, FirstCall_Snapshots) {
-  EXPECT_NO_THROW(mesh._checkEpochRollback(3, 7));
+  EXPECT_NO_THROW(mesh.testTxState().checkEpochRollback(3, 7));
 }
 
 TEST_F(MeshEpochRollbackTest, HigherEpoch_Passes) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_NO_THROW(mesh._checkEpochRollback(4, 0));
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_NO_THROW(mesh.testTxState().checkEpochRollback(4, 0));
 }
 
 TEST_F(MeshEpochRollbackTest, SameEpochHigherSeq_Passes) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_NO_THROW(mesh._checkEpochRollback(3, 8));
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_NO_THROW(mesh.testTxState().checkEpochRollback(3, 8));
 }
 
 TEST_F(MeshEpochRollbackTest, LowerEpoch_Fatal) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_THROW(mesh._checkEpochRollback(2, 0), lattice::err::FatalError);
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_THROW(mesh.testTxState().checkEpochRollback(2, 0), lattice::err::FatalError);
 }
 
 TEST_F(MeshEpochRollbackTest, SameEpochLowerSeq_Fatal) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_THROW(mesh._checkEpochRollback(3, 6), lattice::err::FatalError);
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_THROW(mesh.testTxState().checkEpochRollback(3, 6), lattice::err::FatalError);
 }
 
 TEST_F(MeshEpochRollbackTest, SameEpochSameSeq_Fatal) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_THROW(mesh._checkEpochRollback(3, 7), lattice::err::FatalError);
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_THROW(mesh.testTxState().checkEpochRollback(3, 7), lattice::err::FatalError);
 }
 
 // --- currentMaster.distance derivation from NeighborTable (issue #45) ---
@@ -1999,10 +2139,12 @@ TEST_F(MeshEpochRollbackTest, SameEpochSameSeq_Fatal) {
 // In UNIT_TEST builds all of Mesh's members are public (see the
 // `#ifdef UNIT_TEST public: #else private: #endif` at the top of the class
 // body in Mesh.h), so test bodies read/set `mesh.enrollment` and
-// `mesh.currentMaster` directly — same pattern MeshLogicTest and
-// MeshEpochRollbackTest above already use (e.g. `mesh._checkEpochRollback`,
-// `mesh.enrollment.hasMasterMac`). No `_enrollmentForTest()` /
+// `mesh.currentMaster` directly — same pattern MeshLogicTest above already
+// uses (e.g. `mesh.enrollment.hasMasterMac`). No `_enrollmentForTest()` /
 // `_currentMasterForTest()` accessors or `friend class` declaration needed.
+// (MeshEpochRollbackTest above goes through `mesh.testTxState()` instead,
+// since the guard it exercises now lives on OutboundSequenceState, which
+// keeps its own two backing fields private — see ReplayCache.h.)
 class MeshDistanceDerivationTest : public ::testing::Test {
 protected:
   lattice::mesh::Mesh mesh;
@@ -2022,7 +2164,7 @@ TEST_F(MeshDistanceDerivationTest, DirectBeacon_DistanceIs1) {
   // Set enrollment.knownMasterMac so the TOFU fromPrimary branch accepts.
   memcpy(mesh.enrollment.knownMasterMac, master, 6);
   mesh.enrollment.hasMasterMac = true;
-  mesh.processMasterBeacon(m);
+  mesh.beacon.process(m, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1);
 }
 
@@ -2040,7 +2182,7 @@ TEST_F(MeshDistanceDerivationTest, SinglePathAgeOut_DistanceRises) {
   memcpy(direct.last_hop_mac_address, master, 6);
   direct.message_type = MESH_TYPE_MASTER_BEACON;
   direct.hop_count = 0;
-  mesh.processMasterBeacon(direct);
+  mesh.beacon.process(direct, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   ASSERT_EQ(mesh.currentMaster.distance, 1);
 
   // Advance clock past STALE_PEER_THRESHOLD_MS — the direct master neighbor
@@ -2054,7 +2196,7 @@ TEST_F(MeshDistanceDerivationTest, SinglePathAgeOut_DistanceRises) {
   memcpy(relayed.last_hop_mac_address, relay, 6);
   relayed.message_type = MESH_TYPE_MASTER_BEACON;
   relayed.hop_count = 2;
-  mesh.processMasterBeacon(relayed);
+  mesh.beacon.process(relayed, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 3);
 }
 
@@ -2081,19 +2223,19 @@ TEST_F(MeshDistanceDerivationTest, TwoPathsDifferentLength_NoOscillation) {
   // Interleave direct + relayed beacons while both neighbor entries stay
   // fresh — the direct (distance-0) neighbor always wins minFreshDistance,
   // so currentMaster.distance must stay 1 throughout. No oscillation.
-  mesh.processMasterBeacon(direct);
+  mesh.beacon.process(direct, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1);
 
   advanceMillis(10);
-  mesh.processMasterBeacon(relayed);
+  mesh.beacon.process(relayed, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1) << "shorter path still fresh — must not rise";
 
   advanceMillis(10);
-  mesh.processMasterBeacon(direct);
+  mesh.beacon.process(direct, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1);
 
   advanceMillis(10);
-  mesh.processMasterBeacon(relayed);
+  mesh.beacon.process(relayed, mesh.deviceMacAddress, mesh.isMaster, mesh._dualMasterMode, mesh.enrollment, mesh.neighbors, mesh.currentMaster, mesh.txState, mesh.relayPendingMsg, mesh.relayPendingAt, mesh.relayPending, mesh.lastSeenMasterMac);
   EXPECT_EQ(mesh.currentMaster.distance, 1) << "must not oscillate";
 }
 

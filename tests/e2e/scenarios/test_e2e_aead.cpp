@@ -1,7 +1,8 @@
 // Task 6: E2E AEAD integration — seal on uplink (Mesh::transmitCore), open at
 // the master's local-delivery path (Mesh::processAdapterData /
-// Mesh::processRouteReport). See harness/MeshSimTest.h for the shared
-// fixture/enroll() helper this reuses verbatim.
+// RouteReportHandler::processRouteReport, the latter moved off Mesh in round 2
+// task 12). See harness/MeshSimTest.h for the shared fixture/enroll() helper
+// this reuses verbatim.
 //
 // "On the bus" capture technique: a frame sent during simulation step N sits
 // in VirtualBus's pending queue from the moment step N's deliver() call
