@@ -58,13 +58,16 @@ task-level implementation detail; each phase gets its own implementation plan
 | A — Audit | nodes | Survey every file under `firmware/main/src` (`mesh/`, `adapter/`, `hardware/`, `app/`, `persistence/`, `error/`, `logging/`, `network/`, `crypto/`) for excessive size, SRP violations, God-objects, missing encapsulation, real inheritance opportunities, library-replacement candidates. No line-count threshold — every file gets sized and judged on responsibility count, not just the ones already known to be big. Ranked findings doc. |
 | B — Mesh subsystem cleanup | nodes | Extract collaborator classes out of `Mesh` via composition (transport, beacon, downlink-router are the known candidates); `Mesh` becomes a thin orchestrator. Headlined by `Mesh.cpp` decomposition but scoped to the whole `mesh/` directory — boundaries finalized in the Phase A ledger. Dedicated phase because `Mesh.cpp` is the confirmed worst offender (1382 lines, 8-9 jobs) — not because it's assumed to be the only file touched. |
 | C — Repo-wide sweep | nodes | Every other file Phase A flags as excessively large or overloaded (candidates so far: `EepromManager.cpp` 651 lines, `main.cpp` 579 lines — final list from Phase A, not capped to these) plus cross-cutting encapsulation/OOP items. |
-| D — Docs rewrite | nodes | README + `docs/*.md` rewritten to describe the post-A/B/C architecture, covering the history through Phase J/TLS-follow-up that current docs predate entirely. |
+| D — Docs rewrite | nodes | README + `docs/*.md` rewritten to describe the post-A/B/C/E architecture, covering the history through Phase J/TLS-follow-up that current docs predate entirely. |
+| E — Array-in-interface consistency | nodes | Not Phase A-sourced — discovered via CodeQL's `cpp/array-in-interface` query firing on Phase B's PR (6 new alerts, dismissed as won't-fix pending this phase; 1 pre-existing undismissed alert on `Adapter.cpp:31`; ~9 total pre-existing array-syntax MAC parameter sites repo-wide). Scope: decide whether to adopt `std::array<uint8_t,6>` (or similar) for fixed-size buffer parameters across `mesh/`, `adapter/`, `network/`, `crypto/`, touching every call site of the ~15+ affected functions — not just the declarations. **Must reconcile with Phase A finding 7**, which already deleted a `std::array`-like `MacAddress` value-type wrapper as "strictly worse" than raw-byte handling; this phase needs to either justify why `std::array` parameters are different from that rejected wrapper, or conclude the CodeQL alerts should stay dismissed. |
 
 **Phase list is not closed.** If Phase A surfaces a finding large enough to
 warrant its own dedicated implementation plan — same bar `Mesh.cpp` cleared
 for Phase B — it gets its own new phase (E, F, ...) instead of being crammed
 into Phase C. C is for the sweep of everything else, not a dumping ground for
-anything oversized.
+anything oversized. (Phase E itself is the first example of a phase *not*
+sourced from Phase A — new findings can surface from any later phase's CI
+results too, not just the original audit.)
 
 ## Dependency graph & sequencing
 
@@ -73,13 +76,17 @@ Phase A (audit)  ──┬── gates Phase B (boundaries come from findings)
                     └── gates Phase C (sweep scope comes from findings)
 Phase B ────────────── the mesh/ subsystem, headlined by Mesh.cpp; can start once
                         A's mesh-relevant findings land, doesn't need to wait for all of A
-Phase C ────────────── everything else A finds; independent of B
-Phase D ────────────── strictly last — documents the end state, not a moving target
+                        └── surfaced Phase E (CodeQL finding from B's own PR CI, not from A)
+Phase C ────────────── everything else A finds; independent of B and E
+Phase E ────────────── independent of B/C's own scope; gated only by its CodeQL source
+                        existing (i.e. after B merges, since B is what triggered it)
+Phase D ────────────── strictly last — documents the end state, waits on B, C, and E
 ```
 
 - Phase A is a hard prerequisite for B and C (both consume its findings).
 - B and C are independent of each other and may run in parallel once A lands.
-- D waits on both B and C.
+- E depends only on Phase B having merged (it's scoped from Phase B's CI findings); independent of C.
+- D waits on B, C, and E.
 
 ## Per-phase notes
 
