@@ -40,7 +40,7 @@ protected:
     memcpy(mesh.enrollment.devicePublicKey, myPub, 32);
 
     // Register master as a live, keyed peer so findNextHopToMaster() AND E2E
-    // sealing (Mesh::masterE2EKeys) both succeed.
+    // sealing (lattice::mesh::masterE2EKeys) both succeed.
     PeerInfo peer{};
     memcpy(peer.mac, masterMac, 6);
     memcpy(peer.publicKey, masterPub, 32);
@@ -59,7 +59,7 @@ protected:
   // The k_up this node uses to seal uplinks to the master set up by
   // setupRelayNode() — ECDH is symmetric, so deriving from our own priv + the
   // master's pubkey matches what the master derives from its priv + our pubkey
-  // (mirrors Mesh::masterE2EKeys).
+  // (mirrors lattice::mesh::masterE2EKeys).
   void deriveUpKey(uint8_t kUpOut[32]) {
     uint8_t kDown[32];
     lattice::mesh::crypto::deriveE2EKeys(myPriv, masterPub, kUpOut, kDown);

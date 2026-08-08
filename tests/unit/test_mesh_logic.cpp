@@ -920,8 +920,8 @@ TEST_F(JoinAckRelayTest, ProcessJoinAckRegistersSecondaryMasterAndKeys) {
   // A JOIN_ACK carrying a non-zero secondary master identity (spec §5 dual
   // master) must register the secondary as a routable/keyable PeerRegistry
   // peer (mac+pubkey, persisted) AND record it as the TOFU secondary — this
-  // is what lets masterE2EKeys() derive keys against the secondary once
-  // currentMaster.mac flips to it after failover.
+  // is what lets lattice::mesh::masterE2EKeys() derive keys against the
+  // secondary once currentMaster.mac flips to it after failover.
   Mesh leaf = makeIntermediateNode(); // non-master, not yet enrolled with anyone
 
   // Primary's key must equal the Phase D (#42) pin: Enrollment::processJoinAck
@@ -961,12 +961,13 @@ TEST_F(JoinAckRelayTest, ProcessJoinAckRegistersSecondaryMasterAndKeys) {
   // Secondary TOFU state set:
   EXPECT_TRUE(leaf.enrollment.hasMasterMacSecondary);
   EXPECT_EQ(0, memcmp(leaf.enrollment.knownMasterMacSecondary, secMac, 6));
-  // And post-failover masterE2EKeys resolves against the secondary:
+  // And post-failover lattice::mesh::masterE2EKeys resolves against the secondary:
   leaf.enrollment.hasMasterMac = true; // enrolled with primary
   memcpy(leaf.currentMaster.mac, secMac, 6); // simulate adoption after failover
   leaf.currentMaster.distance = 1;
   const uint8_t *kUp, *kDown;
-  EXPECT_TRUE(leaf.masterE2EKeys(&kUp, &kDown))
+  EXPECT_TRUE(lattice::mesh::masterE2EKeys(leaf.currentMaster, leaf.peers, leaf.enrollment,
+                                           leaf.e2eKeys, &kUp, &kDown))
       << "keys derivable against the secondary post-failover";
 }
 
@@ -1403,8 +1404,8 @@ protected:
   uint8_t masterPriv[32], masterPub[32];
 
   // A non-master node enrolled under kMasterMac with real Curve25519 keys, so
-  // masterE2EKeys() can derive the same k_down the master would use to seal a
-  // legitimate targeted downlink.
+  // lattice::mesh::masterE2EKeys() can derive the same k_down the master would
+  // use to seal a legitimate targeted downlink.
   Mesh makeEnrolledNode() {
     Mesh mesh;
     memcpy(mesh.deviceMacAddress, kMyMac, 6);
@@ -1484,7 +1485,8 @@ TEST_F(ConfigOpcodeInjectionTest, ForgedBroadcastNodeIdSet_NotDeliveredToExterna
 TEST_F(ConfigOpcodeInjectionTest, TargetedSealedConfigSet_StillDelivered) {
   Mesh mesh = makeEnrolledNode();
   const uint8_t *kUp, *kDown;
-  ASSERT_TRUE(mesh.masterE2EKeys(&kUp, &kDown));
+  ASSERT_TRUE(lattice::mesh::masterE2EKeys(mesh.currentMaster, mesh.peers, mesh.enrollment,
+                                           mesh.e2eKeys, &kUp, &kDown));
 
   mesh_message msg{};
   msg.proto_version = PROTO_VERSION;

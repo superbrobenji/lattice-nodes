@@ -26,6 +26,7 @@
 #include "MeshTransport.h"
 #include "MasterBeacon.h"
 #include "DownlinkRouter.h"
+#include "E2EKeyLookup.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -94,8 +95,8 @@ private:
   // security/E2E half of processAdapterData stays on Mesh — see
   // processAdapterData's doc comments. Mesh::processAdapterData switches on
   // router.classify()'s result and executes the crypto-touching
-  // relay-toward-master action itself (transmitCore needs masterE2EKeys,
-  // which lives on Mesh, and txState.checkEpochRollback).
+  // relay-toward-master action itself (transmitCore needs
+  // lattice::mesh::masterE2EKeys (E2EKeyLookup.h), and txState.checkEpochRollback).
   DownlinkRouter router;
 
   // Peer routing (uses currentMaster — stays in Mesh)
@@ -231,11 +232,6 @@ private:
   // evicted here.
   uint8_t forwardingPeer[6]{};
 
-  // Returns k_up/k_down for the current master (leaf side); false if not enrolled
-  // or master pubkey unknown.
-  bool masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown);
-  // Returns keys for an enrolled origin peer (master side); false if unknown peer.
-  bool peerE2EKeys(const uint8_t* originMac, const uint8_t** kUp, const uint8_t** kDown);
   static bool isSealedType(uint8_t messageType);
 
 public:

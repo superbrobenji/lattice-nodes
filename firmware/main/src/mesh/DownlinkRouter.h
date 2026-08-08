@@ -43,8 +43,9 @@ enum class RouteDecision {
 // external state (PeerRegistry, MasterInfo, MeshTransport) they need as
 // parameters rather than holding a back-reference to Mesh. The
 // crypto-touching relay-toward-master action (transmitCore, which needs
-// masterE2EKeys and txState.checkEpochRollback) stays a Mesh-executed action
-// driven by classify()'s result, not a DownlinkRouter method.
+// lattice::mesh::masterE2EKeys (E2EKeyLookup.h) and txState.checkEpochRollback)
+// stays a Mesh-executed action driven by classify()'s result, not a
+// DownlinkRouter method.
 class DownlinkRouter {
 public:
   // Read-only classification of processAdapterData's downlink routing

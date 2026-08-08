@@ -255,22 +255,6 @@ bool Mesh::isSealedType(uint8_t messageType) {
   return messageType == MESH_TYPE_ADAPTER_DATA || messageType == MESH_TYPE_ROUTE_REPORT;
 }
 
-bool Mesh::masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown) {
-  if (!enrollment.hasMasterMac)
-    return false;
-  PeerInfo* master = peers.find(currentMaster.mac);
-  if (!master)
-    return false;
-  return e2eKeys.getKeys(master->mac, enrollment.getPrivateKey(), master->publicKey, kUp, kDown);
-}
-
-bool Mesh::peerE2EKeys(const uint8_t* originMac, const uint8_t** kUp, const uint8_t** kDown) {
-  PeerInfo* peer = peers.find(originMac);
-  if (!peer)
-    return false;
-  return e2eKeys.getKeys(peer->mac, enrollment.getPrivateKey(), peer->publicKey, kUp, kDown);
-}
-
 void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessageType msgType,
                         const mesh_message* msgOverride) {
   mesh_message msg;
@@ -295,7 +279,8 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
   if (!isMaster && selfOriginated && isSealedType(msg.message_type)) {
     const uint8_t *kUp, *kDown;
     txState.checkEpochRollback(msg.epoch_num, msg.seq_num);
-    if (!masterE2EKeys(&kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kUp, msg)) {
+    if (!lattice::mesh::masterE2EKeys(currentMaster, peers, enrollment, e2eKeys, &kUp, &kDown) ||
+        !lattice::mesh::crypto::sealPayload(kUp, msg)) {
       LATTICE_LOGLN("MESH", "E2E seal unavailable — uplink dropped", LogLevel::LOG_WARN);
       return;
     }
@@ -440,7 +425,8 @@ void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const 
 
   const uint8_t *kUp, *kDown;
   txState.checkEpochRollback(msg.epoch_num, msg.seq_num);
-  if (!peerE2EKeys(destMac, &kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kDown, msg)) {
+  if (!lattice::mesh::peerE2EKeys(destMac, peers, enrollment, e2eKeys, &kUp, &kDown) ||
+      !lattice::mesh::crypto::sealPayload(kDown, msg)) {
     LATTICE_LOGLN("MESH", "downlink seal unavailable — dropped", LogLevel::LOG_WARN);
     return;
   }
@@ -527,8 +513,8 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // is crypto-free and read-only here. Every check below is unchanged from
   // the original inline block; only which class owns the classification
   // logic changed. The relay-toward-master case still executes here (not in
-  // DownlinkRouter) because transmitCore needs masterE2EKeys, which lives on
-  // Mesh, and txState.checkEpochRollback.
+  // DownlinkRouter) because transmitCore needs lattice::mesh::masterE2EKeys
+  // (E2EKeyLookup.h) and txState.checkEpochRollback.
   uint8_t nextHop[6];
   switch (router.classify(msg, deviceMacAddress, isMaster, addressedToSelf, isBroadcastTarget,
                           addressedToMaster, nextHop)) {
@@ -588,7 +574,8 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   bool needsOpen = isMaster && addressedToSelf && isSealedType(msg.message_type);
   if (needsOpen) {
     const uint8_t *kUp, *kDown;
-    if (!peerE2EKeys(msg.origin_mac_address, &kUp, &kDown) ||
+    if (!lattice::mesh::peerE2EKeys(msg.origin_mac_address, peers, enrollment, e2eKeys, &kUp,
+                                    &kDown) ||
         !lattice::mesh::crypto::openPayload(kUp, opened)) {
       LATTICE_LOGLN("MESH", "E2E open failed — frame dropped", LogLevel::LOG_WARN);
       return;
@@ -603,7 +590,8 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   bool nodeOpened = false;
   if (!isMaster && addressedToSelf && msg.message_type == MESH_TYPE_ADAPTER_DATA) {
     const uint8_t *kUp, *kDown;
-    if (!masterE2EKeys(&kUp, &kDown) || !lattice::mesh::crypto::openPayload(kDown, opened)) {
+    if (!lattice::mesh::masterE2EKeys(currentMaster, peers, enrollment, e2eKeys, &kUp, &kDown) ||
+        !lattice::mesh::crypto::openPayload(kDown, opened)) {
       LATTICE_LOGLN("MESH", "downlink open failed — dropped", LogLevel::LOG_WARN);
       return;
     }
@@ -823,7 +811,8 @@ void Mesh::processRouteReport(const mesh_message& msg) {
     // the opcode/path bytes — the payload is ciphertext until opened.
     mesh_message opened = msg;
     const uint8_t *kUp, *kDown;
-    if (!peerE2EKeys(msg.origin_mac_address, &kUp, &kDown) ||
+    if (!lattice::mesh::peerE2EKeys(msg.origin_mac_address, peers, enrollment, e2eKeys, &kUp,
+                                    &kDown) ||
         !lattice::mesh::crypto::openPayload(kUp, opened)) {
       LATTICE_LOGLN("MESH", "E2E open failed — route report dropped", LogLevel::LOG_WARN);
       return;
@@ -860,7 +849,7 @@ void Mesh::processRouteReport(const mesh_message& msg) {
     for (uint8_t i = 0; i < msg.route_len; ++i) {
       const uint8_t* hop_mac = &msg.route_path[static_cast<size_t>(i) * 6];
       const uint8_t *hopKUp, *hopKDown;
-      if (!peerE2EKeys(hop_mac, &hopKUp, &hopKDown)) {
+      if (!lattice::mesh::peerE2EKeys(hop_mac, peers, enrollment, e2eKeys, &hopKUp, &hopKDown)) {
         LATTICE_LOGLN("MESH", "Route report: unknown hop, dropping", LogLevel::LOG_ERROR);
         return;
       }
@@ -922,11 +911,12 @@ void Mesh::processRouteReport(const mesh_message& msg) {
 
   // Fold this relay's hop into msg.auth_path, keyed off its own pairwise
   // k_up with the master — the same key material the E2E seal path already
-  // relies on (masterE2EKeys), so no new provisioning is needed. If the
-  // master isn't known yet (rare — relay would also fail the routing lookup
-  // above), drop and log rather than forwarding an unauthenticated hop.
+  // relies on (lattice::mesh::masterE2EKeys), so no new provisioning is
+  // needed. If the master isn't known yet (rare — relay would also fail the
+  // routing lookup above), drop and log rather than forwarding an
+  // unauthenticated hop.
   const uint8_t *kUp, *kDown;
-  if (!masterE2EKeys(&kUp, &kDown)) {
+  if (!lattice::mesh::masterE2EKeys(currentMaster, peers, enrollment, e2eKeys, &kUp, &kDown)) {
     LATTICE_LOGLN("MESH", "Route report: no k_up for master, dropping relay hop",
                   LogLevel::LOG_WARN);
     return;
