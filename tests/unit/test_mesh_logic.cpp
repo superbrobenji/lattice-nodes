@@ -2074,40 +2074,48 @@ TEST_F(EnrollmentRelayCallbackTest, QueueHoldsAndDrainsMultipleConcurrentRelays)
 }
 
 // --- Seal-time AEAD epoch-rollback guard (Phase A Task 3) ---
+//
+// Round 2 Task 8: the guard itself moved from Mesh::_checkEpochRollback to
+// OutboundSequenceState::checkEpochRollback (see ReplayCache.h and
+// tests/unit/test_outbound_sequence_state.cpp, which now carries the
+// canonical unit coverage for the method in isolation). These tests stay
+// here, driven through mesh.testTxState() like the other UNIT_TEST-only
+// accessors below, as a regression check that Mesh's call sites still reach
+// the guard via txState.
 
 class MeshEpochRollbackTest : public ::testing::Test {
 protected:
   lattice::mesh::Mesh mesh;
-  void SetUp() override { /* mesh default-constructed; _lastSealedEpoch = UINT32_MAX */ }
+  void SetUp() override { /* mesh default-constructed; txState's sealed epoch = UINT32_MAX */ }
 };
 
 TEST_F(MeshEpochRollbackTest, FirstCall_Snapshots) {
-  EXPECT_NO_THROW(mesh._checkEpochRollback(3, 7));
+  EXPECT_NO_THROW(mesh.testTxState().checkEpochRollback(3, 7));
 }
 
 TEST_F(MeshEpochRollbackTest, HigherEpoch_Passes) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_NO_THROW(mesh._checkEpochRollback(4, 0));
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_NO_THROW(mesh.testTxState().checkEpochRollback(4, 0));
 }
 
 TEST_F(MeshEpochRollbackTest, SameEpochHigherSeq_Passes) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_NO_THROW(mesh._checkEpochRollback(3, 8));
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_NO_THROW(mesh.testTxState().checkEpochRollback(3, 8));
 }
 
 TEST_F(MeshEpochRollbackTest, LowerEpoch_Fatal) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_THROW(mesh._checkEpochRollback(2, 0), lattice::err::FatalError);
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_THROW(mesh.testTxState().checkEpochRollback(2, 0), lattice::err::FatalError);
 }
 
 TEST_F(MeshEpochRollbackTest, SameEpochLowerSeq_Fatal) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_THROW(mesh._checkEpochRollback(3, 6), lattice::err::FatalError);
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_THROW(mesh.testTxState().checkEpochRollback(3, 6), lattice::err::FatalError);
 }
 
 TEST_F(MeshEpochRollbackTest, SameEpochSameSeq_Fatal) {
-  mesh._checkEpochRollback(3, 7);
-  EXPECT_THROW(mesh._checkEpochRollback(3, 7), lattice::err::FatalError);
+  mesh.testTxState().checkEpochRollback(3, 7);
+  EXPECT_THROW(mesh.testTxState().checkEpochRollback(3, 7), lattice::err::FatalError);
 }
 
 // --- currentMaster.distance derivation from NeighborTable (issue #45) ---
@@ -2115,10 +2123,12 @@ TEST_F(MeshEpochRollbackTest, SameEpochSameSeq_Fatal) {
 // In UNIT_TEST builds all of Mesh's members are public (see the
 // `#ifdef UNIT_TEST public: #else private: #endif` at the top of the class
 // body in Mesh.h), so test bodies read/set `mesh.enrollment` and
-// `mesh.currentMaster` directly — same pattern MeshLogicTest and
-// MeshEpochRollbackTest above already use (e.g. `mesh._checkEpochRollback`,
-// `mesh.enrollment.hasMasterMac`). No `_enrollmentForTest()` /
+// `mesh.currentMaster` directly — same pattern MeshLogicTest above already
+// uses (e.g. `mesh.enrollment.hasMasterMac`). No `_enrollmentForTest()` /
 // `_currentMasterForTest()` accessors or `friend class` declaration needed.
+// (MeshEpochRollbackTest above goes through `mesh.testTxState()` instead,
+// since the guard it exercises now lives on OutboundSequenceState, which
+// keeps its own two backing fields private — see ReplayCache.h.)
 class MeshDistanceDerivationTest : public ::testing::Test {
 protected:
   lattice::mesh::Mesh mesh;

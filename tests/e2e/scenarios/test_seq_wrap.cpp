@@ -81,8 +81,8 @@ TEST_F(MeshSimTest, SeqWrapBumpsEpochAndKeepsSealing) {
 // seq 1,2,3... under the OLD (un-bumped) epoch; any later sealed buildMessage
 // frame in the same boot would then reuse an AEAD nonce already used by
 // pre-wrap traffic. Both call sites now route through the same
-// Mesh::nextSeqGuarded() choke point as buildMessage(); this proves the
-// enrollment-request path specifically.
+// OutboundSequenceState::nextSeqGuarded() choke point (via txState) as
+// buildMessage(); this proves the enrollment-request path specifically.
 //
 // NOTE: the master's serial relay of an ENROLLMENT frame to the hub
 // (SerialAdapter::relayEnrollmentToServer) rebuilds a brand-new message

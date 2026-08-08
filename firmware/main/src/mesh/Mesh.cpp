@@ -38,29 +38,6 @@ Mesh::Mesh()
   memset(&relayPendingMsg, 0, sizeof(relayPendingMsg));
 }
 
-// Seal-time AEAD nonce-reuse guard — see declaration comment in Mesh.h. Must
-// be called immediately before every sealPayload() call-site with the
-// (epoch, seq) about to be sealed; a rollback halts the node before the
-// encryption call ever runs.
-void Mesh::_checkEpochRollback(uint32_t epoch, uint16_t seq) {
-  if (_lastSealedEpoch == UINT32_MAX) {
-    _lastSealedEpoch = epoch;
-    _lastSealedSeq = seq;
-    return;
-  }
-  if (epoch > _lastSealedEpoch) {
-    _lastSealedEpoch = epoch;
-    _lastSealedSeq = seq;
-    return;
-  }
-  if (epoch == _lastSealedEpoch && seq > _lastSealedSeq) {
-    _lastSealedSeq = seq;
-    return;
-  }
-  lattice::err::fail(lattice::core::ErrorTypeDigit::CRYPTO, lattice::core::ModuleDigit::MESH, 1,
-                     "AEAD epoch rollback — refusing seal");
-}
-
 void Mesh::readMacAddress() {
   esp_err_t ret = esp_wifi_get_mac(WIFI_IF_STA, deviceMacAddress);
   if (ret != ESP_OK) {
@@ -127,22 +104,6 @@ PeerInfo* Mesh::findNextHopToMaster() {
   return &nextHopScratch;
 }
 
-uint16_t Mesh::nextSeqGuarded() {
-  uint16_t seq = txState.nextSeq();
-  if (seq == 0) {
-    // seq wrapped (spec §2): a reused (epoch, seq) pair would reuse an AEAD nonce.
-    // Advance the persisted epoch and restart the sequence. txState.bootEpoch is
-    // already the currently active epoch (kept in sync with EEPROM by init()
-    // and by this method), so bump from it directly rather than re-reading
-    // EEPROM.
-    uint32_t epoch = txState.bootEpoch + 1;
-    lattice::eeprom::saveBootEpoch(epoch);
-    txState.bumpEpoch(epoch);
-    seq = txState.nextSeq();
-  }
-  return seq;
-}
-
 mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType) {
   mesh_message msg = {};
   msg.proto_version = PROTO_VERSION;
@@ -158,7 +119,7 @@ mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMes
   if (data)
     memcpy(msg.data, data, sizeof(msg.data));
   msg.hop_count = 0;
-  msg.seq_num = nextSeqGuarded();
+  msg.seq_num = txState.nextSeqGuarded();
   msg.epoch_num = txState.bootEpoch;
   return msg;
 }
@@ -333,7 +294,7 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
   // (msgOverride with foreign origin) are already sealed — forward untouched.
   if (!isMaster && selfOriginated && isSealedType(msg.message_type)) {
     const uint8_t *kUp, *kDown;
-    _checkEpochRollback(msg.epoch_num, msg.seq_num);
+    txState.checkEpochRollback(msg.epoch_num, msg.seq_num);
     if (!masterE2EKeys(&kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kUp, msg)) {
       LATTICE_LOGLN("MESH", "E2E seal unavailable — uplink dropped", LogLevel::LOG_WARN);
       return;
@@ -478,7 +439,7 @@ void Mesh::sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const 
   memcpy(msg.target_mac_address, destMac, 6); // AAD-bound destination — set before sealing
 
   const uint8_t *kUp, *kDown;
-  _checkEpochRollback(msg.epoch_num, msg.seq_num);
+  txState.checkEpochRollback(msg.epoch_num, msg.seq_num);
   if (!peerE2EKeys(destMac, &kUp, &kDown) || !lattice::mesh::crypto::sealPayload(kDown, msg)) {
     LATTICE_LOGLN("MESH", "downlink seal unavailable — dropped", LogLevel::LOG_WARN);
     return;
@@ -566,8 +527,8 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // is crypto-free and read-only here. Every check below is unchanged from
   // the original inline block; only which class owns the classification
   // logic changed. The relay-toward-master case still executes here (not in
-  // DownlinkRouter) because transmitCore needs masterE2EKeys/
-  // _checkEpochRollback, which live on Mesh.
+  // DownlinkRouter) because transmitCore needs masterE2EKeys, which lives on
+  // Mesh, and txState.checkEpochRollback.
   uint8_t nextHop[6];
   switch (router.classify(msg, deviceMacAddress, isMaster, addressedToSelf, isBroadcastTarget,
                           addressedToMaster, nextHop)) {
@@ -811,7 +772,7 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint
   // Draw seq via the guarded choke point FIRST — it may bump txState.bootEpoch
   // on wrap — then stamp epoch_num from the (possibly just-bumped) value so
   // the ACK's epoch always matches the epoch its seq_num was drawn under.
-  ack.seq_num = nextSeqGuarded();
+  ack.seq_num = txState.nextSeqGuarded();
   ack.epoch_num = txState.bootEpoch;
   ack.message_type = MESH_TYPE_JOIN_ACK;
   ack.data_type = adapter_types::UNKNOWN_ADAPTER;
