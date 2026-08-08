@@ -30,6 +30,7 @@
 #include "PeerEnrollment.h"
 #include "UplinkRouter.h"
 #include "MeshMessenger.h"
+#include "RouteReportHandler.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -111,6 +112,11 @@ private:
   // MeshMessenger.h.
   MeshMessenger messenger;
 
+  // Route-report protocol handling — send + process, including the chain-MAC
+  // verification (issue #44 route-path-forgery defense) that used to live
+  // directly on Mesh (round 2 task 12). See RouteReportHandler.h.
+  RouteReportHandler routeReportHandler;
+
   void loadMeshKeyFromEEPROM();
 
   // --- Tiger Style refactor helpers ---
@@ -182,9 +188,6 @@ private:
     if (instance)
       instance->handleReceivedMessage(srcMac, msg);
   }
-
-  bool sendRouteReport();
-  void processRouteReport(const mesh_message& msg);
 
   // Beacon timer (moved from broadcastMasterBeacon for loop() integration).
   // lastBeaconMs is currently dead (unused outside its zero-init in the

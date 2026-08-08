@@ -94,6 +94,7 @@ set(FIRMWARE_SOURCES
   ../firmware/main/src/mesh/PeerEnrollment.cpp
   ../firmware/main/src/mesh/UplinkRouter.cpp
   ../firmware/main/src/mesh/MeshMessenger.cpp
+  ../firmware/main/src/mesh/RouteReportHandler.cpp
 )
 
 enable_testing()

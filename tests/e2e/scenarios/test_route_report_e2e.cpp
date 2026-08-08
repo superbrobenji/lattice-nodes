@@ -3,7 +3,8 @@
 // A non-master node periodically emits a MESH_TYPE_ROUTE_REPORT
 // (ROUTE_REPORT_INTERVAL_MS) carrying OP_ROUTE_REPORT and a hop-chain that each
 // relay appends its own MAC to. Payload layout (verified against
-// Mesh::sendRouteReport / processRouteReport, matches opcodes.h):
+// RouteReportHandler::sendRouteReport / processRouteReport (moved off Mesh in
+// round 2 task 12), matches opcodes.h):
 //   data[0]      = OP_ROUTE_REPORT (0xB3)
 //   data[1]      = path_len (number of relay hops appended so far; the
 //                  originating node emits 0 and does NOT append itself)
@@ -47,7 +48,7 @@ TEST_F(MeshSimTest, DirectNodeRouteReportReachesHub) {
 //
 // Header-field design (spec §4): the route report's opcode payload
 // (data[0]/data[1]) is E2E-sealed origin->master, so a relay can no longer
-// read/append to it (Mesh::processRouteReport's relay branch just forwards the
+// read/append to it (RouteReportHandler::processRouteReport's relay branch just forwards the
 // sealed frame unmodified) — that's why data[1] is a reserved constant 0 (see
 // DirectNodeRouteReportReachesHub above) regardless of hop count. Path
 // accumulation instead happens in the plaintext mesh_message header fields
@@ -57,7 +58,7 @@ TEST_F(MeshSimTest, DirectNodeRouteReportReachesHub) {
 // serial wire protocol to the hub (SerialFraming/mesh.pb.h carry no
 // route_len/route_path field), so hub->ofType() frames can't be used to
 // inspect them — read the path the master actually recorded instead
-// (Mesh::processRouteReport -> RouteTable, Task 5's "master records node
+// (RouteReportHandler::processRouteReport -> RouteTable, Task 5's "master records node
 // routes from route reports").
 TEST_F(MeshSimTest, RouteReportCarriesHopChain) {
   addMaster();

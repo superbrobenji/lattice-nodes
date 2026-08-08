@@ -1268,8 +1268,9 @@ bool downlinkRouteLenExceedsMaxHops(uint8_t pathLen);
 // indexing msg.route_path. RouteTable::record() already clamps pathLen to
 // MAX_HOPS at write time (RouteTable.h: `if (pathLen > config::MAX_HOPS)
 // return;`), and route-report processing rejects route_len > MAX_HOPS before
-// it ever reaches RouteTable::record() (Mesh.cpp's processRouteReport, ~line
-// 1175 pre-patch). Between those two guards there is no legitimate call path
+// it ever reaches RouteTable::record() (RouteReportHandler.cpp's
+// processRouteReport, moved from Mesh.cpp's ~line 1175 pre-patch in round 2
+// task 12). Between those two guards there is no legitimate call path
 // — and no public RouteTable API — that can hand routes->lookup() (and
 // therefore sendDownlinkToNode) a pathLen > MAX_HOPS; RouteTable::Entry
 // storage is private with no test hook to poke an oversized value directly,
