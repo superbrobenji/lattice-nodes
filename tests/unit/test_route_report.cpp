@@ -40,7 +40,7 @@ protected:
     memcpy(mesh.enrollment.devicePublicKey, myPub, 32);
 
     // Register master as a live, keyed peer so findNextHopToMaster() AND E2E
-    // sealing (Mesh::masterE2EKeys) both succeed.
+    // sealing (lattice::mesh::masterE2EKeys) both succeed.
     PeerInfo peer{};
     memcpy(peer.mac, masterMac, 6);
     memcpy(peer.publicKey, masterPub, 32);
@@ -59,7 +59,7 @@ protected:
   // The k_up this node uses to seal uplinks to the master set up by
   // setupRelayNode() — ECDH is symmetric, so deriving from our own priv + the
   // master's pubkey matches what the master derives from its priv + our pubkey
-  // (mirrors Mesh::masterE2EKeys).
+  // (mirrors lattice::mesh::masterE2EKeys).
   void deriveUpKey(uint8_t kUpOut[32]) {
     uint8_t kDown[32];
     lattice::mesh::crypto::deriveE2EKeys(myPriv, masterPub, kUpOut, kDown);
@@ -139,7 +139,10 @@ TEST_F(RouteReportTest, SendRouteReport_MessageType) {
   setupRelayNode(mesh, masterMac);
 
   size_t before = espNowSentPackets.size();
-  mesh.sendRouteReport();
+  mesh.routeReportHandler.sendRouteReport(mesh.isMaster, mesh.uplinkRouter, mesh.currentMaster,
+                                          mesh.peers, mesh.neighbors, mesh.enrollment, mesh.e2eKeys,
+                                          mesh.deviceMacAddress, mesh.txState, mesh.messenger,
+                                          mesh.transport);
 
   EXPECT_EQ(espNowSentPackets.size(), before + 1);
   mesh_message sent = lastSentMsg();
@@ -151,7 +154,10 @@ TEST_F(RouteReportTest, SendRouteReport_PayloadStructure) {
   Mesh mesh;
   setupRelayNode(mesh, masterMac);
 
-  mesh.sendRouteReport();
+  mesh.routeReportHandler.sendRouteReport(mesh.isMaster, mesh.uplinkRouter, mesh.currentMaster,
+                                          mesh.peers, mesh.neighbors, mesh.enrollment, mesh.e2eKeys,
+                                          mesh.deviceMacAddress, mesh.txState, mesh.messenger,
+                                          mesh.transport);
 
   // The wire payload is now E2E-sealed (Task 6) — open it with the same k_up
   // the master would derive before asserting on its plaintext structure.
@@ -176,7 +182,10 @@ TEST_F(RouteReportTest, SendRouteReport_NotSentByMaster) {
   mesh.isMaster = true;
 
   size_t before = espNowSentPackets.size();
-  mesh.sendRouteReport();  // master should be a no-op
+  mesh.routeReportHandler.sendRouteReport(mesh.isMaster, mesh.uplinkRouter, mesh.currentMaster,
+                                          mesh.peers, mesh.neighbors, mesh.enrollment, mesh.e2eKeys,
+                                          mesh.deviceMacAddress, mesh.txState, mesh.messenger,
+                                          mesh.transport); // master should be a no-op
 
   EXPECT_EQ(espNowSentPackets.size(), before);
 }
@@ -209,7 +218,10 @@ TEST_F(RouteReportTest, ProcessRouteReport_RelayForwardsSealedFrameUnmodified) {
     msg.data[i] = static_cast<uint8_t>(0xC0 + i);
 
   size_t before = espNowSentPackets.size();
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   ASSERT_EQ(espNowSentPackets.size(), before + 1);
   mesh_message sent = lastSentMsg();
@@ -261,7 +273,10 @@ TEST_F(RouteReportTest, RelayAppendsOwnMacToRoutePath) {
   ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
 
   size_t before = espNowSentPackets.size();
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   ASSERT_EQ(espNowSentPackets.size(), before + 1);
   mesh_message sent = lastSentMsg();
@@ -323,7 +338,10 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterDeliversToCallback) {
 
   ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
 
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   EXPECT_TRUE(callbackFired);
   EXPECT_EQ(received.data[0], OP_ROUTE_REPORT);
@@ -412,7 +430,10 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterRecordsRouteFromReport) {
 
   ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
 
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   uint8_t out[60];
   uint8_t len = 0;
@@ -442,7 +463,10 @@ TEST_F(RouteReportTest, ProcessRouteReport_HopLimitDropsMessage) {
     msg.data[i] = 0xAB;
 
   size_t before = espNowSentPackets.size();
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   EXPECT_EQ(espNowSentPackets.size(), before); // no message sent — hop limit reached
 }
@@ -478,7 +502,10 @@ TEST_F(RouteReportTest, ProcessRouteReport_MasterDropsOnBadOpcodeAfterOpen) {
   msg.data[0] = 0xFF; // wrong opcode (plaintext) — sealed correctly, auth succeeds
   ASSERT_TRUE(lattice::mesh::crypto::sealPayload(kUp, msg));
 
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   EXPECT_FALSE(callbackFired)
       << "master must drop a validly-sealed frame carrying an unexpected opcode";
@@ -497,13 +524,13 @@ TEST_F(RouteReportTest, DrainRecvQueue_DispatchesRouteReport) {
 
   // Directly push to recv queue (UNIT_TEST exposes all members)
   uint8_t srcMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
-  Mesh::RecvQueueEntry entry;
+  MeshTransport::RecvQueueEntry entry;
   memcpy(entry.srcMac, srcMac, 6);
   entry.msg = msg;
-  xRingbufferSend(mesh.recvQueue, &entry, sizeof(entry), 0);
+  xRingbufferSend(mesh.transport.recvQueue, &entry, sizeof(entry), 0);
 
   size_t before = espNowSentPackets.size();
-  mesh.drainRecvQueue();
+  mesh.drain();
 
   EXPECT_GT(espNowSentPackets.size(), before); // relayed the message
 }
@@ -517,7 +544,10 @@ TEST_F(RouteReportTest, MasterVerifiesValidChain_RecordsPath) {
   Mesh mesh;
   mesh_message msg = buildValidTwoHopChain(mesh, originMac, r1, r2);
 
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   uint8_t out[60];
   uint8_t len = 0;
@@ -538,7 +568,10 @@ TEST_F(RouteReportTest, MasterRejectsTamperedRoutePath_NoRecord) {
 
   msg.route_path[0] ^= 0x01; // flip one byte in route_path AFTER MAC-ing
 
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   uint8_t out[60];
   uint8_t len = 0;
@@ -556,7 +589,10 @@ TEST_F(RouteReportTest, MasterRejectsTamperedAuthPath_NoRecord) {
 
   msg.auth_path[0] ^= 0x01; // flip one byte in auth_path
 
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   uint8_t out[60];
   uint8_t len = 0;
@@ -577,7 +613,10 @@ TEST_F(RouteReportTest, MasterRejectsUnknownHop_NoRecord) {
   // master at all — an unenrolled/unknown hop.
   memcpy(&msg.route_path[6], strangerMac, 6);
 
-  mesh.processRouteReport(msg);
+  mesh.routeReportHandler.processRouteReport(
+      msg, mesh.isMaster, mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.testRoutes(),
+      mesh.deviceMacAddress, mesh.currentMaster, mesh.txState, mesh.messenger, mesh.uplinkRouter,
+      mesh.neighbors, mesh.transport, mesh.externalRecvCallback);
 
   uint8_t out[60];
   uint8_t len = 0;

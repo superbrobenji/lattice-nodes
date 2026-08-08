@@ -5,17 +5,13 @@
 #include <esp_now.h>
 #include <esp_attr.h>
 #include <esp_wifi.h>
-#include <esp_netif.h>
-#include <esp_event.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/ringbuf.h>
 #include <freertos/task.h>
-#include <array>
 #include <cstdint>
 #include <memory>
 #include "src/adapter/Adapter.h"
-#include "src/persistence/EepromManager.h"
 #include "../../project_config.h" // Added for global limits/config
 #include "../../lib/lattice-protocol/c/message_types.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
@@ -25,13 +21,21 @@
 #include "E2EKeyStore.h"
 #include "NeighborTable.h"
 #include "RouteTable.h"
+#include "MeshTransport.h"
+#include "MasterBeacon.h"
+#include "DownlinkRouter.h"
+#include "E2EKeyLookup.h"
+#include "PeerEnrollment.h"
+#include "UplinkRouter.h"
+#include "MeshMessenger.h"
+#include "RouteReportHandler.h"
+#include "FrameAuthorizer.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
 // friend declarations inside lattice::mesh::Mesh are valid.
 class ReplayCacheTest;
 class MeshLogicTest;
-class MeshEpochRollbackTest;
 #endif
 
 namespace lattice {
@@ -41,9 +45,8 @@ using ::mesh_message;
 using ::MeshMessageType;
 using lattice::adapter::adapter_types;
 
-// Protocol v0.6.0 flag-day (Phase G §8 wire shrink): 4→5, bumped atomically
-// with hub Task 6 in a parallel PR — must merge together.
-static constexpr uint8_t PROTO_VERSION = 5;
+// PROTO_VERSION lives in MeshMessenger.h (single definition, fix round 1 —
+// see that header's comment) since Mesh.h already #includes it above.
 
 class Mesh {
 #ifdef UNIT_TEST
@@ -67,104 +70,101 @@ private:
 
   PeerRegistry peers; // Peer list management (no heap alloc)
 
+  // ESP-NOW radio setup, RX ring buffer + trampoline + drain, and send
+  // primitives (Phase B Task 4, finding 1 job 1; finding 19). Mesh delegates
+  // all radio I/O to this instead of owning it directly.
+  MeshTransport transport;
+
   void readMacAddress();
-
-  static void onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status);
-  void IRAM_ATTR onDataRecvCallback(const esp_now_recv_info* mac, const uint8_t* incomingData,
-                                    int len);
-  static void IRAM_ATTR dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data,
-                                           int len);
-
-  mesh_message buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType);
 
   std::function<void(const mesh_message&)> externalRecvCallback;
 
   MasterInfo currentMaster;
   bool isMaster;
-  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
-  // millis() -> esp_timer_get_time()/1000ULL swap. lastBeaconMillis is NOT
-  // renamed to lastBeaconMs to avoid colliding with the (separate, unrelated)
-  // lastBeaconMs field further down this class.
-  uint64_t lastBeaconMillis;
-  uint64_t lastMasterBeaconReceivedMs;
-  static constexpr uint32_t STALE_MASTER_THRESHOLD_MS = lattice::config::STALE_MASTER_THRESHOLD_MS;
 
-  // Peer routing (uses currentMaster — stays in Mesh)
-  PeerInfo* findNextHopToMaster();
+  // Master-role beacon broadcast timing, master-timeout detection, and
+  // incoming-beacon processing (TOFU master-MAC learning, dual-master
+  // failover, duplicate-beacon-relay suppression) — Phase B Task 5 (finding 1
+  // job 3). Owns what were lastBeaconMillis/lastMasterBeaconReceivedMs/
+  // STALE_MASTER_THRESHOLD_MS as its own private members.
+  MasterBeacon beacon;
 
-  void sendMessage(const uint8_t* target, const mesh_message& msg);
-  void broadcastToAllPeers(const mesh_message& msg);
+  // Downlink relay, auto-peer-registration for forwarding, and the
+  // routing-decision half of processAdapterData's downlink branch (Phase B
+  // Task 6, finding 1 job 4 narrowed; finding 2's routing half). The
+  // security/E2E half of processAdapterData now lives in frameAuthorizer
+  // (round 2 task 13) — see FrameAuthorizer.h's doc comment.
+  // Mesh::processAdapterData switches on router.classify()'s result and
+  // executes the crypto-touching relay-toward-master action itself
+  // (transmitCore needs lattice::mesh::masterE2EKeys (E2EKeyLookup.h), and
+  // txState.checkEpochRollback).
+  DownlinkRouter router;
 
-  void transmitCore(const adapter_types type, const uint8_t* data,
-                    MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA,
-                    const mesh_message* msgOverride = nullptr);
+  // Uplink mirror of DownlinkRouter (round 2 task 10): owns findNextHopToMaster
+  // and the forwardingPeer LRU-of-one bookkeeping that used to live directly on
+  // Mesh — see UplinkRouter.h.
+  UplinkRouter uplinkRouter;
 
-  // Shared body for transmit()/transmitSelfOriginated() — see their comments.
-  void transmitDispatch(const adapter_types type, const uint8_t* data, bool selfOriginated);
+  // Owns outbound message construction and dispatch (round 2 task 11) --
+  // buildMessage/transmitCore/transmitDispatch/broadcastAdapterData/
+  // sendDownlinkToNode/enrollPeer/relayEnrollmentUplink all moved here. Mesh's
+  // remaining methods of the same names are thin forwards into this — see
+  // MeshMessenger.h.
+  MeshMessenger messenger;
+
+  // Route-report protocol handling — send + process, including the chain-MAC
+  // verification (issue #44 route-path-forgery defense) that used to live
+  // directly on Mesh (round 2 task 12). See RouteReportHandler.h.
+  RouteReportHandler routeReportHandler;
+
+  // processAdapterData's security half (round 2 task 13, the plan's most
+  // security-sensitive extraction) — master-not-self-addressed sealed-type
+  // gate, E2E open both directions, config-opcode authorization. Moved
+  // verbatim from Mesh; see FrameAuthorizer.h's doc comment for why the E2E
+  // open stays bundled with the authorization decision rather than being
+  // split out further. Mesh keeps only local-delivery dispatch after this
+  // returns.
+  FrameAuthorizer frameAuthorizer;
 
   void loadMeshKeyFromEEPROM();
-  void saveMeshKeyToEEPROM(const uint8_t* key);
 
   // --- Tiger Style refactor helpers ---
-  void processMasterBeacon(const mesh_message& msg);
   void processAdapterData(const mesh_message& msg);
-  void relayDownlink(const mesh_message& msg);
-  // Relay an enrollment (JOIN_REQUEST) broadcast one hop toward the master so a
-  // node out of direct RF range of the master can still enroll (Task 9b Bug #5).
-  void relayEnrollmentUplink(const mesh_message& msg);
 
   // Setup helpers (Tiger Style refactor)
-  bool setupWiFi();
-  bool setupEspNow();
+  // Wraps transport.setup() (Wi-Fi bring-up) plus this node's own MAC-address
+  // ownership (readMacAddress()/peers.setDeviceMac()) — MAC address stays on
+  // Mesh (Phase B Task 4) since many other things beyond transport need it.
+  bool setupRadio();
   void loadPersistentState();
 
   // Enrollment helper (relay dispatch only — "addressed to us" branch is in Enrollment)
   void processJoinAck(const mesh_message& msg);
 
-  // Add (or key-update) a peer in the registry, persist, and register it with
-  // ESP-NOW encryption. Shared by enrollPeer() (master registers the enrolling
-  // node; allowRekey=true — the hub-approved serial path may legitimately
-  // re-key a re-enrolling node) and processJoinAck() (node registers the
-  // approving master; allowRekey=false — an over-the-air JOIN_ACK must never
-  // replace established key material, only set it on first contact or upgrade
-  // a placeholder all-zero key). Returns false if the registry is full and the
-  // peer could not be added.
-  bool registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, bool allowRekey);
-
-  // Static trampoline binding registerPeerWithKey(allowRekey=false) to
-  // Enrollment::RegisterPeerFn's plain-function-pointer signature (item H) —
+  // Static trampoline binding lattice::mesh::registerPeerWithKey(allowRekey=false)
+  // to Enrollment::RegisterPeerFn's plain-function-pointer signature (item H) —
   // routes through the singleton `instance` the same way dataRecvTrampoline
-  // does for esp_now_register_recv_cb. Used only by processJoinAck().
-  static bool registerPeerWithKeyTrampoline(const uint8_t* mac, const uint8_t* publicKey32);
+  // does for esp_now_register_recv_cb. Used only by processJoinAck() (via
+  // lattice::mesh::dispatchJoinAck, round 2 task 10).
+  static bool registerPeerWithKeyTrampoline(const uint8_t* mac, const uint8_t* publicKey32) {
+    return lattice::mesh::registerPeerWithKey(mac, publicKey32, /*allowRekey=*/false,
+                                              instance->peers, instance->enrollment,
+                                              instance->_dualMasterMode);
+  }
 
   // Replay protection (composed)
   ReplayCache replay;
 
-  // Single choke point for drawing a tx sequence number from replay.txSeqNum.
-  // ALL sites that need a fresh (epoch, seq) pair for a message we originate
-  // MUST go through this — it is the only place that guards against the
-  // 0xFFFF -> 0 wrap (spec §2): a reused (epoch, seq) pair after a silent
-  // wrap would reuse an AEAD nonce. On wrap, bumps + persists the boot epoch
-  // before redrawing so the new sequence starts under a fresh epoch.
-  uint16_t nextSeqGuarded();
-
-  // Seal-time AEAD nonce-reuse guard (Phase A, complements nextSeqGuarded's
-  // wrap handling above): tracks the (epoch, seq) of the last frame this node
-  // sealed. Called immediately before every sealPayload() call-site; halts
-  // the node via lattice::err::fail(CRYPTO, MESH, 1) if the new (epoch, seq)
-  // does not strictly advance, since that would reuse an AEAD nonce prefix
-  // under the same key. UINT32_MAX in _lastSealedEpoch is the sentinel for
-  // "no seal observed yet" (first call always passes).
-  uint32_t _lastSealedEpoch = UINT32_MAX;
-  uint16_t _lastSealedSeq = 0;
-  void _checkEpochRollback(uint32_t epoch, uint16_t seq);
-
-#ifdef UNIT_TEST
-  friend class MeshEpochRollbackTest;
-#endif
+  // This node's own outbound sequence + relay-dedup bookkeeping (finding 15
+  // split — was fields directly on ReplayCache). Round 2 Task 8: txState now
+  // also owns the guarded-sequence-draw and seal-time epoch-rollback guard
+  // (txState.nextSeqGuarded()/txState.checkEpochRollback()) — see
+  // OutboundSequenceState in ReplayCache.h for both.
+  OutboundSequenceState txState;
 
 #ifdef UNIT_TEST
   ReplayCache& testReplay() { return replay; }
+  OutboundSequenceState& testTxState() { return txState; }
   NeighborTable& testNeighbors() { return neighbors; }
   RouteTable* testRoutes() { return routes.get(); }
   // Exposes the node's mocked clock to tests. Phase I Task 6 (FF): return
@@ -181,55 +181,22 @@ private:
 
   bool _dualMasterMode;
 
-  // --- ESP-NOW receive ring buffer (lock-free SPSC) ---
-  // (Phase G §4) Trimmed 8 -> 4: observed fan-in during Phase A + B testing never
-  // exceeded 3 concurrent frames; 4-deep gives a 1-slot margin. Raise back if real
-  // deployments show queue-full drops.
-  static constexpr size_t RECV_QUEUE_SIZE = 4;
+  // Dispatch for one message dequeued by transport.drain() (Phase B Task 4).
+  // Reproduces the old Mesh::drainRecvQueue's post-pop body exactly: proto-
+  // version check, replay check, peers.updateLastSeen, then the message-type
+  // switch into Mesh-owned handlers (enrollment.processRequest,
+  // beacon.process, processAdapterData, etc.) — this dispatch stays on Mesh
+  // because MeshTransport has no visibility into those collaborators.
+  void handleReceivedMessage(const uint8_t srcMac[6], const mesh_message& msg);
 
-  // Phase G §7: CompactMessage (src/mesh/CompactMessage.h) was evaluated for
-  // recvQueue's element type but is NOT used here — see task-3-report.md.
-  // Every message type that flows through this queue (ADAPTER_DATA downlink
-  // relay, ROUTE_REPORT verify/relay, JOIN_ACK, ENROLLMENT relay) needs at
-  // least one wire-only field CompactMessage cannot carry without matching
-  // the wire message's own size (route_path/auth_tag/auth_path/
-  // enrollment_public_key are load-bearing everywhere; secondary_master_mac/
-  // secondary_public_key turned out to be load-bearing too — confirmed by
-  // DualMasterTest.UplinkReachesSecondaryMasterAfterFailover and
-  // ConfigSetFromSecondaryMasterIsHonoredAfterFailover failing when they were
-  // dropped). RECV_QUEUE_SIZE below (8 -> 4) is this bundle's actual queue
-  // RAM lever.
-  struct RecvQueueEntry {
-    uint8_t srcMac[6];
-    mesh_message msg;
-  };
-
-  // Phase I Task 8 (item OO): static FreeRTOS ring buffer replaces the
-  // hand-rolled head/tail/count SPSC array above. RINGBUF_TYPE_NOSPLIT keeps
-  // each xRingbufferReceive() call returning a contiguous pointer to one
-  // whole RecvQueueEntry (never split across the wrap boundary), matching
-  // the old array's per-slot semantics. Storage is a static member array —
-  // xRingbufferCreateStatic() places the ring entirely inside it, so this
-  // stays heap-free like the array it replaces. The +128 pads for the ring's
-  // internal per-item header overhead (a few bytes/item); real usage is
-  // RECV_QUEUE_SIZE * (sizeof(RecvQueueEntry) + ~8).
-  RingbufHandle_t recvQueue = nullptr;
-  StaticRingbuffer_t _recvQueueStruct;
-  uint8_t _recvQueueStorage[RECV_QUEUE_SIZE * sizeof(RecvQueueEntry) + 128];
-
-  // Phase I Task 9 (item EE): handle of the dedicated mesh-drain task (owned by
-  // main.cpp — see mesh_task_fn / setDrainNotifyHandle()). The RX-ISR
-  // trampoline (onDataRecvCallback) notifies this task via
-  // vTaskNotifyGiveFromISR immediately after enqueueing into recvQueue, so the
-  // task wakes to drain instead of a polling loop discovering the item on its
-  // next tick. Null (never set) is a valid state — the host unit-test /
-  // SimNode harness has no real FreeRTOS task and calls drain() directly, and
-  // onDataRecvCallback null-checks before notifying.
-  TaskHandle_t drainNotifyHandle_ = nullptr;
-
-  void drainRecvQueue();
-  bool sendRouteReport();
-  void processRouteReport(const mesh_message& msg);
+  // Static trampoline binding handleReceivedMessage to
+  // MeshTransport::MessageHandler's plain-function-pointer signature — routes
+  // through the singleton `instance` the same way dataRecvTrampoline used to.
+  // Used only by drain() below.
+  static void handleReceivedMessageTrampoline(const uint8_t srcMac[6], const mesh_message& msg) {
+    if (instance)
+      instance->handleReceivedMessage(srcMac, msg);
+  }
 
   // Beacon timer (moved from broadcastMasterBeacon for loop() integration).
   // lastBeaconMs is currently dead (unused outside its zero-init in the
@@ -257,54 +224,6 @@ private:
   // theirs), so move is the only thing letting Mesh be returned by value
   // from the test factory helpers (see those types' header comments).
   std::unique_ptr<RouteTable> routes;
-  // Holds a NeighborTable-resolved next hop (not an enrolled peer) so
-  // findNextHopToMaster() can return a stable PeerInfo* for a pure relay,
-  // which is never added to `peers` (enrollment-only rule).
-  PeerInfo nextHopScratch{};
-  // MAC of the single auto-registered (unencrypted) ESP-NOW peer currently
-  // standing in for a multi-hop forwarding relay, or all-zero if none. A node
-  // only ever forwards uplink to ONE next hop at a time, so at most one such
-  // peer is ever needed — bounding it here closes the ESP-NOW peer table
-  // exhaustion vector (spec §2: "20-peer cap, LRU-evicted") that an RF
-  // attacker flooding distinct-MAC spoofed beacons would otherwise trigger.
-  // Enrolled peers (master + sensors, held in `peers`) are NEVER tracked or
-  // evicted here.
-  uint8_t forwardingPeer[6]{};
-
-  // Bounded LRU of auto-registered DOWNLINK forwarding-peer MACs (spec §2:
-  // "20-peer cap, LRU-evicted"). Unlike the single uplink forwardingPeer
-  // above, a node/master may legitimately need to have MULTIPLE distinct
-  // downlink forwarding peers registered concurrently (e.g. relaying several
-  // in-flight source-routed frames toward different next hops), so this is a
-  // small fixed-capacity LRU rather than a single slot. Capacity is
-  // LATTICE_DOWNLINK_PEER_MAX (project_config.h) — kept small so enrolled
-  // peers + the uplink forwardingPeer + this stay well under the ~20 ESP-NOW
-  // cap. Entries are ordered most-recently-used first (index 0). Enrolled
-  // peers (`peers`) and the current master are NEVER tracked or evicted here
-  // — see registerDownlinkPeer().
-  uint8_t downlinkPeerLru[lattice::config::LATTICE_DOWNLINK_PEER_MAX][6]{};
-  size_t downlinkPeerLruCount{0};
-
-  // Auto-register `mac` as an unencrypted ESP-NOW peer for downlink
-  // forwarding, bounding the set of non-enrolled, non-master peers this adds
-  // via the downlinkPeerLru above (spec §2). If `mac` is an enrolled peer or
-  // the current master, this is a plain idempotent registration — those
-  // peers are managed elsewhere (PeerRegistry / enrollment) and must never be
-  // evicted by downlink forwarding churn. Otherwise `mac` is tracked in the
-  // LRU: already-tracked -> move to front (touch); not tracked and the LRU is
-  // full -> evict the oldest entry from ESP-NOW first. Replaces the plaintext
-  // `registerPeerWithEspNow` calls previously used directly by
-  // sendDownlinkToNode()/processAdapterData()'s relay-forward branch, which
-  // had no bound and let an RF attacker crafting frames with fresh distinct
-  // next-hop MACs exhaust the ESP-NOW peer table one entry per frame.
-  void registerDownlinkPeer(const uint8_t* mac);
-
-  // Returns k_up/k_down for the current master (leaf side); false if not enrolled
-  // or master pubkey unknown.
-  bool masterE2EKeys(const uint8_t** kUp, const uint8_t** kDown);
-  // Returns keys for an enrolled origin peer (master side); false if unknown peer.
-  bool peerE2EKeys(const uint8_t* originMac, const uint8_t** kUp, const uint8_t** kDown);
-  static bool isSealedType(uint8_t messageType);
 
 public:
   Mesh();
@@ -370,7 +289,7 @@ public:
   // Public (unlike drainRecvQueue) so main.cpp's task body and the host
   // unit-test / SimNode harness — which has no real FreeRTOS task — can both
   // call it directly.
-  void drain() { drainRecvQueue(); }
+  void drain() { transport.drain(&Mesh::handleReceivedMessageTrampoline); }
 
   // Registers the dedicated mesh task's handle so onDataRecvCallback's ISR
   // trampoline can wake it via vTaskNotifyGiveFromISR after enqueueing into
@@ -379,7 +298,7 @@ public:
   // is valid — onDataRecvCallback null-checks before notifying, so the ISR
   // path simply skips the notify and drain() must instead be driven directly
   // (as it is by SimNode::tick() and the unit tests).
-  void setDrainNotifyHandle(TaskHandle_t handle) { drainNotifyHandle_ = handle; }
+  void setDrainNotifyHandle(TaskHandle_t handle) { transport.setDrainNotifyHandle(handle); }
 
   // Node role config
   // Re-evaluates the RouteTable allocation (issue #51) on every role change,
@@ -397,10 +316,10 @@ public:
   bool getDualMasterMode() const { return _dualMasterMode; }
 
   // Peer management API (optional, can be used in your app/UI)
-  void addPeer(const uint8_t* mac);
+  void addPeer(const uint8_t* mac) { lattice::mesh::addPeer(mac, peers); }
   void removePeer(const uint8_t* mac) { peers.removeAndPersist(mac); }
-  const PeerInfo* getPeerList() const { return peers.peerMacs; }
-  size_t getPeerCount() const { return peers.peerCount; }
+  const PeerInfo* getPeerList() const { return peers.begin(); }
+  size_t getPeerCount() const { return peers.count(); }
 
   // Broadcast adapter data to all peers.
   // deliverLocally: also hand the built message to externalRecvCallback, the
@@ -408,14 +327,23 @@ public:
   // master-originated, server-bound data (currently: health reports) reaches
   // this node's own serial adapter — broadcastToAllPeers() explicitly skips
   // self, so without this the master could never answer for itself.
-  void broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally = false);
+  // Thin forward (round 2 task 11) — body now lives in MeshMessenger.
+  void broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally = false) {
+    messenger.broadcastAdapterData(type, data, deliverLocally, deviceMacAddress, currentMaster,
+                                   txState, peers, transport, externalRecvCallback);
+  }
 
   // Master-only: source-route a sealed downlink to a specific enrolled node
   // (spec §4). Seals `data` with the destination's k_down, then unicasts via
   // the reversed relay path recorded in RouteTable (from that node's most
   // recent route report), or broadcast-floods if no route is known. No-op if
-  // this node is not master. See Mesh.cpp for the full rationale.
-  void sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const uint8_t* data);
+  // this node is not master. See MeshMessenger.cpp for the full rationale.
+  // Thin forward (round 2 task 11) — body now lives in MeshMessenger.
+  void sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const uint8_t* data) {
+    messenger.sendDownlinkToNode(destMac, type, data, isMaster, deviceMacAddress, currentMaster,
+                                 txState, peers, enrollment, e2eKeys, routes.get(), router,
+                                 transport);
+  }
 
   // Serial adapter helper (optional broadcast)
   static void broadcastAdapterDataStatic(adapter_types type, const uint8_t* data);
@@ -425,19 +353,6 @@ public:
   // targeted server command without holding a Mesh instance itself.
   static void sendDownlinkToNodeStatic(const uint8_t* destMac, adapter_types type,
                                        const uint8_t* data);
-
-  // Single choke point for esp_now_send(BROADCAST_MAC, ...) (post-Phase-G
-  // audit item U): every broadcast site (master beacon, JOIN_ACK broadcast,
-  // beacon relay, enrollment request) now funnels through here instead of
-  // hand-rolling the reinterpret_cast<>/sizeof() call + its own error
-  // handling. Returns true on ESP_OK; on failure, logs (LOG_WARN) and returns
-  // false — callers that previously ignored the esp_now_send() result may
-  // keep doing so (this still logs internally), and callers that previously
-  // added their own success/fail message keep that message, now driven off
-  // this return value instead of a raw esp_err_t. Static (no instance state
-  // needed) so Enrollment::sendRequest() — which does not hold a Mesh* — can
-  // call it directly.
-  static bool sendBroadcast(const mesh_message& msg);
 
   // Debug helper
   void debugDumpRadio();
@@ -452,23 +367,30 @@ public:
   void sendEnrollmentRequest() {
     // Pass proto_version + a fresh (epoch, seq) so ReplayCache can dedup relayed
     // copies of this request while still allowing the deliberate 10s retry.
-    // Draw seq via the guarded choke point FIRST (it may bump replay.bootEpoch
+    // Draw seq via the guarded choke point FIRST (it may bump txState.bootEpoch
     // on wrap), then read bootEpoch — reading it as a separate statement after
-    // the draw (rather than in the same call as replay.nextSeq()) avoids
+    // the draw (rather than in the same call as txState.nextSeq()) avoids
     // depending on unspecified argument evaluation order for a possibly-mutated
     // member.
-    uint16_t seq = nextSeqGuarded();
-    enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, replay.bootEpoch, seq);
+    uint16_t seq = txState.nextSeqGuarded();
+    enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, txState.bootEpoch, seq);
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
-  void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);
+  // Thin forward (round 2 task 11) — body now lives in MeshMessenger.
+  void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
+    enrollPeer(mac, publicKey32, nullptr, nullptr);
+  }
   // 4-arg overload: also stamps the server-provided secondary-master identity
   // (secondaryMac/secondaryPubKey32) into the JOIN_ACK broadcast to the newly
   // enrolled node, so it can TOFU-learn its failover master up front (Phase 4).
   // Pass nullptr, nullptr (as the 2-arg overload does) when there is no
-  // secondary — the ACK's secondary fields are then left zeroed.
+  // secondary — the ACK's secondary fields are then left zeroed. Thin forward
+  // (round 2 task 11) — body now lives in MeshMessenger.
   void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint8_t* secondaryMac,
-                  const uint8_t* secondaryPubKey32);
+                  const uint8_t* secondaryPubKey32) {
+    messenger.enrollPeer(mac, publicKey32, secondaryMac, secondaryPubKey32, deviceMacAddress,
+                         txState, peers, enrollment, _dualMasterMode, transport);
+  }
 
   // Enrollment relay callback — set by Serial_Adapter owner (main.ino)
   void setEnrollmentRelayFn(EnrollmentRelayFn fn) { enrollment.setRelayFn(fn); }
@@ -477,14 +399,11 @@ public:
   uint8_t getHopCount() const { return isMaster ? 0 : currentMaster.distance; }
 
 #if SIMULATE_MODE
-  // Inject a message directly into the receive queue (bypasses radio — for dev/test only)
+  // Inject a message directly into the receive queue (bypasses radio — for
+  // dev/test only). Forwards to MeshTransport, which owns recvQueue (Phase B
+  // Task 4).
   void injectReceivedMessage(const uint8_t* srcMac, const mesh_message& msg) {
-    RecvQueueEntry entry;
-    memcpy(entry.srcMac, srcMac, 6);
-    entry.msg = msg;
-    // Non-blocking send (0 ticks); silently dropped if full, matching the
-    // old array-based "Queue full — drop" behavior.
-    xRingbufferSend(recvQueue, &entry, sizeof(entry), 0);
+    transport.injectReceivedMessage(srcMac, msg);
   }
 #endif
 };

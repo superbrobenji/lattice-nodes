@@ -10,15 +10,16 @@ namespace mesh {
 // protocol v0.6.0 wire shrink, §8 — was 250B when this type was designed)
 // remains the source of truth for anything that touches the radio
 // (SerialFraming / ESP-NOW send path) — this type only shrinks what a frame
-// costs while it sits in Mesh::recvQueue or is carried on the stack past the
-// initial decode boundary (Mesh::onDataRecvCallback / Mesh::drainRecvQueue).
+// costs while it sits in MeshTransport::recvQueue or is carried on the stack
+// past the initial decode boundary (MeshTransport::onDataRecvCallback /
+// Mesh::handleReceivedMessage, Phase B Task 4 — formerly Mesh::drainRecvQueue).
 //
 // Field-drop rationale (audited against every recvQueue-reachable consumer in
 // Mesh.cpp/Enrollment.cpp before finalizing — see task-3-report.md for the
 // full trace): the design doc's original sketch for this struct additionally
 // dropped route_len/route_path/auth_tag/auth_path/enrollment_public_key, but
 // each of those is read by at least one message type that flows through
-// Mesh::recvQueue in normal (not just edge-case) operation:
+// MeshTransport::recvQueue in normal (not just edge-case) operation:
 //   - auth_tag:               every AEAD open/seal (E2ECrypto.h) — sealed
 //                              ADAPTER_DATA/ROUTE_REPORT local delivery.
 //   - route_len/route_path:   downlink source-routed relay (processAdapterData,
@@ -41,11 +42,11 @@ namespace mesh {
 // data[4..42] (see SerialFraming::decode / Enrollment::processJoinAck).
 // Because toCompact()/toWire() copy data[64] verbatim (CompactMessage.cpp),
 // this secondary data DOES survive the compact round trip today: a
-// Mesh::recvQueue frame carrying a real dual-master JOIN_ACK's secondary
-// fields keeps them, embedded in dst.data, all the way through
-// drainRecvQueue's reconstruction. There is nothing to "drop" here anymore
-// — readers just need to know to pull the secondary MAC/pubkey out of
-// data[4..42] on JOIN_ACK frames, same as the wire form requires.
+// MeshTransport::recvQueue frame carrying a real dual-master JOIN_ACK's
+// secondary fields keeps them, embedded in dst.data, all the way through
+// Mesh::handleReceivedMessage's reconstruction. There is nothing to "drop"
+// here anymore — readers just need to know to pull the secondary MAC/pubkey
+// out of data[4..42] on JOIN_ACK frames, same as the wire form requires.
 struct CompactMessage {
   int32_t data_type;
   uint32_t epoch_num;

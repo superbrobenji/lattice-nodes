@@ -75,8 +75,8 @@ TEST(CompactMessage, RoundTripPreservesStoredFields) {
 // the ordinary `data` field coverage in RoundTripPreservesStoredFields above.
 
 // toWire() fully overwrites its output — no stale data from a previous
-// reconstruction should leak through (matters since drainRecvQueue reuses a
-// single stack mesh_message per iteration in Mesh.cpp).
+// reconstruction should leak through (matters since MeshTransport::drain
+// reuses a single stack RecvQueueEntry per iteration in MeshTransport.cpp).
 TEST(CompactMessage, ToWireOverwritesPreviousContents) {
   mesh_message stale = makeFullWireMessage(); // fully non-zero, incl. dropped fields
   CompactMessage empty{}; // zero-initialized compact message

@@ -29,9 +29,6 @@ struct MasterInfo {
 
 class PeerRegistry {
 public:
-  PeerInfo peerMacs[MAX_PEERS]{};
-  size_t peerCount{0};
-
   PeerRegistry();
   void setDeviceMac(const uint8_t* mac);
 
@@ -48,8 +45,15 @@ public:
   void removeAndPersist(const uint8_t* mac);
 
   size_t count() const { return peerCount; }
+  const PeerInfo& at(size_t i) const { return peerMacs[i]; }
+  PeerInfo* begin() { return peerMacs; }
+  PeerInfo* end() { return peerMacs + peerCount; }
+  const PeerInfo* begin() const { return peerMacs; }
+  const PeerInfo* end() const { return peerMacs + peerCount; }
 
 private:
+  PeerInfo peerMacs[MAX_PEERS]{};
+  size_t peerCount{0};
   uint8_t deviceMac[6]{};
 };
 
