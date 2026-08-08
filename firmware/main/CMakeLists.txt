@@ -5,7 +5,7 @@
 # Listing it in REQUIRES exposes Arduino.h, Serial, WiFi, String,
 # esp_now, and the rest of the Arduino API headers.
 # CONFIG_AUTOSTART_ARDUINO=y (sdkconfig.defaults) provides app_main().
-# Persistence (src/persistence/EepromManager.*) uses the `nvs_flash` component
+# Persistence (src/persistence/eeprom/*) uses the `nvs_flash` component
 # directly (nvs_open/nvs_get_*/nvs_set_*) rather than Arduino's Preferences
 # wrapper — Phase I Task 4.
 idf_component_register(
@@ -40,7 +40,14 @@ idf_component_register(
     "src/mesh/serialization/nanopb/pb_encode.c"
     "src/mesh/serialization/nanopb/pb_decode.c"
     "src/mesh/serialization/nanopb/pb_common.c"
-    "src/persistence/EepromManager.cpp"
+    "src/persistence/eeprom/EepromCore.cpp"
+    "src/persistence/eeprom/EepromIdentity.cpp"
+    "src/persistence/eeprom/EepromRole.cpp"
+    "src/persistence/eeprom/EepromSecurity.cpp"
+    "src/persistence/eeprom/EepromPeers.cpp"
+    "src/persistence/eeprom/EepromDiagnostics.cpp"
+    "src/persistence/eeprom/EepromEnrollment.cpp"
+    "src/persistence/eeprom/EepromDeviceConfig.cpp"
   INCLUDE_DIRS
     "."
     "src"
@@ -69,4 +76,5 @@ target_include_directories(${COMPONENT_LIB} PUBLIC
   src/mesh/serialization/nanopb
   src/network
   src/persistence
+  src/persistence/eeprom
 )

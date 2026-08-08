@@ -1,7 +1,7 @@
 #pragma once
 // Mock nvs.h — shadows the ESP-IDF nvs_flash component's nvs.h for host tests.
 //
-// Backs EepromManager's nvs_open/nvs_get_*/nvs_set_*/nvs_commit/nvs_close/
+// Backs lattice::eeprom's nvs_open/nvs_get_*/nvs_set_*/nvs_commit/nvs_close/
 // nvs_erase_* calls (Phase I Task 4: nvs_flash direct) with an in-memory
 // "namespace/key" -> bytes map, keyed the same way tests/mocks/Preferences.cpp
 // used to key its store. Semantics deliberately mirror the real ESP-IDF nvs
@@ -13,7 +13,7 @@
 //   - nvs_get_blob with a buffer >= stored size copies only the actual stored
 //     length and reports that length back via *length (matches real IDF; the
 //     untouched remainder of a caller's larger buffer is left as-is, which is
-//     why EepromManager::loadPeerList() prefills its buffer with 0xFF before
+//     why eeprom::loadPeerList() (EepromPeers.cpp) prefills its buffer with 0xFF before
 //     calling in).
 #include <cstddef>
 #include <cstdint>

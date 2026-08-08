@@ -6,7 +6,8 @@
 #include "esp_wifi_mock.h"
 #include "time_mock.h"
 #include "EEPROM.h"
-#include "persistence/EepromManager.h"
+#include "persistence/eeprom/EepromCore.h"
+#include "persistence/eeprom/EepromIdentity.h"
 #include "mesh/Mesh.h"
 
 using namespace lattice::adapter;

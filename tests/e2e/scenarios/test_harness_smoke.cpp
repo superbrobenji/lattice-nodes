@@ -7,7 +7,7 @@
 #include "harness/MasterKeypairFixture.h"
 #include "EEPROM.h"
 #include "esp_wifi_mock.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromCore.h"
 #include "src/mesh/Mesh.h"
 #include "src/adapter/AdapterFactory.h"
 #include "src/adapter/serial/SerialFraming.h"

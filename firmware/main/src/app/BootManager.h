@@ -2,7 +2,7 @@
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromDiagnostics.h"
 #include "src/logging/Logger.h"
 
 namespace lattice {

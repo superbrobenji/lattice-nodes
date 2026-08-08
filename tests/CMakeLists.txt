@@ -59,7 +59,14 @@ set(FIRMWARE_SOURCES
   ../firmware/main/src/mesh/serialization/nanopb/pb_encode.c
   ../firmware/main/src/mesh/serialization/nanopb/pb_decode.c
   ../firmware/main/src/mesh/serialization/nanopb/pb_common.c
-  ../firmware/main/src/persistence/EepromManager.cpp
+  ../firmware/main/src/persistence/eeprom/EepromCore.cpp
+  ../firmware/main/src/persistence/eeprom/EepromIdentity.cpp
+  ../firmware/main/src/persistence/eeprom/EepromRole.cpp
+  ../firmware/main/src/persistence/eeprom/EepromSecurity.cpp
+  ../firmware/main/src/persistence/eeprom/EepromPeers.cpp
+  ../firmware/main/src/persistence/eeprom/EepromDiagnostics.cpp
+  ../firmware/main/src/persistence/eeprom/EepromEnrollment.cpp
+  ../firmware/main/src/persistence/eeprom/EepromDeviceConfig.cpp
   ../firmware/main/src/adapter/AdapterFactory.cpp
   ../firmware/main/src/adapter/Adapter.cpp
   ../firmware/main/src/adapter/serial/SerialFraming.cpp
@@ -109,7 +116,14 @@ macro(add_unit_test name source)
 endmacro()
 
 add_unit_test(test_smoke              unit/test_smoke.cpp)
-add_unit_test(test_eeprom_manager     unit/test_eeprom_manager.cpp)
+add_unit_test(test_eeprom_core        unit/test_eeprom_core.cpp)
+add_unit_test(test_eeprom_identity    unit/test_eeprom_identity.cpp)
+add_unit_test(test_eeprom_role        unit/test_eeprom_role.cpp)
+add_unit_test(test_eeprom_security    unit/test_eeprom_security.cpp)
+add_unit_test(test_eeprom_peers       unit/test_eeprom_peers.cpp)
+add_unit_test(test_eeprom_diagnostics unit/test_eeprom_diagnostics.cpp)
+add_unit_test(test_eeprom_enrollment  unit/test_eeprom_enrollment.cpp)
+add_unit_test(test_eeprom_device_config unit/test_eeprom_device_config.cpp)
 add_unit_test(test_serial_framing     unit/test_serial_framing.cpp)
 add_unit_test(test_replay_cache       unit/test_replay_cache.cpp)
 add_unit_test(test_outbound_sequence_state unit/test_outbound_sequence_state.cpp)

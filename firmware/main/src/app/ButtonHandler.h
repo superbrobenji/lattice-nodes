@@ -7,7 +7,8 @@
 #include "src/hardware/input/Button.h"
 #include "src/hardware/output/Led.h"
 #include "src/mesh/Mesh.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromCore.h"
+#include "src/persistence/eeprom/EepromRole.h"
 #include "src/logging/Logger.h"
 
 namespace lattice {

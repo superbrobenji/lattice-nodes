@@ -3,7 +3,10 @@
 #include "src/network/hw_mac.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromCore.h"
+#include "src/persistence/eeprom/EepromDiagnostics.h"
+#include "src/persistence/eeprom/EepromDeviceConfig.h"
+#include "src/persistence/eeprom/EepromSecurity.h"
 // Error.h already provides ERROR_CHECK macros
 #include <esp_now.h>
 #include <esp_timer.h>
