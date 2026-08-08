@@ -186,10 +186,6 @@ void Mesh::handleReceivedMessage(const uint8_t srcMac[6], const mesh_message& ms
   }
 }
 
-bool Mesh::isSealedType(uint8_t messageType) {
-  return messageType == MESH_TYPE_ADAPTER_DATA || messageType == MESH_TYPE_ROUTE_REPORT;
-}
-
 // Static trampoline through the singleton `instance` (Adapter holds a plain
 // function-pointer member — see this method's declaration comment in Mesh.h
 // for why it can't be a capturing lambda/std::function). Body moved to
@@ -370,7 +366,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // a broadcast-target (or otherwise not-self-addressed) sealed frame arriving here
   // over the air at the master is either a stale self-echo or a forgery — drop it
   // rather than deliver it to externalRecvCallback without E2E authentication.
-  if (isMaster && !addressedToSelf && isSealedType(msg.message_type)) {
+  if (isMaster && !addressedToSelf && lattice::mesh::isSealedType(msg.message_type)) {
     LATTICE_LOGLN("MESH",
                   "Master: sealed-type frame not addressed to self rejected (unauthenticated)",
                   LogLevel::LOG_WARN);
@@ -380,7 +376,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // Local delivery
   // E2E open (spec §2): master unseals self-targeted uplink before local delivery.
   mesh_message opened = msg;
-  bool needsOpen = isMaster && addressedToSelf && isSealedType(msg.message_type);
+  bool needsOpen = isMaster && addressedToSelf && lattice::mesh::isSealedType(msg.message_type);
   if (needsOpen) {
     const uint8_t *kUp, *kDown;
     if (!lattice::mesh::peerE2EKeys(msg.origin_mac_address, peers, enrollment, e2eKeys, &kUp,

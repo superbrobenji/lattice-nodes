@@ -45,9 +45,8 @@ using ::mesh_message;
 using ::MeshMessageType;
 using lattice::adapter::adapter_types;
 
-// Protocol v0.6.0 flag-day (Phase G §8 wire shrink): 4→5, bumped atomically
-// with hub Task 6 in a parallel PR — must merge together.
-static constexpr uint8_t PROTO_VERSION = 5;
+// PROTO_VERSION lives in MeshMessenger.h (single definition, fix round 1 —
+// see that header's comment) since Mesh.h already #includes it above.
 
 class Mesh {
 #ifdef UNIT_TEST
@@ -213,8 +212,6 @@ private:
   // theirs), so move is the only thing letting Mesh be returned by value
   // from the test factory helpers (see those types' header comments).
   std::unique_ptr<RouteTable> routes;
-
-  static bool isSealedType(uint8_t messageType);
 
 public:
   Mesh();

@@ -60,12 +60,7 @@ void MeshMessenger::transmitCore(const adapter_types type, const uint8_t* data,
 
   // E2E seal (spec §1/§2): self-originated uplink payloads only. Relayed frames
   // (msgOverride with foreign origin) are already sealed — forward untouched.
-  // Inlined sealed-type predicate (mirrors Mesh::isSealedType, which stays a
-  // private Mesh-only helper per the design doc's Task 14 note — this class
-  // never calls back into Mesh, see the class doc comment) — same two message
-  // types.
-  if (!isMaster && selfOriginated &&
-      (msg.message_type == MESH_TYPE_ADAPTER_DATA || msg.message_type == MESH_TYPE_ROUTE_REPORT)) {
+  if (!isMaster && selfOriginated && lattice::mesh::isSealedType(msg.message_type)) {
     const uint8_t *kUp, *kDown;
     txState.checkEpochRollback(msg.epoch_num, msg.seq_num);
     if (!lattice::mesh::masterE2EKeys(currentMaster, peers, enrollment, e2eKeys, &kUp, &kDown) ||

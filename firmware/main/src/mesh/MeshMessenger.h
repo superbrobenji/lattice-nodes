@@ -29,6 +29,28 @@ using lattice::adapter::adapter_types;
 // Task 12/13's collaborators reuse the same typedef.
 using ExternalRecvCallback = std::function<void(const mesh_message&)>;
 
+// Protocol v0.6.0 flag-day (Phase G §8 wire shrink): 4→5, bumped atomically
+// with hub Task 6 in a parallel PR — must merge together. Single definition
+// (fix round 1): this used to also exist as a separate Mesh::PROTO_VERSION-
+// shaped class constant on MeshMessenger, which risked a future version bump
+// touching one copy and not the other — a wire-compat split. Mesh.h no
+// longer declares its own copy; it consumes this one (Mesh.h #includes this
+// header already).
+static constexpr uint8_t PROTO_VERSION = 5;
+
+// Message types whose payload is E2E-sealed (spec §1/§2) — decides both
+// "should this frame get sealed on send" (MeshMessenger::transmitCore) and
+// "should this frame be opened on receive" (Mesh::processAdapterData).
+// Single definition (fix round 1): used to also exist as a second,
+// hand-inlined copy of this same two-message-type check inside
+// transmitCore, which risked a future third sealed message type being added
+// to one copy and missed in the other — a silent send/receive divergence,
+// not a compile error. A free function (not a MeshMessenger method) since
+// Mesh::processAdapterData needs it too and holds no MeshMessenger reference.
+inline bool isSealedType(uint8_t messageType) {
+  return messageType == MESH_TYPE_ADAPTER_DATA || messageType == MESH_TYPE_ROUTE_REPORT;
+}
+
 // Owns outbound message construction and dispatch (round 2 task 11) — the
 // single place "how does this node send something" lives. Depends on more
 // collaborators than any other class in this plan, by design: everything a
@@ -41,8 +63,6 @@ using ExternalRecvCallback = std::function<void(const mesh_message&)>;
 // docs/superpowers/specs/2026-08-07-phaseB-mesh-cleanup-design.md, Task 11.
 class MeshMessenger {
 public:
-  static constexpr uint8_t PROTO_VERSION = 5; // mirrors lattice::mesh::PROTO_VERSION (Mesh.h)
-
   mesh_message buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType,
                             const uint8_t* deviceMac, const MasterInfo& currentMaster,
                             OutboundSequenceState& txState);
