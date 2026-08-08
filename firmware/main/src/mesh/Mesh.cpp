@@ -58,52 +58,6 @@ void Mesh::readMacAddress() {
   }
 }
 
-PeerInfo* Mesh::findNextHopToMaster() {
-  if (currentMaster.distance == 0xFF)
-    return nullptr;
-
-  // Prefer an enrolled peer that is the direct master and in range (distance 1,
-  // the common single-hop case) — keeps the existing behavior and E2E peering.
-  PeerInfo* direct = peers.find(currentMaster.mac);
-  if (direct && currentMaster.distance == 1 && peers.isPeerInRange(direct->mac) &&
-      !lattice::mac::eq(direct->mac, deviceMacAddress))
-    return direct;
-
-  // Multi-hop (spec §3): pick the freshest neighbor strictly closer to the
-  // master from the NeighborTable. The relay need not be an enrolled peer.
-  uint8_t hopMac[6];
-  if (!neighbors.selectNextHop(currentMaster.distance,
-                               static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL, hopMac))
-    return nullptr;
-  if (lattice::mac::eq(hopMac, deviceMacAddress))
-    return nullptr;
-
-  // Bound the auto-registered forwarding peer to exactly one (spec §2:
-  // "20-peer cap, LRU-evicted"). A node forwards uplink to only one next hop
-  // at a time, so if we previously auto-registered a DIFFERENT relay, evict
-  // it before registering the new one — otherwise a beacon-flooding attacker
-  // spoofing distinct relay MACs could exhaust the ~20-slot ESP-NOW peer
-  // table (no self-heal, no reboot) and blackhole the real uplink. Never
-  // evict an enrolled peer (master or sensor) — those live in `peers` and
-  // are managed exclusively by the enrollment path.
-  static const uint8_t kZeroMac[6] = {0, 0, 0, 0, 0, 0};
-  bool isNewRelay = !lattice::mac::eq(forwardingPeer, hopMac);
-  bool forwardingPeerSet = !lattice::mac::eq(forwardingPeer, kZeroMac);
-  if (forwardingPeerSet && isNewRelay && !peers.find(forwardingPeer) &&
-      !lattice::mac::eq(forwardingPeer, currentMaster.mac)) {
-    if (esp_now_is_peer_exist(forwardingPeer))
-      esp_now_del_peer(forwardingPeer);
-  }
-
-  // Auto-register the chosen next hop as an unencrypted ESP-NOW peer (spec §3).
-  // Idempotent — registerPeerWithEspNow no-ops if the peer already exists.
-  MeshTransport::registerPeerWithEspNow(hopMac);
-  memcpy(forwardingPeer, hopMac, 6);
-
-  memcpy(nextHopScratch.mac, hopMac, 6);
-  return &nextHopScratch;
-}
-
 mesh_message Mesh::buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType) {
   mesh_message msg = {};
   msg.proto_version = PROTO_VERSION;
@@ -305,7 +259,9 @@ void Mesh::transmitCore(const adapter_types type, const uint8_t* data, MeshMessa
   }
 
   // Routing: always use next hop if possible
-  PeerInfo* nextHop = findNextHopToMaster();
+  PeerInfo* nextHop =
+      uplinkRouter.findNextHopToMaster(currentMaster, peers, neighbors, deviceMacAddress,
+                                       static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL);
   if (nextHop && !lattice::mac::eq(nextHop->mac, deviceMacAddress)) {
     transport.sendMessage(nextHop->mac, msg, deviceMacAddress);
   } else {
@@ -647,10 +603,11 @@ void Mesh::relayEnrollmentUplink(const mesh_message& msg) {
   if (msg.hop_count >= lattice::config::MAX_HOPS)
     return;
   // Can only relay toward the master if we actually have a route to it.
-  if (!findNextHopToMaster())
+  if (!uplinkRouter.findNextHopToMaster(currentMaster, peers, neighbors, deviceMacAddress,
+                                        static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL))
     return;
   // Relay one hop toward the master, exactly like the ADAPTER_DATA uplink path:
-  // bump hop_count, stamp ourselves as last hop, and route via findNextHopToMaster
+  // bump hop_count, stamp ourselves as last hop, and route via uplinkRouter.findNextHopToMaster
   // (transmitCore does NOT rewrite target for non-ADAPTER_DATA types, so the
   // request's broadcast target is preserved for the master to process).
   mesh_message relay = msg;
@@ -660,85 +617,12 @@ void Mesh::relayEnrollmentUplink(const mesh_message& msg) {
                &relay);
 }
 
+// Outer JOIN_ACK dispatch moved to lattice::mesh::dispatchJoinAck (round 2 task
+// 10, PeerEnrollment.h/.cpp) — verbatim, see that function's doc comment for
+// the relay-vs-process reasoning this wrapper used to spell out inline.
 void Mesh::processJoinAck(const mesh_message& msg) {
-  // Relay outward if not addressed to us (multi-hop enrollment, Task 9b Bug #5
-  // downlink counterpart). The target node is still mid-enrollment and is NOT
-  // yet a registered unicast peer of ours, so — exactly as the master does when
-  // it first emits the ACK (see enrollPeer: broadcast via the FF:FF peer) — we
-  // RE-BROADCAST rather than unicast to known peers via router.relayDownlink(). Loop
-  // safety: never re-broadcast a JOIN_ACK we originated (only masters originate
-  // them, so this stops the master looping on its own echo), and bound depth by
-  // MAX_HOPS as a backstop for cyclic topologies.
-  if (!lattice::mac::eq(msg.target_mac_address, deviceMacAddress)) {
-    if (lattice::mac::eq(msg.origin_mac_address, deviceMacAddress))
-      return;
-    if (msg.hop_count >= lattice::config::MAX_HOPS)
-      return;
-    mesh_message relay = msg;
-    relay.hop_count++;
-    memcpy(relay.last_hop_mac_address, deviceMacAddress, 6);
-    transport.sendBroadcast(relay);
-    return;
-  }
-  // Masters issue JOIN_ACKs; they never enroll via one. Without this guard a
-  // forged ACK addressed to the master (fingerprint is observable over the
-  // air) could TOFU-poison it and register attacker key material.
-  if (isMaster) {
-    LATTICE_LOGLN("MESH", "JOIN_ACK addressed to master — ignoring", LogLevel::LOG_WARN);
-    return;
-  }
-  enrollment.processJoinAck(msg, deviceMacAddress, &Mesh::registerPeerWithKeyTrampoline);
-}
-
-bool Mesh::registerPeerWithKeyTrampoline(const uint8_t* mac, const uint8_t* publicKey32) {
-  return instance->registerPeerWithKey(mac, publicKey32, /*allowRekey=*/false);
-}
-
-void Mesh::addPeer(const uint8_t* mac) {
-  size_t before = peers.count();
-  peers.addAndPersist(mac);
-  if (peers.count() > before) {
-    MeshTransport::registerPeerWithEspNow(peers.at(peers.count() - 1).mac);
-  }
-}
-
-bool Mesh::registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, bool allowRekey) {
-  PeerInfo* p = peers.find(mac);
-  if (p) {
-    if (!allowRekey) {
-      // Established (non-zero) key material must never be replaced from this
-      // path — an over-the-air JOIN_ACK with a spoofed trusted origin would
-      // otherwise re-key the link to attacker-chosen material. An all-zero
-      // stored key is a pre-enrollment placeholder (e.g. DEFAULT_PEERS), not
-      // an established key, so upgrading it is allowed.
-      // Thinned via lattice::mem::is_zero (Phase H2 audit item Z).
-      bool keyEstablished = !lattice::mem::is_zero(p->publicKey, 32);
-      if (keyEstablished) {
-        LATTICE_LOGLN("MESH", "Peer already registered — keeping established key",
-                      LogLevel::LOG_DEBUG);
-        p->lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
-        return true; // already routable; nothing to change
-      }
-    }
-    // Update existing peer's public key
-    memcpy(p->publicKey, publicKey32, 32);
-    p->lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
-  } else {
-    if (peers.count() >= MAX_PEERS) {
-      LATTICE_LOGLN("MESH", "Peer list full, cannot enroll", LogLevel::LOG_WARN);
-      return false;
-    }
-    PeerInfo newPeer;
-    memcpy(newPeer.mac, mac, 6);
-    memcpy(newPeer.publicKey, publicKey32, 32);
-    newPeer.lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
-    peers.append(newPeer);
-  }
-  peers.saveToEEPROM();
-
-  // Re-register with encryption now that we have the public key (mbedtls-heavy via Enrollment)
-  enrollment.enrollPeer(mac, publicKey32, nullptr, _dualMasterMode);
-  return true;
+  lattice::mesh::dispatchJoinAck(msg, deviceMacAddress, isMaster, enrollment,
+                                 &Mesh::registerPeerWithKeyTrampoline);
 }
 
 void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
@@ -747,7 +631,8 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
 
 void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint8_t* secondaryMac,
                       const uint8_t* secondaryPubKey32) {
-  if (!registerPeerWithKey(mac, publicKey32, /*allowRekey=*/true))
+  if (!lattice::mesh::registerPeerWithKey(mac, publicKey32, /*allowRekey=*/true, peers, enrollment,
+                                          _dualMasterMode))
     return; // registry full — do not ACK an enrollment we could not record
 
   // Send JOIN_ACK unicast to new node
@@ -796,7 +681,8 @@ void Mesh::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint
 bool Mesh::sendRouteReport() {
   if (isMaster)
     return false;
-  if (!findNextHopToMaster())
+  if (!uplinkRouter.findNextHopToMaster(currentMaster, peers, neighbors, deviceMacAddress,
+                                        static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL))
     return false;
   uint8_t data[64] = {};
   data[0] = OP_ROUTE_REPORT;

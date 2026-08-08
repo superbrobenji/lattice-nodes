@@ -91,6 +91,8 @@ set(FIRMWARE_SOURCES
   ../firmware/main/src/mesh/Enrollment.cpp
   ../firmware/main/src/mesh/PendingRelayQueue.cpp
   ../firmware/main/src/mesh/CompactMessage.cpp
+  ../firmware/main/src/mesh/PeerEnrollment.cpp
+  ../firmware/main/src/mesh/UplinkRouter.cpp
 )
 
 enable_testing()
@@ -125,6 +127,8 @@ add_unit_test(test_compact_message    unit/test_compact_message.cpp)
 add_unit_test(test_button             unit/test_button.cpp)
 add_unit_test(test_display_manager    unit/test_display_manager.cpp)
 add_unit_test(test_peer_registry      unit/test_peer_registry.cpp)
+add_unit_test(test_peer_enrollment    unit/test_peer_enrollment.cpp)
+add_unit_test(test_uplink_router      unit/test_uplink_router.cpp)
 
 add_unit_test(test_mbedtls_kat        unit/test_mbedtls_kat.cpp)
 

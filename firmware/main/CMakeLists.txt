@@ -31,6 +31,8 @@ idf_component_register(
     "src/mesh/Enrollment.cpp"
     "src/mesh/PendingRelayQueue.cpp"
     "src/mesh/PeerRegistry.cpp"
+    "src/mesh/PeerEnrollment.cpp"
+    "src/mesh/UplinkRouter.cpp"
     "src/mesh/serialization/mesh.pb.c"
     "src/mesh/serialization/nanopb/pb_encode.c"
     "src/mesh/serialization/nanopb/pb_decode.c"

@@ -912,7 +912,9 @@ TEST_F(JoinAckRelayTest, JoinAckAddressedToSelf_RegistersMasterAsRoutablePeer) {
   // (nextHop = master, one hop) — the end goal of registering the master.
   memcpy(mesh.currentMaster.mac, kMasterMac, 6);
   mesh.currentMaster.distance = 1;
-  EXPECT_NE(mesh.findNextHopToMaster(), nullptr)
+  EXPECT_NE(mesh.uplinkRouter.findNextHopToMaster(mesh.currentMaster, mesh.peers, mesh.neighbors,
+                                                  mesh.deviceMacAddress, mesh.testMillisNow()),
+            nullptr)
       << "uplink route must resolve through the newly registered master peer";
 }
 
@@ -980,7 +982,8 @@ TEST_F(JoinAckRelayTest, NextHopThroughRelayIsRegisteredAsEspNowPeer) {
   mesh.testNeighbors().observe(relayMac, 1, mesh.testMillisNow());
 
   resetEspNowMock(); // clear recorded peers (mirror the mock's reset used elsewhere)
-  PeerInfo* hop = mesh.findNextHopToMaster();
+  PeerInfo* hop = mesh.uplinkRouter.findNextHopToMaster(
+      mesh.currentMaster, mesh.peers, mesh.neighbors, mesh.deviceMacAddress, mesh.testMillisNow());
 
   ASSERT_NE(hop, nullptr) << "distance-2 node must route through the distance-1 relay";
   EXPECT_EQ(memcmp(hop->mac, relayMac, 6), 0);
@@ -1011,7 +1014,8 @@ TEST_F(JoinAckRelayTest, DirectMasterStaleFallsBackToNeighborTable) {
   // Master is also a fresh distance-0 neighbor:
   node.testNeighbors().observe(masterMac, 0, node.testMillisNow());
 
-  PeerInfo* hop = node.findNextHopToMaster();
+  PeerInfo* hop = node.uplinkRouter.findNextHopToMaster(
+      node.currentMaster, node.peers, node.neighbors, node.deviceMacAddress, node.testMillisNow());
   ASSERT_NE(hop, nullptr) << "stale direct peer must fall back to the fresh NeighborTable entry";
   EXPECT_EQ(0, memcmp(hop->mac, masterMac, 6));
   // Branch-identity proof: only the NeighborTable fallback branch auto-registers
@@ -1039,7 +1043,8 @@ TEST_F(JoinAckRelayTest, MultiHopForwardingPeer_BoundToOne_EvictsStaleRelayOnSwi
 
   // R1 observed first, distance 1 from master.
   mesh.testNeighbors().observe(r1Mac, 1, mesh.testMillisNow());
-  PeerInfo* hop1 = mesh.findNextHopToMaster();
+  PeerInfo* hop1 = mesh.uplinkRouter.findNextHopToMaster(
+      mesh.currentMaster, mesh.peers, mesh.neighbors, mesh.deviceMacAddress, mesh.testMillisNow());
   ASSERT_NE(hop1, nullptr);
   EXPECT_EQ(memcmp(hop1->mac, r1Mac, 6), 0);
   EXPECT_TRUE(esp_now_is_peer_exist(r1Mac)) << "R1 must be auto-registered on first forward";
@@ -1050,7 +1055,8 @@ TEST_F(JoinAckRelayTest, MultiHopForwardingPeer_BoundToOne_EvictsStaleRelayOnSwi
   advanceMillis(1000);
   mesh.testNeighbors().observe(r2Mac, 1, mesh.testMillisNow());
 
-  PeerInfo* hop2 = mesh.findNextHopToMaster();
+  PeerInfo* hop2 = mesh.uplinkRouter.findNextHopToMaster(
+      mesh.currentMaster, mesh.peers, mesh.neighbors, mesh.deviceMacAddress, mesh.testMillisNow());
   ASSERT_NE(hop2, nullptr);
   EXPECT_EQ(memcmp(hop2->mac, r2Mac, 6), 0) << "freshest relay (R2) must now be selected";
   EXPECT_TRUE(esp_now_is_peer_exist(r2Mac)) << "R2 must be auto-registered as the new next hop";

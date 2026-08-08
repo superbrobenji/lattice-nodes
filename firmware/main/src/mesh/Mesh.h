@@ -27,6 +27,8 @@
 #include "MasterBeacon.h"
 #include "DownlinkRouter.h"
 #include "E2EKeyLookup.h"
+#include "PeerEnrollment.h"
+#include "UplinkRouter.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -99,8 +101,10 @@ private:
   // lattice::mesh::masterE2EKeys (E2EKeyLookup.h), and txState.checkEpochRollback).
   DownlinkRouter router;
 
-  // Peer routing (uses currentMaster — stays in Mesh)
-  PeerInfo* findNextHopToMaster();
+  // Uplink mirror of DownlinkRouter (round 2 task 10): owns findNextHopToMaster
+  // and the forwardingPeer LRU-of-one bookkeeping that used to live directly on
+  // Mesh — see UplinkRouter.h.
+  UplinkRouter uplinkRouter;
 
   void transmitCore(const adapter_types type, const uint8_t* data,
                     MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA,
@@ -127,21 +131,16 @@ private:
   // Enrollment helper (relay dispatch only — "addressed to us" branch is in Enrollment)
   void processJoinAck(const mesh_message& msg);
 
-  // Add (or key-update) a peer in the registry, persist, and register it with
-  // ESP-NOW encryption. Shared by enrollPeer() (master registers the enrolling
-  // node; allowRekey=true — the hub-approved serial path may legitimately
-  // re-key a re-enrolling node) and processJoinAck() (node registers the
-  // approving master; allowRekey=false — an over-the-air JOIN_ACK must never
-  // replace established key material, only set it on first contact or upgrade
-  // a placeholder all-zero key). Returns false if the registry is full and the
-  // peer could not be added.
-  bool registerPeerWithKey(const uint8_t* mac, const uint8_t* publicKey32, bool allowRekey);
-
-  // Static trampoline binding registerPeerWithKey(allowRekey=false) to
-  // Enrollment::RegisterPeerFn's plain-function-pointer signature (item H) —
+  // Static trampoline binding lattice::mesh::registerPeerWithKey(allowRekey=false)
+  // to Enrollment::RegisterPeerFn's plain-function-pointer signature (item H) —
   // routes through the singleton `instance` the same way dataRecvTrampoline
-  // does for esp_now_register_recv_cb. Used only by processJoinAck().
-  static bool registerPeerWithKeyTrampoline(const uint8_t* mac, const uint8_t* publicKey32);
+  // does for esp_now_register_recv_cb. Used only by processJoinAck() (via
+  // lattice::mesh::dispatchJoinAck, round 2 task 10).
+  static bool registerPeerWithKeyTrampoline(const uint8_t* mac, const uint8_t* publicKey32) {
+    return lattice::mesh::registerPeerWithKey(mac, publicKey32, /*allowRekey=*/false,
+                                              instance->peers, instance->enrollment,
+                                              instance->_dualMasterMode);
+  }
 
   // Replay protection (composed)
   ReplayCache replay;
@@ -218,19 +217,6 @@ private:
   // theirs), so move is the only thing letting Mesh be returned by value
   // from the test factory helpers (see those types' header comments).
   std::unique_ptr<RouteTable> routes;
-  // Holds a NeighborTable-resolved next hop (not an enrolled peer) so
-  // findNextHopToMaster() can return a stable PeerInfo* for a pure relay,
-  // which is never added to `peers` (enrollment-only rule).
-  PeerInfo nextHopScratch{};
-  // MAC of the single auto-registered (unencrypted) ESP-NOW peer currently
-  // standing in for a multi-hop forwarding relay, or all-zero if none. A node
-  // only ever forwards uplink to ONE next hop at a time, so at most one such
-  // peer is ever needed — bounding it here closes the ESP-NOW peer table
-  // exhaustion vector (spec §2: "20-peer cap, LRU-evicted") that an RF
-  // attacker flooding distinct-MAC spoofed beacons would otherwise trigger.
-  // Enrolled peers (master + sensors, held in `peers`) are NEVER tracked or
-  // evicted here.
-  uint8_t forwardingPeer[6]{};
 
   static bool isSealedType(uint8_t messageType);
 
@@ -325,7 +311,7 @@ public:
   bool getDualMasterMode() const { return _dualMasterMode; }
 
   // Peer management API (optional, can be used in your app/UI)
-  void addPeer(const uint8_t* mac);
+  void addPeer(const uint8_t* mac) { lattice::mesh::addPeer(mac, peers); }
   void removePeer(const uint8_t* mac) { peers.removeAndPersist(mac); }
   const PeerInfo* getPeerList() const { return peers.begin(); }
   size_t getPeerCount() const { return peers.count(); }
