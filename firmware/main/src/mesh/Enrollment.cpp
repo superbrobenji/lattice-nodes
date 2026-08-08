@@ -134,7 +134,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
     return;
   }
 
-  // Register the approving master as a routable peer. Mesh::findNextHopToMaster()
+  // Register the approving master as a routable peer. UplinkRouter::findNextHopToMaster()
   // can only route through PeerRegistry entries, so without this the enrolled
   // node has no uplink route (adapter data / route reports toward the master).
   // The JOIN_ACK carries the master's public key in enrollment_public_key

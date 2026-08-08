@@ -1,8 +1,6 @@
 #include "Mesh.h"
-#include "src/network/MacAddress.h"
 #include "src/network/MacEq.h"
 #include "src/network/hw_mac.h"
-#include "src/network/mem.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
 #include "src/persistence/EepromManager.h"
@@ -13,7 +11,6 @@
 #include <cstdio>
 #include "../../project_config.h"
 #include "broadcast_mac.h"
-#include "config/master_pubkey_pin_wrapper.h"
 
 namespace lattice {
 namespace mesh {
@@ -362,7 +359,7 @@ void Mesh::processAdapterData(const mesh_message& msg) {
   // to be this function's own body. See FrameAuthorizer.h/.cpp for the full
   // security rationale (including the forged-broadcast-config-opcode attack the
   // gates below close) — Mesh keeps only local-delivery dispatch after this call.
-  mesh_message opened;
+  mesh_message opened{};
   if (frameAuthorizer.authorize(msg, isMaster, addressedToSelf, currentMaster, peers, enrollment,
                                 e2eKeys, opened) == AuthResult::Rejected) {
     return;

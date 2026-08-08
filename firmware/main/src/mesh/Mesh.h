@@ -9,11 +9,9 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/ringbuf.h>
 #include <freertos/task.h>
-#include <array>
 #include <cstdint>
 #include <memory>
 #include "src/adapter/Adapter.h"
-#include "src/persistence/EepromManager.h"
 #include "../../project_config.h" // Added for global limits/config
 #include "../../lib/lattice-protocol/c/message_types.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
