@@ -40,13 +40,15 @@ static constexpr uint8_t PROTO_VERSION = 5;
 
 // Message types whose payload is E2E-sealed (spec §1/§2) — decides both
 // "should this frame get sealed on send" (MeshMessenger::transmitCore) and
-// "should this frame be opened on receive" (Mesh::processAdapterData).
+// "should this frame be opened on receive" (FrameAuthorizer::authorize, round
+// 2 task 13 — formerly Mesh::processAdapterData directly, before that
+// function's security half moved out).
 // Single definition (fix round 1): used to also exist as a second,
 // hand-inlined copy of this same two-message-type check inside
 // transmitCore, which risked a future third sealed message type being added
 // to one copy and missed in the other — a silent send/receive divergence,
 // not a compile error. A free function (not a MeshMessenger method) since
-// Mesh::processAdapterData needs it too and holds no MeshMessenger reference.
+// FrameAuthorizer needs it too and holds no MeshMessenger reference.
 inline bool isSealedType(uint8_t messageType) {
   return messageType == MESH_TYPE_ADAPTER_DATA || messageType == MESH_TYPE_ROUTE_REPORT;
 }

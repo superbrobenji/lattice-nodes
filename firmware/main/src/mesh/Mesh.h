@@ -31,6 +31,7 @@
 #include "UplinkRouter.h"
 #include "MeshMessenger.h"
 #include "RouteReportHandler.h"
+#include "FrameAuthorizer.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -93,11 +94,12 @@ private:
   // Downlink relay, auto-peer-registration for forwarding, and the
   // routing-decision half of processAdapterData's downlink branch (Phase B
   // Task 6, finding 1 job 4 narrowed; finding 2's routing half). The
-  // security/E2E half of processAdapterData stays on Mesh — see
-  // processAdapterData's doc comments. Mesh::processAdapterData switches on
-  // router.classify()'s result and executes the crypto-touching
-  // relay-toward-master action itself (transmitCore needs
-  // lattice::mesh::masterE2EKeys (E2EKeyLookup.h), and txState.checkEpochRollback).
+  // security/E2E half of processAdapterData now lives in frameAuthorizer
+  // (round 2 task 13) — see FrameAuthorizer.h's doc comment.
+  // Mesh::processAdapterData switches on router.classify()'s result and
+  // executes the crypto-touching relay-toward-master action itself
+  // (transmitCore needs lattice::mesh::masterE2EKeys (E2EKeyLookup.h), and
+  // txState.checkEpochRollback).
   DownlinkRouter router;
 
   // Uplink mirror of DownlinkRouter (round 2 task 10): owns findNextHopToMaster
@@ -116,6 +118,15 @@ private:
   // verification (issue #44 route-path-forgery defense) that used to live
   // directly on Mesh (round 2 task 12). See RouteReportHandler.h.
   RouteReportHandler routeReportHandler;
+
+  // processAdapterData's security half (round 2 task 13, the plan's most
+  // security-sensitive extraction) — master-not-self-addressed sealed-type
+  // gate, E2E open both directions, config-opcode authorization. Moved
+  // verbatim from Mesh; see FrameAuthorizer.h's doc comment for why the E2E
+  // open stays bundled with the authorization decision rather than being
+  // split out further. Mesh keeps only local-delivery dispatch after this
+  // returns.
+  FrameAuthorizer frameAuthorizer;
 
   void loadMeshKeyFromEEPROM();
 

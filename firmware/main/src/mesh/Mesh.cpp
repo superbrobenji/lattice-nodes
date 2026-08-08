@@ -12,8 +12,6 @@
 #include <cstring>
 #include <cstdio>
 #include "../../project_config.h"
-#include "lib/lattice-protocol/c/opcodes.h"
-#include "E2ECrypto.h"
 #include "broadcast_mac.h"
 #include "config/master_pubkey_pin_wrapper.h"
 
@@ -306,7 +304,6 @@ void Mesh::checkMasterTimeout() {
 // ---------- Tiger Style helper implementations ----------
 
 void Mesh::processAdapterData(const mesh_message& msg) {
-  // OP_CONFIG_SET = 0xC1 (from lib/lattice-protocol/opcodes.h)
   bool addressedToSelf = (lattice::mac::eq(msg.target_mac_address, deviceMacAddress));
   bool isBroadcastTarget = (lattice::mac::eq(msg.target_mac_address, BROADCAST_MAC));
   bool addressedToMaster =
@@ -359,83 +356,17 @@ void Mesh::processAdapterData(const mesh_message& msg) {
     break; // fall through to the security gate below, unchanged
   }
 
-  // Security gate: at the master, a sealed-type frame (ADAPTER_DATA/ROUTE_REPORT)
-  // that is NOT addressed to self must never reach local delivery unopened. No
-  // leaf ever originates a broadcast-target (FF:FF:FF:FF:FF:FF) sealed uplink —
-  // only the master's own downlink broadcast (broadcastAdapterData, which delivers
-  // locally directly and never re-enters this function) and beacons use FF:FF. So
-  // a broadcast-target (or otherwise not-self-addressed) sealed frame arriving here
-  // over the air at the master is either a stale self-echo or a forgery — drop it
-  // rather than deliver it to externalRecvCallback without E2E authentication.
-  if (isMaster && !addressedToSelf && lattice::mesh::isSealedType(msg.message_type)) {
-    LATTICE_LOGLN("MESH",
-                  "Master: sealed-type frame not addressed to self rejected (unauthenticated)",
-                  LogLevel::LOG_WARN);
+  // Authorization decision + E2E open (round 2 task 13) — delegated to
+  // FrameAuthorizer, which owns the master-not-self-addressed sealed-type gate,
+  // both E2E-open branches, and both config-opcode gates verbatim from what used
+  // to be this function's own body. See FrameAuthorizer.h/.cpp for the full
+  // security rationale (including the forged-broadcast-config-opcode attack the
+  // gates below close) — Mesh keeps only local-delivery dispatch after this call.
+  mesh_message opened;
+  if (frameAuthorizer.authorize(msg, isMaster, addressedToSelf, currentMaster, peers, enrollment,
+                                e2eKeys, opened) == AuthResult::Rejected) {
     return;
   }
-
-  // Local delivery
-  // E2E open (spec §2): master unseals self-targeted uplink before local delivery.
-  mesh_message opened = msg;
-  bool needsOpen = isMaster && addressedToSelf && lattice::mesh::isSealedType(msg.message_type);
-  if (needsOpen) {
-    const uint8_t *kUp, *kDown;
-    if (!lattice::mesh::peerE2EKeys(msg.origin_mac_address, peers, enrollment, e2eKeys, &kUp,
-                                    &kDown) ||
-        !lattice::mesh::crypto::openPayload(kUp, opened)) {
-      LATTICE_LOGLN("MESH", "E2E open failed — frame dropped", LogLevel::LOG_WARN);
-      return;
-    }
-  }
-
-  // Node-side E2E open (spec §2): a self-addressed sealed ADAPTER_DATA from the
-  // master is opened with our k_down before local delivery. Mirrors the master's
-  // uplink open above. Failure → drop (finding-#9 pattern). Broadcast (FF:FF)
-  // frames are NOT opened — addressedToSelf is false for those, so this never
-  // fires for them (they stay plaintext, handled below).
-  bool nodeOpened = false;
-  if (!isMaster && addressedToSelf && msg.message_type == MESH_TYPE_ADAPTER_DATA) {
-    const uint8_t *kUp, *kDown;
-    if (!lattice::mesh::masterE2EKeys(currentMaster, peers, enrollment, e2eKeys, &kUp, &kDown) ||
-        !lattice::mesh::crypto::openPayload(kDown, opened)) {
-      LATTICE_LOGLN("MESH", "downlink open failed — dropped", LogLevel::LOG_WARN);
-      return;
-    }
-    nodeOpened = true;
-  }
-
-  bool isConfigOpcode = (opened.data_type == adapter_types::SERIAL_ADAPTER &&
-                         (opened.data[0] == OP_CONFIG_SET || opened.data[0] == OP_NODE_ID_SET));
-  // Critical fix: config opcodes (CONFIG_SET / NODE_ID_SET) are state-changing
-  // (adapter-type reconfig + restart, node-identity assignment) and must be
-  // honored ONLY via the sealed, opened path above (needsOpen on the master,
-  // nodeOpened on a node) — never via a broadcast-target or otherwise-unopened
-  // frame. Without this, a forged plaintext BROADCAST (target FF:FF)
-  // ADAPTER_DATA frame is never addressedToSelf, so it is never opened; since
-  // origin_mac is attacker-controlled and the master's real MAC is public in
-  // beacons, such a frame sailed past the origin check below too and reached
-  // externalRecvCallback fully unauthenticated (one plaintext RF frame could
-  // reboot/reconfigure any node). Legitimate non-config broadcast adapter data
-  // (e.g. OP_HEALTH_REQ, OP_TX_POWER_SET) is unaffected — this guard only
-  // fires for CONFIG_SET/NODE_ID_SET.
-  if (isConfigOpcode && !needsOpen && !nodeOpened) {
-    LATTICE_LOGLN("MESH", "Config opcode via unopened/broadcast path rejected (unauthenticated)",
-                  LogLevel::LOG_WARN);
-    return;
-  }
-  if (isConfigOpcode && enrollment.hasMasterMac) {
-    bool fromPrimary = lattice::mac::eq(opened.origin_mac_address, enrollment.knownMasterMac);
-    bool fromSecondary =
-        enrollment.hasMasterMacSecondary &&
-        lattice::mac::eq(opened.origin_mac_address, enrollment.knownMasterMacSecondary);
-    if (!fromPrimary && !fromSecondary) {
-      LATTICE_LOGLN("MESH", "CONFIG_SET from non-master MAC rejected", LogLevel::LOG_WARN);
-      return;
-    }
-  }
-  // Note: the "master received ADAPTER_DATA not addressed to self" case is now
-  // handled (and rejected) by the security gate above — ADAPTER_DATA is always a
-  // sealed type, so isMaster && !addressedToSelf never reaches this point.
   if (externalRecvCallback)
     externalRecvCallback(opened);
 

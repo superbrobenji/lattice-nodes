@@ -30,13 +30,13 @@ enum class RouteDecision {
 // Phase B Task 6 (finding 1 job 4, narrowed; finding 2's routing half): owns
 // downlink relay, auto-peer-registration for forwarding, and the routing
 // *decision* for processAdapterData's downlink half — NOT the security/E2E
-// half, which stays on Mesh (see Mesh::processAdapterData's untouched
-// security gate -> E2E open -> config-opcode authorization -> deliver
-// sequence). Extracted out of Mesh; every check and early-return point below
-// is unchanged from the original Mesh::relayDownlink/registerDownlinkPeer and
-// processAdapterData's routing block — only which class owns the code
-// changed. See docs/superpowers/specs/2026-08-07-phaseB-mesh-cleanup-design.md,
-// Task 6.
+// half, which now lives in FrameAuthorizer (round 2 task 13; see
+// Mesh::processAdapterData's security gate -> E2E open -> config-opcode
+// authorization -> deliver sequence, moved there verbatim). Extracted out of
+// Mesh; every check and early-return point below is unchanged from the
+// original Mesh::relayDownlink/registerDownlinkPeer and processAdapterData's
+// routing block — only which class owns the code changed. See
+// docs/superpowers/specs/2026-08-07-phaseB-mesh-cleanup-design.md, Task 6.
 //
 // Stays crypto-free like MasterBeacon/MeshTransport: classify() is read-only
 // (const, no I/O), and relayDownlink()/registerDownlinkPeer() take whatever

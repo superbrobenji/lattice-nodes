@@ -95,6 +95,7 @@ set(FIRMWARE_SOURCES
   ../firmware/main/src/mesh/UplinkRouter.cpp
   ../firmware/main/src/mesh/MeshMessenger.cpp
   ../firmware/main/src/mesh/RouteReportHandler.cpp
+  ../firmware/main/src/mesh/FrameAuthorizer.cpp
 )
 
 enable_testing()
@@ -131,6 +132,7 @@ add_unit_test(test_display_manager    unit/test_display_manager.cpp)
 add_unit_test(test_peer_registry      unit/test_peer_registry.cpp)
 add_unit_test(test_peer_enrollment    unit/test_peer_enrollment.cpp)
 add_unit_test(test_uplink_router      unit/test_uplink_router.cpp)
+add_unit_test(test_frame_authorizer   unit/test_frame_authorizer.cpp)
 
 add_unit_test(test_mbedtls_kat        unit/test_mbedtls_kat.cpp)
 
