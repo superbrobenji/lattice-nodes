@@ -717,7 +717,9 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_RelaysEnrollmentTowardMaster) {
   req.hop_count = 0;
 
   size_t before = espNowSentPackets.size();
-  mesh.relayEnrollmentUplink(req);
+  mesh.messenger.relayEnrollmentUplink(req, mesh.deviceMacAddress, mesh.currentMaster, mesh.txState,
+                                       mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.uplinkRouter,
+                                       mesh.neighbors, mesh.transport);
 
   ASSERT_EQ(espNowSentPackets.size(), before + 1) << "must relay one hop toward master";
   EXPECT_EQ(memcmp(espNowSentPackets.back().addr, kMasterMac, 6), 0)
@@ -740,7 +742,9 @@ TEST_F(AdapterDataRelayTest, IntermediateNode_DoesNotRelayOwnEnrollment) {
   req.hop_count = 0;
 
   size_t before = espNowSentPackets.size();
-  mesh.relayEnrollmentUplink(req);
+  mesh.messenger.relayEnrollmentUplink(req, mesh.deviceMacAddress, mesh.currentMaster, mesh.txState,
+                                       mesh.peers, mesh.enrollment, mesh.e2eKeys, mesh.uplinkRouter,
+                                       mesh.neighbors, mesh.transport);
 
   EXPECT_EQ(espNowSentPackets.size(), before) << "must not relay our own request";
 }
@@ -1156,8 +1160,10 @@ TEST_F(JoinAckRelayTest, RelayedAdapterDataKeepsOriginTarget) {
   fwd.seq_num = 5;
 
   resetEspNowMock();
-  relay.transmitCore(static_cast<adapter_types>(fwd.data_type), fwd.data, MESH_TYPE_ADAPTER_DATA,
-                     &fwd);
+  relay.messenger.transmitCore(static_cast<adapter_types>(fwd.data_type), fwd.data,
+                               MESH_TYPE_ADAPTER_DATA, &fwd, relay.isMaster, relay.deviceMacAddress,
+                               relay.currentMaster, relay.txState, relay.peers, relay.enrollment,
+                               relay.e2eKeys, relay.uplinkRouter, relay.neighbors, relay.transport);
 
   ASSERT_TRUE(wasSentTo(relaysMaster)) << "relay must forward toward its own next hop";
   mesh_message sent = lastEspNowSentTo(relaysMaster);
@@ -1248,9 +1254,10 @@ TEST_F(JoinAckRelayTest, DownlinkRelayForward_BoundsAutoRegisteredPeers_NeverEvi
 // Defense-in-depth items from Phase E (issue #47 items 4 + 5).
 
 // Not declared in any header — it's a plain (external-linkage) helper
-// function defined next to sendDownlinkToNode() in Mesh.cpp, kept out of
-// Mesh.h/RouteTable.h deliberately (this task's file list is Mesh.cpp +
-// this test file only). Forward-declared here so the test below can call it.
+// function defined next to sendDownlinkToNode() in MeshMessenger.cpp (moved
+// there with sendDownlinkToNode, round 2 task 11 — was Mesh.cpp before),
+// kept out of MeshMessenger.h/RouteTable.h deliberately. Forward-declared
+// here so the test below can call it.
 namespace lattice {
 namespace mesh {
 bool downlinkRouteLenExceedsMaxHops(uint8_t pathLen);

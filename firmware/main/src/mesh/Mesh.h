@@ -29,6 +29,7 @@
 #include "E2EKeyLookup.h"
 #include "PeerEnrollment.h"
 #include "UplinkRouter.h"
+#include "MeshMessenger.h"
 
 #ifdef UNIT_TEST
 // Forward declarations for test fixture classes (global namespace) so that
@@ -77,8 +78,6 @@ private:
 
   void readMacAddress();
 
-  mesh_message buildMessage(adapter_types type, const uint8_t* data, MeshMessageType msgType);
-
   std::function<void(const mesh_message&)> externalRecvCallback;
 
   MasterInfo currentMaster;
@@ -106,20 +105,17 @@ private:
   // Mesh — see UplinkRouter.h.
   UplinkRouter uplinkRouter;
 
-  void transmitCore(const adapter_types type, const uint8_t* data,
-                    MeshMessageType msgType = MESH_TYPE_ADAPTER_DATA,
-                    const mesh_message* msgOverride = nullptr);
-
-  // Shared body for transmit()/transmitSelfOriginated() — see their comments.
-  void transmitDispatch(const adapter_types type, const uint8_t* data, bool selfOriginated);
+  // Owns outbound message construction and dispatch (round 2 task 11) --
+  // buildMessage/transmitCore/transmitDispatch/broadcastAdapterData/
+  // sendDownlinkToNode/enrollPeer/relayEnrollmentUplink all moved here. Mesh's
+  // remaining methods of the same names are thin forwards into this — see
+  // MeshMessenger.h.
+  MeshMessenger messenger;
 
   void loadMeshKeyFromEEPROM();
 
   // --- Tiger Style refactor helpers ---
   void processAdapterData(const mesh_message& msg);
-  // Relay an enrollment (JOIN_REQUEST) broadcast one hop toward the master so a
-  // node out of direct RF range of the master can still enroll (Task 9b Bug #5).
-  void relayEnrollmentUplink(const mesh_message& msg);
 
   // Setup helpers (Tiger Style refactor)
   // Wraps transport.setup() (Wi-Fi bring-up) plus this node's own MAC-address
@@ -322,14 +318,23 @@ public:
   // master-originated, server-bound data (currently: health reports) reaches
   // this node's own serial adapter — broadcastToAllPeers() explicitly skips
   // self, so without this the master could never answer for itself.
-  void broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally = false);
+  // Thin forward (round 2 task 11) — body now lives in MeshMessenger.
+  void broadcastAdapterData(adapter_types type, const uint8_t* data, bool deliverLocally = false) {
+    messenger.broadcastAdapterData(type, data, deliverLocally, deviceMacAddress, currentMaster,
+                                   txState, peers, transport, externalRecvCallback);
+  }
 
   // Master-only: source-route a sealed downlink to a specific enrolled node
   // (spec §4). Seals `data` with the destination's k_down, then unicasts via
   // the reversed relay path recorded in RouteTable (from that node's most
   // recent route report), or broadcast-floods if no route is known. No-op if
-  // this node is not master. See Mesh.cpp for the full rationale.
-  void sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const uint8_t* data);
+  // this node is not master. See MeshMessenger.cpp for the full rationale.
+  // Thin forward (round 2 task 11) — body now lives in MeshMessenger.
+  void sendDownlinkToNode(const uint8_t* destMac, adapter_types type, const uint8_t* data) {
+    messenger.sendDownlinkToNode(destMac, type, data, isMaster, deviceMacAddress, currentMaster,
+                                 txState, peers, enrollment, e2eKeys, routes.get(), router,
+                                 transport);
+  }
 
   // Serial adapter helper (optional broadcast)
   static void broadcastAdapterDataStatic(adapter_types type, const uint8_t* data);
@@ -362,14 +367,21 @@ public:
     enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, txState.bootEpoch, seq);
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
-  void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32);
+  // Thin forward (round 2 task 11) — body now lives in MeshMessenger.
+  void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
+    enrollPeer(mac, publicKey32, nullptr, nullptr);
+  }
   // 4-arg overload: also stamps the server-provided secondary-master identity
   // (secondaryMac/secondaryPubKey32) into the JOIN_ACK broadcast to the newly
   // enrolled node, so it can TOFU-learn its failover master up front (Phase 4).
   // Pass nullptr, nullptr (as the 2-arg overload does) when there is no
-  // secondary — the ACK's secondary fields are then left zeroed.
+  // secondary — the ACK's secondary fields are then left zeroed. Thin forward
+  // (round 2 task 11) — body now lives in MeshMessenger.
   void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32, const uint8_t* secondaryMac,
-                  const uint8_t* secondaryPubKey32);
+                  const uint8_t* secondaryPubKey32) {
+    messenger.enrollPeer(mac, publicKey32, secondaryMac, secondaryPubKey32, deviceMacAddress,
+                         txState, peers, enrollment, _dualMasterMode, transport);
+  }
 
   // Enrollment relay callback — set by Serial_Adapter owner (main.ino)
   void setEnrollmentRelayFn(EnrollmentRelayFn fn) { enrollment.setRelayFn(fn); }

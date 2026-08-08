@@ -93,6 +93,7 @@ set(FIRMWARE_SOURCES
   ../firmware/main/src/mesh/CompactMessage.cpp
   ../firmware/main/src/mesh/PeerEnrollment.cpp
   ../firmware/main/src/mesh/UplinkRouter.cpp
+  ../firmware/main/src/mesh/MeshMessenger.cpp
 )
 
 enable_testing()

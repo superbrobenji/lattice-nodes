@@ -65,7 +65,10 @@ TEST_F(MeshSimTest, ReplayedFrameIsDropped) {
   // mesh replay protection.
   sensor->with([](lattice::mesh::Mesh& mesh, lattice::adapter::Adapter*) {
     uint8_t data[64] = {1};
-    mesh.transmitCore(lattice::adapter::PIR_ADAPTER, data, MESH_TYPE_ADAPTER_DATA);
+    mesh.messenger.transmitCore(lattice::adapter::PIR_ADAPTER, data, MESH_TYPE_ADAPTER_DATA,
+                                nullptr, mesh.isMaster, mesh.deviceMacAddress, mesh.currentMaster,
+                                mesh.txState, mesh.peers, mesh.enrollment, mesh.e2eKeys,
+                                mesh.uplinkRouter, mesh.neighbors, mesh.transport);
     return 0;
   });
   runPolled(2000);
