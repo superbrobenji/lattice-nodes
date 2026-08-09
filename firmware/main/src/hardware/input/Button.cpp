@@ -9,15 +9,14 @@ namespace hardware {
 Button::Button(uint8_t pin) : GpioInput(pin) {}
 
 bool Button::init() {
-  if (!isValidInputPin(_pin)) {
-    return false;
-  }
-  // Phase I Task 7 (RR): per-init pinMode() call removed — this pin is part
-  // of main.cpp's bundled input-group gpio_config_t (pull-DOWN, matching the
-  // prior INPUT_PULLDOWN behavior — the line is LOW unless actively driven
-  // HIGH), applied once at boot.
-  _initialized = true;
-  return true;
+  // Finding 9: delegates to the shared base validation, matching
+  // Pir::init()'s pattern of calling GpioInput::init() explicitly — Button
+  // has no extra per-init state to reset on success, so there's nothing
+  // else to do here. Phase I Task 7 (RR)'s note still applies: no per-init
+  // pinMode() call — this pin is part of main.cpp's bundled input-group
+  // gpio_config_t (pull-DOWN, matching the prior INPUT_PULLDOWN behavior —
+  // the line is LOW unless actively driven HIGH), applied once at boot.
+  return GpioInput::init();
 }
 
 bool Button::isPressed() {

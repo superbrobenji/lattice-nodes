@@ -392,12 +392,14 @@ static void initHardwareOutputs() {
 
   if (!configButton.init()) {
     Logger::error("Config button initialization failed!");
-    lattice::err::fail(lattice::utils::ErrorType::HARDWARE_FAILURE, "Config button init failed!");
+    lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::CORE, 5,
+                       "Config button init failed!");
   }
 
   if (!resetButton.init()) {
     Logger::error("Reset button initialization failed!");
-    lattice::err::fail(lattice::utils::ErrorType::HARDWARE_FAILURE, "Reset button init failed!");
+    lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::CORE, 6,
+                       "Reset button init failed!");
   }
 
   // Initialize EEPROM Manager
