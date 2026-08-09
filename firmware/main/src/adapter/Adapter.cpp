@@ -238,9 +238,5 @@ bool Adapter::dispatchControlOp(const lattice::mesh::mesh_message& message,
   return false;
 }
 
-bool Adapter::init() {
-  return true;
-}
-
 } // namespace adapter
 } // namespace lattice

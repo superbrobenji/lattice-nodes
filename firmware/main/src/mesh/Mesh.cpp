@@ -22,8 +22,6 @@ using namespace lattice::utils;
 
 Mesh* Mesh::instance = nullptr;
 
-// no longer need macEquals helper – use MacAddress equality directly
-
 Mesh::Mesh()
     : isMaster(false), relayPendingAt(0), relayPending(false),
       _dualMasterMode(lattice::config::DUAL_MASTER_MODE), lastBeaconMs(0), lastRouteReportMs(0) {
