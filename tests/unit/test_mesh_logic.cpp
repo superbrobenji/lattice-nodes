@@ -1908,6 +1908,75 @@ TEST_F(EnrollmentTest, ProcessSingleMessageSetsKey) {
       << "Full 32-byte key must be copied without chunk reassembly";
 }
 
+// ─── Mesh::tickEnrollmentBroadcast (Phase C Task 2) ──────────────────────────
+// Moved verbatim from main.cpp's housekeeping_task_fn inline enrollment state
+// machine (a static interval tracker + sendEnrollmentRequest() call) into
+// Mesh, which already owns the state (isEnrolled()/getIsMaster()) the
+// per-tick decision is based on. Pure behavior-preserving move — same 10s
+// retry interval, same skipDataForwarding semantics via the bool return.
+
+TEST_F(EnrollmentTest, TickEnrollmentBroadcast_ReturnsFalseWhenMaster) {
+  Mesh mesh;
+  mesh.setIsMaster(true);
+  EXPECT_FALSE(mesh.tickEnrollmentBroadcast(1000));
+}
+
+TEST_F(EnrollmentTest, TickEnrollmentBroadcast_ReturnsFalseWhenEnrolled) {
+  Mesh mesh;
+  mesh.setIsMaster(false);
+  // Enroll via the real Enrollment::processJoinAck path — the same call
+  // EnrollmentPinTest::ProcessJoinAck_ValidPubkey_Enrolls below exercises
+  // directly on a bare Enrollment — rather than poking a private "enrolled"
+  // flag or adding a test-only backdoor to Mesh. registerFn=nullptr is a
+  // no-op registration, not a bypass: Enrollment::processJoinAck only skips
+  // the registration-failure early-return when no registerFn is supplied.
+  mesh_message ack{};
+  ack.message_type = MESH_TYPE_JOIN_ACK;
+  static constexpr uint8_t kMasterMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+  memcpy(ack.origin_mac_address, kMasterMac, 6);
+  memcpy(ack.enrollment_public_key, lattice::mesh::pin::MASTER_PUBKEY, 32);
+  mesh.enrollment.processJoinAck(ack, /*deviceMac*/ nullptr, /*registerFn*/ nullptr);
+  ASSERT_TRUE(mesh.isEnrolled());
+
+  EXPECT_FALSE(mesh.tickEnrollmentBroadcast(1000));
+}
+
+TEST_F(EnrollmentTest,
+       TickEnrollmentBroadcast_ReturnsTrueAndBroadcastsWhenNeitherMasterNorEnrolled) {
+  Mesh mesh;
+  mesh.setIsMaster(false);
+  ASSERT_FALSE(mesh.isEnrolled());
+
+  // lastEnrollmentBroadcastMs_ starts at 0 (never broadcast yet), so nowMs
+  // itself must exceed the 10s interval for this first tick to broadcast —
+  // matches the old inline `static uint64_t lastEnrollmentBroadcast = 0`'s
+  // behavior exactly.
+  EXPECT_TRUE(mesh.tickEnrollmentBroadcast(10001));
+  ASSERT_EQ(espNowSentPackets.size(), 1u)
+      << "unenrolled non-master tick past the 10s interval must broadcast "
+         "exactly one enrollment request";
+  const auto* sent = reinterpret_cast<const mesh_message*>(espNowSentPackets[0].data.data());
+  EXPECT_EQ(sent->message_type, MESH_TYPE_ENROLLMENT);
+}
+
+TEST_F(EnrollmentTest, TickEnrollmentBroadcast_RespectsTenSecondInterval) {
+  Mesh mesh;
+  mesh.setIsMaster(false);
+  ASSERT_FALSE(mesh.isEnrolled());
+
+  EXPECT_TRUE(mesh.tickEnrollmentBroadcast(10001)); // first tick past 10s — broadcasts
+  EXPECT_EQ(espNowSentPackets.size(), 1u);
+
+  // Second call inside the 10s window since the last broadcast still returns
+  // true (skip forwarding) but must not re-broadcast.
+  EXPECT_TRUE(mesh.tickEnrollmentBroadcast(15001)); // +5000ms — within window
+  EXPECT_EQ(espNowSentPackets.size(), 1u)
+      << "must not re-broadcast before the 10s interval elapses";
+
+  EXPECT_TRUE(mesh.tickEnrollmentBroadcast(20002)); // +10001ms — re-broadcasts
+  EXPECT_EQ(espNowSentPackets.size(), 2u);
+}
+
 // ─── EnrollmentPinTest ────────────────────────────────────────────────────────
 // Phase D (#42): Enrollment::processJoinAck now requires the JOIN_ACK's
 // enrollment_public_key to match the compile-time-pinned lattice::mesh::pin::

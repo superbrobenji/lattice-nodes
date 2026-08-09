@@ -299,6 +299,21 @@ void Mesh::checkMasterTimeout() {
   beacon.checkTimeout(isMaster, currentMaster, lastSeenMasterMac);
 }
 
+// Phase C Task 2: moved verbatim from main.cpp's housekeeping_task_fn inline
+// enrollment state machine — Mesh already owns isEnrolled()/getIsMaster()/
+// sendEnrollmentRequest(), the state this decision is based on.
+bool Mesh::tickEnrollmentBroadcast(uint64_t nowMs) {
+  if (isEnrolled() || getIsMaster()) {
+    return false;
+  }
+  if (nowMs - lastEnrollmentBroadcastMs_ > 10000) {
+    lastEnrollmentBroadcastMs_ = nowMs;
+    sendEnrollmentRequest();
+    Logger::logln("MAIN", "Enrollment request sent (awaiting server approval)", LogLevel::LOG_INFO);
+  }
+  return true;
+}
+
 // ---------- Tiger Style helper implementations ----------
 
 void Mesh::processAdapterData(const mesh_message& msg) {
