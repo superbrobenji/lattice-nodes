@@ -4,6 +4,12 @@
 #include "src/network/MacEq.h"
 #include "config/master_pubkey_pin_wrapper.h"
 #include <esp_timer.h>
+// Phase C finding 17: esp_random() used to reach this TU transitively via
+// Logger.h -> Arduino.h (arduino-esp32's esp32-hal.h pulls in esp_random.h).
+// Logger.h no longer includes Arduino.h, so declare the real ESP-IDF
+// dependency directly — esp_random() is a plain esp_hw_support API, not an
+// Arduino one, so this needs no Arduino component at all.
+#include <esp_random.h>
 #include <cstring>
 
 namespace lattice {

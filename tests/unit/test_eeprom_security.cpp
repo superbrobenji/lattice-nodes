@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <cstring>
+#include "time_mock.h"
 #include "persistence/eeprom/EepromCore.h"
 #include "persistence/eeprom/EepromSecurity.h"
 #include <nvs.h>

@@ -1,7 +1,8 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
-#include <Arduino.h>
+#include <driver/uart.h>
+#include <cstdarg>
 #include <cstdio>
 
 #ifndef LATTICE_LOG_LEVEL
