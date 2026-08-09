@@ -35,19 +35,12 @@
 // mesh-drain task and the new housekeeping task, which absorbs everything
 // that used to run every iteration of the Arduino loop() task).
 //
-// Logger.cpp is the one deliberately-kept Arduino API user in this codebase
-// (see non-goals — it shares UART_NUM_0's Arduino Serial wrapper with
-// SerialAdapter's native uart_read_bytes/uart_write_bytes path, and esp_log on
-// the same UART would corrupt the binary framing SerialAdapter depends on).
-// Because CONFIG_AUTOSTART_ARDUINO=y used to be what called arduino-esp32's
-// initArduino() before setup(), owning app_main() ourselves means we must call
-// initArduino() explicitly before Serial.begin() below, or HardwareSerial's
-// internal state (which Logger.cpp's Serial.print/println/vprintf calls rely
-// on) is never brought up. This is the one remaining place in this file that
-// still needs Arduino.h -- transitively included via Logger.h/AdapterFactory
-// -> Adapter -> project_config.h no longer pulls it in (all narrowed to
-// <cstdint> in this task), so Logger.h is the sole surviving source.
-extern "C" void initArduino();
+// Phase C finding 17: Logger.cpp was the last file in the tree using the
+// Arduino Serial API (arduino-esp32's HardwareSerial wrapper). It has been
+// migrated onto the same native uart_write_bytes(UART_NUM_0, ...) path
+// SerialAdapter already used, so nothing in this file (or the component
+// graph) depends on arduino-esp32 anymore — the dependency has been dropped
+// from CMakeLists.txt/idf_component.yml.
 
 using namespace lattice::utils;
 // Avoid 'mesh' ambiguity by not importing the namespace
@@ -288,14 +281,12 @@ static void initDrivers() {
   ESP_ERROR_CHECK(gpio_install_isr_service(0));
 
   // Phase I Task 5: uart_driver — install the native ESP-IDF UART driver for
-  // UART_NUM_0 before anything touches Serial (Logger) or SerialAdapter.
-  // arduino-esp32's Serial.begin() below detects the driver is already
-  // installed (uart_is_driver_installed()) and skips re-installing it,
-  // calling only uart_param_config() to apply matching settings — so Logger
-  // (hand-rolled Serial.print path, intentionally left alone — see
-  // Logger.cpp) and SerialAdapter (uart_read_bytes/uart_write_bytes) share
-  // one underlying driver instance with no conflict. Baud rate here MUST
-  // match Serial.begin(115200) below.
+  // UART_NUM_0 before anything touches it. Logger and SerialAdapter both
+  // write via uart_write_bytes(UART_NUM_0, ...) (Phase C finding 17 moved
+  // Logger off the Arduino Serial wrapper onto the same native path
+  // SerialAdapter already used), so this single uart_driver_install() +
+  // uart_param_config() call is the only setup either of them needs — no
+  // more Arduino Serial.begin() to keep in sync with the baud rate here.
   uart_config_t uartCfg = {
       .baud_rate = 115200,
       .data_bits = UART_DATA_8_BITS,
@@ -306,13 +297,6 @@ static void initDrivers() {
   };
   ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, 1024, 0, 0, NULL, 0)); // RX 1024, TX unbuffered
   ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uartCfg));
-
-  // Phase I Task 10: with CONFIG_AUTOSTART_ARDUINO gone, nothing calls
-  // arduino-esp32's initArduino() for us anymore — do it explicitly so
-  // Logger.cpp's Serial.print/println/vprintf calls have a working
-  // HardwareSerial underneath. Must run before Serial.begin() below.
-  initArduino();
-  Serial.begin(115200);
 }
 
 // Legitimate special case: the red LED itself just failed to initialize, so

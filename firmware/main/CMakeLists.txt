@@ -1,10 +1,10 @@
 # ESP-IDF component CMakeLists.txt for lattice-nodes main component
 #
-# arduino-as-component: `espressif/arduino-esp32` (v3.x) is pulled in by
-# idf_component.yml and registers the ESP-IDF component name `arduino-esp32`.
-# Listing it in REQUIRES exposes Arduino.h, Serial, WiFi, String,
-# esp_now, and the rest of the Arduino API headers.
-# CONFIG_AUTOSTART_ARDUINO=y (sdkconfig.defaults) provides app_main().
+# Phase C finding 17: the `arduino-esp32` component (and its
+# idf_component.yml dependency) was removed here once Logger.cpp — the last
+# file in the tree using Arduino.h/Serial — migrated to native
+# uart_write_bytes(), the same path SerialAdapter already used. Nothing in
+# this component graph depends on Arduino anymore.
 # Persistence (src/persistence/eeprom/*) uses the `nvs_flash` component
 # directly (nvs_open/nvs_get_*/nvs_set_*) rather than Arduino's Preferences
 # wrapper — Phase I Task 4.
@@ -53,7 +53,6 @@ idf_component_register(
     "src"
     "lib"
   REQUIRES
-    arduino-esp32
     esp_wifi
     nvs_flash
     driver
