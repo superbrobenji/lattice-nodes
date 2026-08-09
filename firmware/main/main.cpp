@@ -234,7 +234,7 @@ void dataRecvCallback(const lattice::mesh::mesh_message& message) {
   greenLed.pulse(2, 100, 100);
 }
 
-extern "C" void app_main(void) {
+static void initDrivers() {
   // Phase I Task 4: nvs_flash direct — initialize the NVS partition before
   // anything touches lattice::eeprom (which opens nvs_flash handles directly
   // instead of going through Arduino's Preferences wrapper). Erase-and-retry
@@ -323,7 +323,33 @@ extern "C" void app_main(void) {
   // HardwareSerial underneath. Must run before Serial.begin() below.
   initArduino();
   Serial.begin(115200);
+}
 
+// Legitimate special case: the red LED itself just failed to initialize, so
+// the only way to signal the failure is to try the green one and pump its
+// non-blocking pulse() state machine inline (there is no other task running
+// yet to do it). If neither LED works, halt silently.
+static void haltOnRedLedFailure(lattice::hardware::Led& greenLed) {
+  Logger::logln("MAIN", "FATAL: Failed to initialize red LED!", LogLevel::LOG_ERROR);
+  if (greenLed.init()) {
+    while (true) {
+      greenLed.pulse(6, 100, 100);
+      while (greenLed.isBusy()) {
+        uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
+        greenLed.update(nowMs);
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+  } else {
+    Logger::logln("MAIN", "FATAL: No LEDs available. System halted.", LogLevel::LOG_ERROR);
+    while (true) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+  }
+}
+
+static void initHardwareOutputs() {
   Logger::setLogLevel(lattice::config::DEFAULT_LOG_LEVEL);
 
   // Phase I Task 10: was a raw, manually-gated Serial.println("Lattice
@@ -345,28 +371,7 @@ extern "C" void app_main(void) {
   Led::setSystemErrorLed(&redLed);
 
   if (!redLed.init()) {
-    Logger::logln("MAIN", "FATAL: Failed to initialize red LED!", LogLevel::LOG_ERROR);
-    if (greenLed.init()) {
-      // Phase I Task 7 (WW): greenLed.pulse() arms a pattern non-blockingly;
-      // this halt loop is the (rare) legitimate case that pumps
-      // greenLed.update() itself inline — nothing else runs here, so it's
-      // equivalent in effect to the old blink()'s internal delay()-driven
-      // blocking, just implemented as an explicit local pump instead.
-      while (true) {
-        greenLed.pulse(6, 100, 100);
-        while (greenLed.isBusy()) {
-          uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
-          greenLed.update(nowMs);
-          vTaskDelay(pdMS_TO_TICKS(10));
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-      }
-    } else {
-      Logger::logln("MAIN", "FATAL: No LEDs available. System halted.", LogLevel::LOG_ERROR);
-      while (true) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-      }
-    }
+    haltOnRedLedFailure(greenLed);
   }
 
   // Seven segment conditional init
@@ -396,12 +401,18 @@ extern "C" void app_main(void) {
   }
 
   // Initialize EEPROM Manager
+  // (finding 18: this is the authoritative checked call — the earlier
+  // lattice::eeprom::init() above is an unchecked early probe needed only so
+  // BootManager::check()'s reboot-reason/-count calls aren't no-ops; init()
+  // is idempotent, so calling it twice is safe.)
   if (!lattice::eeprom::init()) {
     Logger::logln("MAIN", "Failed to initialize EEPROM Manager", LogLevel::LOG_ERROR);
     lattice::err::fatal(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::CORE, 2,
                         "EEPROM Manager init failed!");
   }
+}
 
+static bool initSubsystems() {
   // Bluetooth disabled via CONFIG_BT_ENABLED=n in sdkconfig
 
   // Check if we're in dev mode (compile-time constant takes precedence)
@@ -536,6 +547,10 @@ extern "C" void app_main(void) {
 
   mesh.linkDataRecvCallback(dataRecvCallback);
 
+  return isMaster;
+}
+
+static void spawnTasks(bool isMaster) {
   // Configure task watchdog: 10-second timeout. Registration
   // (esp_task_wdt_add) happens inside housekeeping_task_fn itself, below —
   // app_main()'s own task is transient and returns once boot completes, so it
@@ -575,7 +590,13 @@ extern "C" void app_main(void) {
       .light_sleep_enable = true,
   };
   ESP_ERROR_CHECK(esp_pm_configure(&pm_cfg));
+}
 
+extern "C" void app_main(void) {
+  initDrivers();
+  initHardwareOutputs();
+  bool isMaster = initSubsystems();
+  spawnTasks(isMaster);
   // app_main() returns here; the FreeRTOS scheduler owns the runtime from
   // this point on, via the mesh-drain task and housekeeping task spawned
   // above.
