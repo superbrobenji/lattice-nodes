@@ -168,17 +168,7 @@ extern "C" void housekeeping_task_fn(void*) {
     // adapter/button work below is conditionally skipped. Same behavior for
     // everything that must keep ticking (mesh.loop(), checkMasterTimeout(),
     // DisplayManager, WDT reset), with a real yield guaranteed every pass.
-    static uint64_t lastEnrollmentBroadcast = 0;
-    bool skipDataForwarding = false;
-    if (!mesh.isEnrolled() && !mesh.getIsMaster()) {
-      if (nowMs - lastEnrollmentBroadcast > 10000) {
-        lastEnrollmentBroadcast = nowMs;
-        mesh.sendEnrollmentRequest();
-        Logger::logln("MAIN", "Enrollment request sent (awaiting server approval)",
-                      LogLevel::LOG_INFO);
-      }
-      skipDataForwarding = true;
-    }
+    bool skipDataForwarding = mesh.tickEnrollmentBroadcast(nowMs);
 
     esp_task_wdt_reset();
 

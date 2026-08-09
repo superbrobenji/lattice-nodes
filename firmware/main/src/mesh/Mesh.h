@@ -205,6 +205,7 @@ private:
   // uint32_t.
   uint64_t lastBeaconMs;
   uint64_t lastRouteReportMs;
+  uint64_t lastEnrollmentBroadcastMs_ = 0;
 
   // Enrollment state (composed — mbedtls-heavy methods stubbed in test builds)
   Enrollment enrollment;
@@ -376,6 +377,12 @@ public:
     enrollment.sendRequest(deviceMacAddress, PROTO_VERSION, txState.bootEpoch, seq);
   }
   bool isEnrolled() const { return enrollment.isEnrolled(); }
+
+  // Periodic re-broadcast of this node's enrollment request while unenrolled
+  // (every 10s). Returns true if data-forwarding should be skipped this tick
+  // (not yet enrolled and not master) — callers use this to gate the rest of
+  // their per-tick work, same as the old inline housekeeping_task_fn logic.
+  bool tickEnrollmentBroadcast(uint64_t nowMs);
   // Thin forward (round 2 task 11) — body now lives in MeshMessenger.
   void enrollPeer(const uint8_t* mac, const uint8_t* publicKey32) {
     enrollPeer(mac, publicKey32, nullptr, nullptr);
