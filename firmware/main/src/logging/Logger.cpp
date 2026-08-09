@@ -30,6 +30,14 @@ void uartWriteLine(const char* tag, const char* prefix, const char* message) {
 // Mirrors the old Serial.print(prefix); Serial.vprintf(fmt, args); Serial.println();
 // sequence — formats into a stack buffer (matches LATTICE_LOGF's existing
 // 128-byte convention in Logger.h) then writes it as one native UART call.
+//
+// Note: the old Serial.vprintf() (arduino-esp32) used a 64-byte stack buffer
+// but fell back to a dynamically malloc'd buffer sized to fit the full output
+// on overflow, so it had no effective length cap. This fixed 128-byte buffer
+// has no such fallback — formatted messages at or beyond 128 bytes are
+// silently truncated by vsnprintf. That's a deliberate tradeoff matching
+// LATTICE_LOGF's existing 128-byte convention (see Logger.h), not an
+// oversight; revisit if a call site ever needs longer formatted output.
 void uartWriteFormatted(const char* prefix, const char* fmt, va_list args) {
   char buf[128];
   vsnprintf(buf, sizeof(buf), fmt, args);
