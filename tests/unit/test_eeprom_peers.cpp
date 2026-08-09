@@ -1,5 +1,10 @@
 #include <gtest/gtest.h>
 #include <cstring>
+// Phase C finding 17: resetMillis() (SetUp() below) used to reach this TU
+// transitively via EepromCore.h -> Logger.h -> Arduino.h (mocks/Arduino.h
+// includes time_mock.h). Logger.h no longer includes Arduino.h (migrated to
+// native uart_write_bytes), so include time_mock.h directly for the
+// resetMillis() declaration these fixtures rely on.
 #include "time_mock.h"
 #include "persistence/eeprom/EepromCore.h"
 #include "persistence/eeprom/EepromPeers.h"
