@@ -210,10 +210,9 @@ TEST_F(ButtonHandlerTest, ConfigButtonDoesNotRefireAfterRelease) {
 // (tests/mocks/freertos/task.h) — so on this test harness that loop never
 // terminates. Every test below is therefore deliberately written to never
 // reach the confirmed-wipe branch (i.e. never holds a second time within the
-// 3s confirm window); the "confirm succeeds" transition itself is exercised
-// by reaching the arm branch a second time (see
-// ResetArmsAgainAfterAProperTimeout below), stopping short of the actual
-// clearAll()/esp_restart() call.
+// 3s confirm window); the arm→timeout→re-arm cycle is exercised (see
+// ResetArmsAgainAfterAProperTimeout below), but the confirm-branch itself
+// is not tested—it never reaches clearAll()/esp_restart() in this harness.
 
 TEST_F(ButtonHandlerTest, ResetButtonFirstHoldArmsConfirmWindow) {
   pressButton(*resetBtn, kResetButtonPin);
