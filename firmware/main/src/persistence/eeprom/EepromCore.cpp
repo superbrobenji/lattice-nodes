@@ -206,7 +206,7 @@ bool init() {
   if (err != ESP_OK) {
     LATTICE_LOGLN("NVS", "Failed to open NVS namespace", lattice::utils::LogLevel::LOG_ERROR);
     lattice::err::fail(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::EEPROM, 1,
-                       "EepromManager: NVS begin failed");
+                       "EepromCore: NVS begin failed");
     return false;
   }
   nvs_close(probe);

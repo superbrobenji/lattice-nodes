@@ -49,10 +49,19 @@ constexpr uint16_t PEER_LIST_SIZE = MAX_PEERS * PEER_RECORD_SIZE;          // 38
 } // namespace lattice
 
 // Phase C: EepromManager split into persistence/eeprom/ domain files (audit
-// finding 4). This header is the internal KV-primitive layer — the other
-// eeprom/*.cpp files include it; consumers outside persistence/eeprom/ never
-// should (each includes only the domain header(s) it actually calls into,
-// which is the fix for "any consumer can reach any persistence function").
+// finding 4). This header carries two things with different audiences: the
+// public lifecycle API (init/setDevMode/getDevMode/flushIfDirty/forceFlush/
+// clearAll) plus the EEPROM_SIZES/NVS_KEYS constants above, which any
+// consumer may legitimately include (main.cpp, ButtonHandler.h, Mesh.cpp,
+// and PeerRegistry.h all do today) — and two internal-only pieces below,
+// detail:: (module state, reachable only via the UNIT_TEST-gated
+// debugStateForTest() the e2e harness uses to snapshot/restore it) and
+// core_internal:: (the KV-primitive layer). Neither is meant for use
+// outside persistence/eeprom/: core_internal:: exists so the other
+// eeprom/*.cpp domain files can call into it without each re-declaring its
+// own copy, and external consumers should include only the domain
+// header(s) they actually call into, which is the fix for "any consumer
+// can reach any persistence function".
 namespace lattice {
 namespace eeprom {
 

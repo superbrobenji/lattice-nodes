@@ -8,6 +8,20 @@
 # Persistence (src/persistence/eeprom/*) uses the `nvs_flash` component
 # directly (nvs_open/nvs_get_*/nvs_set_*) rather than Arduino's Preferences
 # wrapper — Phase I Task 4.
+#
+# Phase C final review: dropping arduino-esp32 above also dropped its
+# transitive exposure of esp_timer.h (main.cpp/Mesh.h/PirAdapter.cpp call
+# esp_timer_get_time() directly but never declared `esp_timer` themselves —
+# arduino-esp32 was silently providing it). `esp_wifi` and `driver` both
+# depend on esp_timer too, but only via PRIV_REQUIRES, which ESP-IDF's build
+# system does not propagate to consumers — hence the explicit REQUIRES entry
+# below. esp_pm.h (main.cpp's esp_pm_configure()) and esp_task_wdt.h
+# (main.cpp's esp_task_wdt_*()) were checked too: esp_pm.h stays resolvable
+# because `driver`'s own CMakeLists.txt REQUIRES esp_pm publicly (so it
+# propagates transitively through `driver` above), and esp_task_wdt.h lives
+# in the esp_system component, which ESP-IDF's build system adds to every
+# component's requirements automatically (build.cmake's
+# __COMPONENT_REQUIRES_COMMON) — neither needed an explicit entry here.
 idf_component_register(
   SRCS
     "main.cpp"
@@ -57,6 +71,7 @@ idf_component_register(
     nvs_flash
     driver
     mbedtls
+    esp_timer
 )
 
 # Subdirectory includes for IDE/IntelliSense and internal #include resolution

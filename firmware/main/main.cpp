@@ -330,8 +330,9 @@ static void initHardwareOutputs() {
   // Starting..."); LATTICE_LOGLN folds to nothing under LOG_NONE the same way
   // the old manual `if (DEFAULT_LOG_LEVEL != LOG_NONE)` guard did, so this is
   // behavior-preserving and removes one more direct Arduino Serial call site
-  // from main.cpp — Logger.cpp remains the only file that touches Serial
-  // directly.
+  // from main.cpp. (Phase C Task 4 later migrated Logger.cpp itself off
+  // Serial to native uart_write_bytes(), so nothing in the tree touches
+  // Arduino's Serial anymore.)
   LATTICE_LOGLN("MAIN", "Lattice Starting...", LogLevel::LOG_INFO);
 
   // Check and log reset reason; escalate if WDT looping

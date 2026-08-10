@@ -7,8 +7,10 @@
 // harness's per-node Serial state swap (see tests/e2e/harness/NodeContext.cpp
 // swapIn/swapOut, which snapshot/restore Serial.written/Serial.rxQueue)
 // working unchanged, regardless of whether firmware code goes through
-// Serial.read()/write() (Logger, unchanged) or uart_read_bytes/
-// uart_write_bytes (SerialAdapter, migrated here).
+// Serial.read()/write() or uart_read_bytes/uart_write_bytes — both
+// SerialAdapter and, since Phase C Task 4's native-UART migration,
+// Logger.cpp now route through this mock's uart_read_bytes/uart_write_bytes
+// path rather than serial_mock.h's Serial object directly.
 #pragma once
 #include <cstddef>
 #include <cstdint>
