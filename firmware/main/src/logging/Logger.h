@@ -1,7 +1,8 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
-#include <Arduino.h>
+#include <driver/uart.h>
+#include <cstdarg>
 #include <cstdio>
 
 #ifndef LATTICE_LOG_LEVEL
@@ -65,7 +66,7 @@
 //
 // Buffer size: 128 bytes. Audited every existing snprintf+LATTICE_LOGLN call site
 // being migrated onto this macro; the largest local buffer among them was 96 bytes
-// (Error.h checkEsp, ErrorCore.cpp signalError, EepromManager.cpp persistOrEscalate,
+// (Error.h checkEsp, ErrorCore.cpp signalError, EepromCore.cpp persistOrEscalate,
 // SerialAdapter.cpp onMeshDataImpl). 128 covers all of them with headroom, and
 // matches LOG_D's existing buffer size above for consistency.
 #if LATTICE_DEFAULT_LOG_LEVEL == LATTICE_LOG_LEVEL_NONE

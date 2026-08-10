@@ -7,7 +7,10 @@
 #include "src/hardware/input/Button.h"
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromCore.h"
+#include "src/persistence/eeprom/EepromIdentity.h"
+#include "src/persistence/eeprom/EepromRole.h"
+#include "src/persistence/eeprom/EepromPeers.h"
 #include "src/app/BootManager.h"
 #include "src/app/DisplayManager.h"
 #include "src/app/ButtonHandler.h"
@@ -32,19 +35,12 @@
 // mesh-drain task and the new housekeeping task, which absorbs everything
 // that used to run every iteration of the Arduino loop() task).
 //
-// Logger.cpp is the one deliberately-kept Arduino API user in this codebase
-// (see non-goals — it shares UART_NUM_0's Arduino Serial wrapper with
-// SerialAdapter's native uart_read_bytes/uart_write_bytes path, and esp_log on
-// the same UART would corrupt the binary framing SerialAdapter depends on).
-// Because CONFIG_AUTOSTART_ARDUINO=y used to be what called arduino-esp32's
-// initArduino() before setup(), owning app_main() ourselves means we must call
-// initArduino() explicitly before Serial.begin() below, or HardwareSerial's
-// internal state (which Logger.cpp's Serial.print/println/vprintf calls rely
-// on) is never brought up. This is the one remaining place in this file that
-// still needs Arduino.h -- transitively included via Logger.h/AdapterFactory
-// -> Adapter -> project_config.h no longer pulls it in (all narrowed to
-// <cstdint> in this task), so Logger.h is the sole surviving source.
-extern "C" void initArduino();
+// Phase C finding 17: Logger.cpp was the last file in the tree using the
+// Arduino Serial API (arduino-esp32's HardwareSerial wrapper). It has been
+// migrated onto the same native uart_write_bytes(UART_NUM_0, ...) path
+// SerialAdapter already used, so nothing in this file (or the component
+// graph) depends on arduino-esp32 anymore — the dependency has been dropped
+// from CMakeLists.txt/idf_component.yml.
 
 using namespace lattice::utils;
 // Avoid 'mesh' ambiguity by not importing the namespace
@@ -165,17 +161,7 @@ extern "C" void housekeeping_task_fn(void*) {
     // adapter/button work below is conditionally skipped. Same behavior for
     // everything that must keep ticking (mesh.loop(), checkMasterTimeout(),
     // DisplayManager, WDT reset), with a real yield guaranteed every pass.
-    static uint64_t lastEnrollmentBroadcast = 0;
-    bool skipDataForwarding = false;
-    if (!mesh.isEnrolled() && !mesh.getIsMaster()) {
-      if (nowMs - lastEnrollmentBroadcast > 10000) {
-        lastEnrollmentBroadcast = nowMs;
-        mesh.sendEnrollmentRequest();
-        Logger::logln("MAIN", "Enrollment request sent (awaiting server approval)",
-                      LogLevel::LOG_INFO);
-      }
-      skipDataForwarding = true;
-    }
+    bool skipDataForwarding = mesh.tickEnrollmentBroadcast(nowMs);
 
     esp_task_wdt_reset();
 
@@ -231,7 +217,7 @@ void dataRecvCallback(const lattice::mesh::mesh_message& message) {
   greenLed.pulse(2, 100, 100);
 }
 
-extern "C" void app_main(void) {
+static void initDrivers() {
   // Phase I Task 4: nvs_flash direct — initialize the NVS partition before
   // anything touches lattice::eeprom (which opens nvs_flash handles directly
   // instead of going through Arduino's Preferences wrapper). Erase-and-retry
@@ -295,14 +281,12 @@ extern "C" void app_main(void) {
   ESP_ERROR_CHECK(gpio_install_isr_service(0));
 
   // Phase I Task 5: uart_driver — install the native ESP-IDF UART driver for
-  // UART_NUM_0 before anything touches Serial (Logger) or SerialAdapter.
-  // arduino-esp32's Serial.begin() below detects the driver is already
-  // installed (uart_is_driver_installed()) and skips re-installing it,
-  // calling only uart_param_config() to apply matching settings — so Logger
-  // (hand-rolled Serial.print path, intentionally left alone — see
-  // Logger.cpp) and SerialAdapter (uart_read_bytes/uart_write_bytes) share
-  // one underlying driver instance with no conflict. Baud rate here MUST
-  // match Serial.begin(115200) below.
+  // UART_NUM_0 before anything touches it. Logger and SerialAdapter both
+  // write via uart_write_bytes(UART_NUM_0, ...) (Phase C finding 17 moved
+  // Logger off the Arduino Serial wrapper onto the same native path
+  // SerialAdapter already used), so this single uart_driver_install() +
+  // uart_param_config() call is the only setup either of them needs — no
+  // more Arduino Serial.begin() to keep in sync with the baud rate here.
   uart_config_t uartCfg = {
       .baud_rate = 115200,
       .data_bits = UART_DATA_8_BITS,
@@ -313,22 +297,42 @@ extern "C" void app_main(void) {
   };
   ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, 1024, 0, 0, NULL, 0)); // RX 1024, TX unbuffered
   ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uartCfg));
+}
 
-  // Phase I Task 10: with CONFIG_AUTOSTART_ARDUINO gone, nothing calls
-  // arduino-esp32's initArduino() for us anymore — do it explicitly so
-  // Logger.cpp's Serial.print/println/vprintf calls have a working
-  // HardwareSerial underneath. Must run before Serial.begin() below.
-  initArduino();
-  Serial.begin(115200);
+// Legitimate special case: the red LED itself just failed to initialize, so
+// the only way to signal the failure is to try the green one and pump its
+// non-blocking pulse() state machine inline (there is no other task running
+// yet to do it). If neither LED works, halt silently.
+static void haltOnRedLedFailure(lattice::hardware::Led& greenLed) {
+  Logger::logln("MAIN", "FATAL: Failed to initialize red LED!", LogLevel::LOG_ERROR);
+  if (greenLed.init()) {
+    while (true) {
+      greenLed.pulse(6, 100, 100);
+      while (greenLed.isBusy()) {
+        uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
+        greenLed.update(nowMs);
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+  } else {
+    Logger::logln("MAIN", "FATAL: No LEDs available. System halted.", LogLevel::LOG_ERROR);
+    while (true) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+  }
+}
 
+static void initHardwareOutputs() {
   Logger::setLogLevel(lattice::config::DEFAULT_LOG_LEVEL);
 
   // Phase I Task 10: was a raw, manually-gated Serial.println("Lattice
   // Starting..."); LATTICE_LOGLN folds to nothing under LOG_NONE the same way
   // the old manual `if (DEFAULT_LOG_LEVEL != LOG_NONE)` guard did, so this is
   // behavior-preserving and removes one more direct Arduino Serial call site
-  // from main.cpp — Logger.cpp remains the only file that touches Serial
-  // directly.
+  // from main.cpp. (Phase C Task 4 later migrated Logger.cpp itself off
+  // Serial to native uart_write_bytes(), so nothing in the tree touches
+  // Arduino's Serial anymore.)
   LATTICE_LOGLN("MAIN", "Lattice Starting...", LogLevel::LOG_INFO);
 
   // Check and log reset reason; escalate if WDT looping
@@ -342,28 +346,7 @@ extern "C" void app_main(void) {
   Led::setSystemErrorLed(&redLed);
 
   if (!redLed.init()) {
-    Logger::logln("MAIN", "FATAL: Failed to initialize red LED!", LogLevel::LOG_ERROR);
-    if (greenLed.init()) {
-      // Phase I Task 7 (WW): greenLed.pulse() arms a pattern non-blockingly;
-      // this halt loop is the (rare) legitimate case that pumps
-      // greenLed.update() itself inline — nothing else runs here, so it's
-      // equivalent in effect to the old blink()'s internal delay()-driven
-      // blocking, just implemented as an explicit local pump instead.
-      while (true) {
-        greenLed.pulse(6, 100, 100);
-        while (greenLed.isBusy()) {
-          uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
-          greenLed.update(nowMs);
-          vTaskDelay(pdMS_TO_TICKS(10));
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-      }
-    } else {
-      Logger::logln("MAIN", "FATAL: No LEDs available. System halted.", LogLevel::LOG_ERROR);
-      while (true) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-      }
-    }
+    haltOnRedLedFailure(greenLed);
   }
 
   // Seven segment conditional init
@@ -384,21 +367,29 @@ extern "C" void app_main(void) {
 
   if (!configButton.init()) {
     Logger::error("Config button initialization failed!");
-    lattice::err::fail(lattice::utils::ErrorType::HARDWARE_FAILURE, "Config button init failed!");
+    lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::CORE, 5,
+                       "Config button init failed!");
   }
 
   if (!resetButton.init()) {
     Logger::error("Reset button initialization failed!");
-    lattice::err::fail(lattice::utils::ErrorType::HARDWARE_FAILURE, "Reset button init failed!");
+    lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::CORE, 6,
+                       "Reset button init failed!");
   }
 
   // Initialize EEPROM Manager
+  // (finding 18: this is the authoritative checked call — the earlier
+  // lattice::eeprom::init() above is an unchecked early probe needed only so
+  // BootManager::check()'s reboot-reason/-count calls aren't no-ops; init()
+  // is idempotent, so calling it twice is safe.)
   if (!lattice::eeprom::init()) {
     Logger::logln("MAIN", "Failed to initialize EEPROM Manager", LogLevel::LOG_ERROR);
     lattice::err::fatal(lattice::core::ErrorTypeDigit::MEMORY, lattice::core::ModuleDigit::CORE, 2,
                         "EEPROM Manager init failed!");
   }
+}
 
+static bool initSubsystems() {
   // Bluetooth disabled via CONFIG_BT_ENABLED=n in sdkconfig
 
   // Check if we're in dev mode (compile-time constant takes precedence)
@@ -533,6 +524,10 @@ extern "C" void app_main(void) {
 
   mesh.linkDataRecvCallback(dataRecvCallback);
 
+  return isMaster;
+}
+
+static void spawnTasks(bool isMaster) {
   // Configure task watchdog: 10-second timeout. Registration
   // (esp_task_wdt_add) happens inside housekeeping_task_fn itself, below —
   // app_main()'s own task is transient and returns once boot completes, so it
@@ -572,7 +567,13 @@ extern "C" void app_main(void) {
       .light_sleep_enable = true,
   };
   ESP_ERROR_CHECK(esp_pm_configure(&pm_cfg));
+}
 
+extern "C" void app_main(void) {
+  initDrivers();
+  initHardwareOutputs();
+  bool isMaster = initSubsystems();
+  spawnTasks(isMaster);
   // app_main() returns here; the FreeRTOS scheduler owns the runtime from
   // this point on, via the mesh-drain task and housekeeping task spawned
   // above.

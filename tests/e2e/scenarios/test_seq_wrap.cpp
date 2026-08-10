@@ -13,7 +13,7 @@
 // runPolled() window comfortably longer than that before the next.
 #include "harness/MeshSimTest.h"
 #include "src/mesh/Mesh.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromDiagnostics.h"
 
 TEST_F(MeshSimTest, SeqWrapBumpsEpochAndKeepsSealing) {
   addMaster();

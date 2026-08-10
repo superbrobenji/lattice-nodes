@@ -6,7 +6,7 @@
 #include "../../project_config.h"
 #include "src/network/MacEq.h"
 #include "src/network/mac_table.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromDiagnostics.h"
 #include "src/error/Error.h"
 #include "src/error/ErrorCore.h"
 

@@ -1,14 +1,18 @@
 # ESP-IDF default configuration for lattice-nodes firmware
-# Approach: arduino-esp32 as IDF component (spec §Phase 0)
+# Approach: pure ESP-IDF component, no Arduino framework (spec §Phase 0
+# started with arduino-esp32 as an IDF component; Phase C Task 4 finished
+# migrating the last Arduino API user — Logger.cpp — to native
+# uart_write_bytes(), and the arduino-esp32 component/dependency was
+# dropped entirely from firmware/main/CMakeLists.txt).
 
 # Phase I Task 10 (item AAA): CONFIG_AUTOSTART_ARDUINO removed. This firmware
-# now owns app_main() directly (firmware/main/main.cpp) instead of letting
+# owns app_main() directly (firmware/main/main.cpp) instead of letting
 # arduino-esp32's own app_main() call setup()/loop() on our behalf via its
-# Arduino loop task. Per arduino-esp32's own Kconfig help text for
-# AUTOSTART_ARDUINO ("If disabled, you can call initArduino() to run any
-# preparations required by the framework"), app_main() calls initArduino()
-# explicitly before anything that needs it (Logger.cpp's Serial-based
-# logging, the sole remaining Arduino API user — see non-goals).
+# Arduino loop task. (Historical: at the time of this change, app_main()
+# still called arduino-esp32's initArduino() before anything that needed it,
+# since Logger.cpp was still Serial-based; Phase C Task 4 later removed both
+# the initArduino() call and the Arduino dependency itself once Logger.cpp
+# migrated to native UART.)
 #
 # CONFIG_ARDUINO_LOOP_STACK_SIZE (previously 4096, sized per Task 6's
 # analysis for the old Arduino loop task) is gone with that task — the two

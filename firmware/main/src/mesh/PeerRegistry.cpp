@@ -1,4 +1,5 @@
 #include "PeerRegistry.h"
+#include "src/persistence/eeprom/EepromPeers.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/network/MacEq.h"

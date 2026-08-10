@@ -3,7 +3,10 @@
 #include "src/network/hw_mac.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h" // unified error
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromCore.h"
+#include "src/persistence/eeprom/EepromDiagnostics.h"
+#include "src/persistence/eeprom/EepromDeviceConfig.h"
+#include "src/persistence/eeprom/EepromSecurity.h"
 // Error.h already provides ERROR_CHECK macros
 #include <esp_now.h>
 #include <esp_timer.h>
@@ -18,8 +21,6 @@ namespace mesh {
 using namespace lattice::utils;
 
 Mesh* Mesh::instance = nullptr;
-
-// no longer need macEquals helper – use MacAddress equality directly
 
 Mesh::Mesh()
     : isMaster(false), relayPendingAt(0), relayPending(false),
@@ -296,6 +297,21 @@ void Mesh::debugDumpRadio() {
 // Thin wrapper (Phase B Task 5) — body moved to MasterBeacon::checkTimeout.
 void Mesh::checkMasterTimeout() {
   beacon.checkTimeout(isMaster, currentMaster, lastSeenMasterMac);
+}
+
+// Phase C Task 2: moved verbatim from main.cpp's housekeeping_task_fn inline
+// enrollment state machine — Mesh already owns isEnrolled()/getIsMaster()/
+// sendEnrollmentRequest(), the state this decision is based on.
+bool Mesh::tickEnrollmentBroadcast(uint64_t nowMs) {
+  if (isEnrolled() || getIsMaster()) {
+    return false;
+  }
+  if (nowMs - lastEnrollmentBroadcastMs_ > 10000) {
+    lastEnrollmentBroadcastMs_ = nowMs;
+    sendEnrollmentRequest();
+    Logger::logln("MAIN", "Enrollment request sent (awaiting server approval)", LogLevel::LOG_INFO);
+  }
+  return true;
 }
 
 // ---------- Tiger Style helper implementations ----------

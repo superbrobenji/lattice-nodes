@@ -7,7 +7,7 @@
 #include "src/mesh/MeshTransport.h"
 #include "src/adapter/pir/PirAdapter.h"
 #include "src/adapter/serial/SerialAdapter.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromCore.h"
 #include "src/error/ErrorCore.h"
 
 namespace sim {

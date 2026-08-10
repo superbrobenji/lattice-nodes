@@ -9,7 +9,8 @@
 #include <esp_wifi.h>
 #include "src/adapter/AdapterFactory.h"
 #include "src/adapter/serial/SerialAdapter.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromIdentity.h"
+#include "src/persistence/eeprom/EepromDeviceConfig.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "src/network/hw_mac.h"
 #include "src/network/MacEq.h"
@@ -235,10 +236,6 @@ bool Adapter::dispatchControlOp(const lattice::mesh::mesh_message& message,
     }
   }
   return false;
-}
-
-bool Adapter::init() {
-  return true;
 }
 
 } // namespace adapter

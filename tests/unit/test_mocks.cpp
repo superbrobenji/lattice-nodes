@@ -22,14 +22,14 @@ TEST(EspMock, RestartSetsFlag) {
 }
 
 TEST(ErrorHooks, FatalThrows) {
-  EXPECT_THROW(
-      lattice::err::fatal(lattice::core::ErrorTypeDigit::GENERIC,
-                          lattice::core::ModuleDigit::CORE, 9, "boom"),
-      lattice::err::FatalError);
+  EXPECT_THROW(lattice::err::fatal(lattice::core::ErrorTypeDigit::GENERIC,
+                                   lattice::core::ModuleDigit::CORE, 9, "boom"),
+               lattice::err::FatalError);
 }
 
 TEST(ErrorHooks, FailIncrementsCounter) {
   int before = lattice_test_errFailCount;
-  lattice::err::fail(lattice::utils::ErrorType::GENERIC, "soft");
+  lattice::err::fail(lattice::core::ErrorTypeDigit::GENERIC, lattice::core::ModuleDigit::CORE, 0,
+                     "soft");
   EXPECT_EQ(lattice_test_errFailCount, before + 1);
 }

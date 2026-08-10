@@ -1,8 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include "src/persistence/EepromManager.h"
-#include "src/network/MacAddress.h"
+#include "src/persistence/eeprom/EepromCore.h"
 #include "../../project_config.h"
 
 namespace lattice {

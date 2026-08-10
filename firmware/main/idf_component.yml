@@ -2,5 +2,3 @@
 dependencies:
   idf:
     version: ">=5.0.0"
-  espressif/arduino-esp32:
-    version: "^3.3.10"

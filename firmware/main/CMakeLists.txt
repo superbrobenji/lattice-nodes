@@ -1,13 +1,27 @@
 # ESP-IDF component CMakeLists.txt for lattice-nodes main component
 #
-# arduino-as-component: `espressif/arduino-esp32` (v3.x) is pulled in by
-# idf_component.yml and registers the ESP-IDF component name `arduino-esp32`.
-# Listing it in REQUIRES exposes Arduino.h, Serial, WiFi, String,
-# esp_now, and the rest of the Arduino API headers.
-# CONFIG_AUTOSTART_ARDUINO=y (sdkconfig.defaults) provides app_main().
-# Persistence (src/persistence/EepromManager.*) uses the `nvs_flash` component
+# Phase C finding 17: the `arduino-esp32` component (and its
+# idf_component.yml dependency) was removed here once Logger.cpp — the last
+# file in the tree using Arduino.h/Serial — migrated to native
+# uart_write_bytes(), the same path SerialAdapter already used. Nothing in
+# this component graph depends on Arduino anymore.
+# Persistence (src/persistence/eeprom/*) uses the `nvs_flash` component
 # directly (nvs_open/nvs_get_*/nvs_set_*) rather than Arduino's Preferences
 # wrapper — Phase I Task 4.
+#
+# Phase C final review: dropping arduino-esp32 above also dropped its
+# transitive exposure of esp_timer.h (main.cpp/Mesh.h/PirAdapter.cpp call
+# esp_timer_get_time() directly but never declared `esp_timer` themselves —
+# arduino-esp32 was silently providing it). `esp_wifi` and `driver` both
+# depend on esp_timer too, but only via PRIV_REQUIRES, which ESP-IDF's build
+# system does not propagate to consumers — hence the explicit REQUIRES entry
+# below. esp_pm.h (main.cpp's esp_pm_configure()) and esp_task_wdt.h
+# (main.cpp's esp_task_wdt_*()) were checked too: esp_pm.h stays resolvable
+# because `driver`'s own CMakeLists.txt REQUIRES esp_pm publicly (so it
+# propagates transitively through `driver` above), and esp_task_wdt.h lives
+# in the esp_system component, which ESP-IDF's build system adds to every
+# component's requirements automatically (build.cmake's
+# __COMPONENT_REQUIRES_COMMON) — neither needed an explicit entry here.
 idf_component_register(
   SRCS
     "main.cpp"
@@ -40,17 +54,24 @@ idf_component_register(
     "src/mesh/serialization/nanopb/pb_encode.c"
     "src/mesh/serialization/nanopb/pb_decode.c"
     "src/mesh/serialization/nanopb/pb_common.c"
-    "src/persistence/EepromManager.cpp"
+    "src/persistence/eeprom/EepromCore.cpp"
+    "src/persistence/eeprom/EepromIdentity.cpp"
+    "src/persistence/eeprom/EepromRole.cpp"
+    "src/persistence/eeprom/EepromSecurity.cpp"
+    "src/persistence/eeprom/EepromPeers.cpp"
+    "src/persistence/eeprom/EepromDiagnostics.cpp"
+    "src/persistence/eeprom/EepromEnrollment.cpp"
+    "src/persistence/eeprom/EepromDeviceConfig.cpp"
   INCLUDE_DIRS
     "."
     "src"
     "lib"
   REQUIRES
-    arduino-esp32
     esp_wifi
     nvs_flash
     driver
     mbedtls
+    esp_timer
 )
 
 # Subdirectory includes for IDE/IntelliSense and internal #include resolution
@@ -69,4 +90,5 @@ target_include_directories(${COMPONENT_LIB} PUBLIC
   src/mesh/serialization/nanopb
   src/network
   src/persistence
+  src/persistence/eeprom
 )
