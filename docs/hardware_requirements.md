@@ -6,7 +6,7 @@ for each. It is a companion to [`docs/adapter_development_guide.md`](adapter_dev
 (software-side adapter architecture) and [`docs/server_requirements.md`](server_requirements.md)
 (serial/mesh wire protocol) — this doc covers only the physical build.
 
-Pin numbers below are sourced directly from `firmware/main/src/config/project_config.h`
+Pin numbers below are sourced directly from `firmware/main/project_config.h`
 (`§4 "Hardware Pins"`) and `firmware/main/src/adapter/AdapterFactory.h`. If you change a
 pin in either file, update this table to match.
 
@@ -16,7 +16,7 @@ pin in either file, update this table to match.
 
 | Qty | Component | Notes |
 |-----|-----------|-------|
-| 1 | ESP32 dev board | Target chip is `esp32` (see `firmware/sdkconfig.defaults`'s `CONFIG_IDF_TARGET` / `idf.py set-target esp32`). The original reference board was an ESP32-WROOM-DA; any ESP32 dev board with the pins below broken out is compatible. |
+| 1 | ESP32 dev board | Target chip is `esp32` (set via `idf.py set-target esp32`, which writes `CONFIG_IDF_TARGET` to the generated, gitignored `firmware/sdkconfig` — not the checked-in `firmware/sdkconfig.defaults`). The original reference board was an ESP32-WROOM-DA; any ESP32 dev board with the pins below broken out is compatible. |
 | 2 | LED (any color) | One is the system status/error LED, one is a secondary status LED. Each needs its own series current-limiting resistor — see [Power](#power) note below; the firmware does not manage resistor sizing. |
 | 1 | Resistor, ~220Ω (x2) | Current-limiting resistor, one per LED. Exact value depends on the LED's forward voltage/current — 220Ω–330Ω is a safe default for standard 3.3V-logic LEDs. |
 | 2 | Momentary push-button | One "config" button, one "reset" button. Simple 2-pin or 4-pin tactile switches both work. |
