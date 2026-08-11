@@ -189,7 +189,7 @@ bool MeshTransport::sendBroadcast(const mesh_message& msg) {
 // payload confidentiality/integrity is end-to-end (E2ECrypto.h), and unencrypted
 // slots raise the ESP-NOW peer cap from ~6 to 20. The shared PMK stays set.
 // Moved from MeshCrypto.h (finding 19 — this is peering, not crypto).
-void MeshTransport::registerPeerWithEspNow(const uint8_t mac[6]) {
+void MeshTransport::registerPeerWithEspNow(const uint8_t* mac) {
   if (esp_now_is_peer_exist(mac))
     return;
   esp_now_peer_info_t info = {};

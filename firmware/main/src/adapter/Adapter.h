@@ -43,7 +43,7 @@ public:
 
   adapter_types getAdapterType() const; // Returns the adapter type
   void sendDataThroughMesh(const adapter_types type,
-                           const uint8_t data[64]); // sends data through mesh
+                           const uint8_t* data); // sends data through mesh
   void setTransmitFn(TransmitPtr fn);
 
   virtual bool init() = 0; // To be implemented by derived classes
