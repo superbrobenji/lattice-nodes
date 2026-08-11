@@ -1,6 +1,11 @@
 #ifndef SERIAL_ADAPTER_H
 #define SERIAL_ADAPTER_H
 
+// Phase I Task 5: native ESP-IDF uart_driver read/write, replacing
+// Serial.available()/read()/write(). Logger stays on the hand-rolled
+// Arduino Serial path (see Logger.cpp) — both share the same UART_NUM_0
+// driver instance, installed once at boot in main.cpp before either is used.
+#include "driver/uart.h"
 #include "src/adapter/Adapter.h"
 #include "src/mesh/serialization/nanopb/pb.h"
 #include "src/mesh/serialization/nanopb/pb_encode.h"
@@ -69,6 +74,12 @@ private:
 
 private:
   uint32_t lastReportedHopCount;
+
+  // Phase I Task 5: uart_driver — UART port this adapter reads/writes on.
+  // uart_driver_install() for this port happens once at boot in main.cpp,
+  // before SerialAdapter::init() runs; this adapter never installs/
+  // uninstalls the driver itself.
+  uart_port_t _uartNum = UART_NUM_0;
 };
 
 } // namespace adapter

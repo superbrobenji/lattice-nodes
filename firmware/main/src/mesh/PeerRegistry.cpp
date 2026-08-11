@@ -1,9 +1,11 @@
 #include "PeerRegistry.h"
+#include "src/persistence/eeprom/EepromPeers.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/network/MacEq.h"
 #include "src/network/mac_table.h"
 #include <esp_now.h>
+#include <esp_timer.h>
 #include <cstddef>
 #include <cstring>
 
@@ -56,7 +58,8 @@ bool PeerRegistry::isPeerInRange(const uint8_t* mac) const {
   const PeerInfo* peer = find(mac);
   if (!peer)
     return false;
-  return millis() - peer->lastSeenMillis < lattice::config::STALE_PEER_THRESHOLD_MS;
+  return static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - peer->lastSeenMs <
+         lattice::config::STALE_PEER_THRESHOLD_MS;
 }
 
 void PeerRegistry::updateLastSeen(const uint8_t* mac) {
@@ -67,37 +70,48 @@ void PeerRegistry::updateLastSeen(const uint8_t* mac) {
   // Enrollment is the only path for new peers — do not auto-add unknown senders here.
   PeerInfo* p = find(mac);
   if (p) {
-    p->lastSeenMillis = millis();
+    p->lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   }
 }
 
 // --- EEPROM Peer Management ---
+//
+// Phase I Task 6 (JJ): per-key blob load/save (EepromManager::loadPeerRecord/
+// savePeerRecord/erasePeerRecord — "peer0".."peer9" NVS keys) replaces the old
+// single 380-byte ("peers" key) blob. real nvs_get_blob has no offset/partial-
+// read mode (verified against IDF v5.5.1 nvs.h), so per-key naming is the only
+// way to avoid materializing the whole MAX_PEERS*PEER_RECORD_SIZE array on the
+// stack here — each iteration now only needs one PEER_RECORD_SIZE (38-byte)
+// scratch buffer instead of a 380-byte one. Changes the on-flash NVS layout
+// ("peers" -> "peer0".."peer9") — requires a device reflash on Phase I close
+// (accepted per project posture; see task-6-report.md).
 void PeerRegistry::loadFromEEPROM() {
   peerCount = 0;
 
-  // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key
-  uint8_t peerRecords[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_RECORD_SIZE];
-  bool eepromOk = lattice::eeprom::loadPeerList(peerRecords, EEPROM_SIZES::MAX_PEERS);
+  // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key.
+  for (uint8_t i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
+    uint8_t record[EEPROM_SIZES::PEER_RECORD_SIZE];
+    if (!lattice::eeprom::loadPeerRecord(i, record))
+      continue; // key not present (never saved / already erased) — skip slot
 
-  if (eepromOk) {
-    for (int i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
-      const uint8_t* record = peerRecords + (i * EEPROM_SIZES::PEER_RECORD_SIZE);
-      // Treat all-0xFF MAC as empty slot
-      bool valid = false;
-      for (int j = 0; j < 6; ++j) {
-        if (record[j] != 0xFF) {
-          valid = true;
-          break;
-        }
-      }
-      if (valid) {
-        PeerInfo peer;
-        memcpy(peer.mac, record, 6);
-        memcpy(peer.publicKey, record + 6, 32);
-        peer.lastSeenMillis = 0;
-        append(peer);
+    // Treat all-0xFF MAC as empty slot (defensive — loadPeerRecord already
+    // reports absent keys via its bool return, but this guards a record that
+    // was somehow persisted as the old sentinel pattern).
+    bool valid = false;
+    for (int j = 0; j < 6; ++j) {
+      if (record[j] != 0xFF) {
+        valid = true;
+        break;
       }
     }
+    if (!valid)
+      continue;
+
+    PeerInfo peer;
+    memcpy(peer.mac, record, 6);
+    memcpy(peer.publicKey, record + 6, 32);
+    peer.lastSeenMs = 0;
+    append(peer);
   }
 
   // Fallback in dev mode or when list is empty
@@ -107,24 +121,29 @@ void PeerRegistry::loadFromEEPROM() {
       PeerInfo peer;
       memcpy(peer.mac, lattice::config::DEFAULT_PEERS[i], 6);
       memset(peer.publicKey, 0, 32); // Public key not known yet for config defaults
-      peer.lastSeenMillis = 0;
+      peer.lastSeenMs = 0;
       append(peer);
     }
   }
 }
 
 void PeerRegistry::saveToEEPROM() {
-  // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key
-  uint8_t peerRecords[EEPROM_SIZES::MAX_PEERS * EEPROM_SIZES::PEER_RECORD_SIZE];
-  memset(peerRecords, 0xFF, sizeof(peerRecords));
-
-  for (size_t i = 0; i < peerCount && i < EEPROM_SIZES::MAX_PEERS; ++i) {
-    uint8_t* record = peerRecords + (i * EEPROM_SIZES::PEER_RECORD_SIZE);
-    memcpy(record, peerMacs[i].mac, 6);
-    memcpy(record + 6, peerMacs[i].publicKey, 32);
+  // Each record is PEER_RECORD_SIZE (38) bytes: 6 MAC + 32 public key. Slots
+  // [0, peerCount) are written; slots [peerCount, MAX_PEERS) are erased so a
+  // shrink (peer removal) doesn't leave stale data behind in a higher-index
+  // "peerN" key — unlike the old single-blob save, each key here persists
+  // independently, so a former tail entry must be explicitly cleared rather
+  // than implicitly dropped by writing a shorter blob.
+  uint8_t record[EEPROM_SIZES::PEER_RECORD_SIZE];
+  for (uint8_t i = 0; i < EEPROM_SIZES::MAX_PEERS; ++i) {
+    if (i < peerCount) {
+      memcpy(record, peerMacs[i].mac, 6);
+      memcpy(record + 6, peerMacs[i].publicKey, 32);
+      lattice::eeprom::savePeerRecord(i, record);
+    } else {
+      lattice::eeprom::erasePeerRecord(i);
+    }
   }
-
-  lattice::eeprom::savePeerList(peerRecords, peerCount);
 }
 
 void PeerRegistry::addAndPersist(const uint8_t* mac) {
@@ -140,7 +159,7 @@ void PeerRegistry::addAndPersist(const uint8_t* mac) {
   PeerInfo peer;
   memcpy(peer.mac, mac, 6);
   memset(peer.publicKey, 0, 32); // Public key unknown until enrollment
-  peer.lastSeenMillis = millis();
+  peer.lastSeenMs = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   append(peer);
   saveToEEPROM();
   // Note: ESP-NOW registration (registerPeerWithEspNow) is handled by Mesh layer

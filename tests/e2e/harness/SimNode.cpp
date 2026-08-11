@@ -10,7 +10,9 @@
 #include "src/error/ErrorCore.h"
 #include "src/error/Error.h"
 #include "src/hardware/output/Led.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromCore.h"
+#include "src/persistence/eeprom/EepromRole.h"
+#include "src/persistence/eeprom/EepromIdentity.h"
 #include "src/logging/Logger.h"
 #include "project_config.h"
 #include <cstring>
@@ -27,6 +29,7 @@ SimNode::~SimNode() {
   // effects land in this node's context, then capture.
   swapIn(ctx_);
   lattice::mesh::Mesh::instance = nullptr;
+  lattice::mesh::MeshTransport::instance = nullptr;
   lattice::adapter::PirAdapter::instance = nullptr;
   adapter_.reset();
   mesh_.reset();
@@ -116,6 +119,12 @@ void SimNode::tick() {
   swapIn(ctx_);
   try {
     lattice::err_core::drainPendingBlink();
+    // Phase I Task 9 (item EE): recvQueue drain moved off Mesh::loop() onto a
+    // dedicated FreeRTOS task on real hardware (woken via task-notify from the
+    // RX-ISR trampoline). This harness has no real FreeRTOS task, so mirror
+    // main.cpp's effective per-tick behavior by calling drain() explicitly,
+    // same as loop() used to do internally.
+    mesh_->drain();
     mesh_->loop();
     mesh_->checkMasterTimeout();
 
@@ -140,6 +149,7 @@ void SimNode::tick() {
 void SimNode::reboot() {
   swapIn(ctx_);
   lattice::mesh::Mesh::instance = nullptr;
+  lattice::mesh::MeshTransport::instance = nullptr;
   lattice::adapter::PirAdapter::instance = nullptr;
   adapter_.reset();
   mesh_.reset();

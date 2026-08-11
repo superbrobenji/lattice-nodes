@@ -14,14 +14,14 @@ static mesh_message makeMsg(const uint8_t mac[6], uint32_t epoch, uint16_t seq) 
 
 TEST(ReplayCacheTest, FreshMessageNotReplay) {
   ReplayCache rc;
-  rc.init(1);
+  rc.init();
   const uint8_t mac[6] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 1), 1000));
 }
 
 TEST(ReplayCacheTest, DuplicateIsReplay) {
   ReplayCache rc;
-  rc.init(1);
+  rc.init();
   const uint8_t mac[6] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
   rc.isReplay(makeMsg(mac, 1, 1), 1000);   // first — records it
   EXPECT_TRUE(rc.isReplay(makeMsg(mac, 1, 1), 1001));  // second — replay
@@ -29,7 +29,7 @@ TEST(ReplayCacheTest, DuplicateIsReplay) {
 
 TEST(ReplayCacheTest, DifferentSeqNotReplay) {
   ReplayCache rc;
-  rc.init(1);
+  rc.init();
   const uint8_t mac[6] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
   rc.isReplay(makeMsg(mac, 1, 1), 1000);
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 2), 1001));
@@ -37,7 +37,7 @@ TEST(ReplayCacheTest, DifferentSeqNotReplay) {
 
 TEST(ReplayCacheTest, DifferentEpochSameSeqNotReplay) {
   ReplayCache rc;
-  rc.init(1);
+  rc.init();
   const uint8_t mac[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 5), 1000));
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 2, 5), 1001));  // Same seq, different epoch
@@ -45,7 +45,7 @@ TEST(ReplayCacheTest, DifferentEpochSameSeqNotReplay) {
 
 TEST(ReplayCacheTest, DifferentMACNotReplay) {
   ReplayCache rc;
-  rc.init(1);
+  rc.init();
   const uint8_t mac1[6] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t mac2[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x00};
   EXPECT_FALSE(rc.isReplay(makeMsg(mac1, 1, 1), 1000));
@@ -59,7 +59,7 @@ TEST(ReplayCacheTest, SingleOrigin_MonotonicSeqBeyondOldRingSize_NeverFalsePosit
   // single origin sending strictly increasing seq numbers, well past the old
   // ring's slot count, must never be flagged as a replay.
   ReplayCache rc;
-  rc.init(1);
+  rc.init();
   const uint8_t mac[6] = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB};
   for (uint16_t i = 1; i <= lattice::config::LATTICE_REPLAY_MAX_ORIGINS + 1; ++i) {
     EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, i), 1000 + i));
@@ -80,7 +80,7 @@ TEST(ReplayCacheTest, HighWater_StaleSeqAfterAdvance_StillDetected) {
   // test was probing, not a weakening: the old attack (replay an
   // already-superseded seq from an active origin) is now barred.
   ReplayCache rc;
-  rc.init(1);
+  rc.init();
   const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
   for (uint16_t i = 0; i < 16; ++i) {
     EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, i), 1000 + i));
@@ -94,40 +94,32 @@ TEST(ReplayCacheTest, HighWater_StaleSeqAfterAdvance_StillDetected) {
 
 TEST(ReplayCacheTest, InitResetsState) {
   ReplayCache rc;
-  rc.init(1);
+  rc.init();
   const uint8_t mac[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
   rc.isReplay(makeMsg(mac, 1, 1), 1000);
   // After re-init, same message should not be a replay
-  rc.init(2);
+  rc.init();
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 1), 1001));
-}
-
-TEST(ReplayCacheTest, NextSeqIncrements) {
-  ReplayCache rc;
-  rc.init(5);
-  EXPECT_EQ(rc.nextSeq(), 1);
-  EXPECT_EQ(rc.nextSeq(), 2);
-  EXPECT_EQ(rc.bootEpoch, 5u);
 }
 
 // --- Per-origin high-water semantics (issue #46) ---
 // Reuses the makeMsg() helper defined at the top of this file.
 
 TEST(ReplayCachePerOrigin, FirstFrame_Accepts) {
-  ReplayCache rc; rc.init(1);
+  ReplayCache rc; rc.init();
   uint8_t mac[6] = {1,2,3,4,5,6};
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 1), 1000));
 }
 
 TEST(ReplayCachePerOrigin, ExactReplay_Drops) {
-  ReplayCache rc; rc.init(1);
+  ReplayCache rc; rc.init();
   uint8_t mac[6] = {1,2,3,4,5,6};
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 5), 1000));
   EXPECT_TRUE(rc.isReplay(makeMsg(mac, 1, 5), 1000));
 }
 
 TEST(ReplayCachePerOrigin, StrictlyNewer_Accepts) {
-  ReplayCache rc; rc.init(1);
+  ReplayCache rc; rc.init();
   uint8_t mac[6] = {1,2,3,4,5,6};
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 5), 1000));
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 6), 1001));
@@ -135,7 +127,7 @@ TEST(ReplayCachePerOrigin, StrictlyNewer_Accepts) {
 }
 
 TEST(ReplayCachePerOrigin, OutOfOrderSameOrigin_Drops) {
-  ReplayCache rc; rc.init(1);
+  ReplayCache rc; rc.init();
   uint8_t mac[6] = {1,2,3,4,5,6};
   EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 5), 1000));
   EXPECT_TRUE(rc.isReplay(makeMsg(mac, 1, 4), 1001));   // same epoch, lower seq
@@ -143,7 +135,7 @@ TEST(ReplayCachePerOrigin, OutOfOrderSameOrigin_Drops) {
 }
 
 TEST(ReplayCachePerOrigin, DifferentOrigin_DoesNotCollide) {
-  ReplayCache rc; rc.init(1);
+  ReplayCache rc; rc.init();
   uint8_t a[6] = {1,2,3,4,5,6};
   uint8_t b[6] = {6,5,4,3,2,1};
   EXPECT_FALSE(rc.isReplay(makeMsg(a, 1, 5), 1000));
@@ -152,7 +144,7 @@ TEST(ReplayCachePerOrigin, DifferentOrigin_DoesNotCollide) {
 }
 
 TEST(ReplayCachePerOrigin, FullTable_EvictsOldest) {
-  ReplayCache rc; rc.init(1);
+  ReplayCache rc; rc.init();
   for (size_t i = 0; i < lattice::config::LATTICE_REPLAY_MAX_ORIGINS; ++i) {
     uint8_t mac[6] = {static_cast<uint8_t>(i+1), 0, 0, 0, 0, 0};
     EXPECT_FALSE(rc.isReplay(makeMsg(mac, 1, 0), 1000 + i));

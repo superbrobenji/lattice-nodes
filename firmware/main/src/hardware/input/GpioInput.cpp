@@ -9,7 +9,10 @@ bool GpioInput::init() {
   if (!isValidInputPin(_pin)) {
     return false;
   }
-  pinMode(_pin, INPUT_PULLUP); // or INPUT, as needed by the hardware
+  // Phase I Task 7 (RR): per-init pinMode() call removed — GpioInput-derived
+  // pins are configured once at boot via main.cpp's bundled input-group
+  // gpio_config_t calls (pull-up or pull-down per pin, matching each
+  // subclass's prior pinMode() choice).
   _initialized = true;
   return true;
 }

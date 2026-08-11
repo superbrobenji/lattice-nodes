@@ -1,8 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
-#include "src/persistence/EepromManager.h"
-#include "src/network/MacAddress.h"
+#include "src/persistence/eeprom/EepromCore.h"
 #include "../../project_config.h"
 
 namespace lattice {
@@ -14,7 +13,11 @@ using lattice::utils::EEPROM_SIZES::MAX_PEERS;
 struct PeerInfo {
   uint8_t mac[6];
   uint8_t publicKey[32]; // Curve25519 public key (zero = not yet known)
-  uint32_t lastSeenMillis;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+  // millis() -> esp_timer_get_time()/1000ULL swap (esp_timer's epoch is
+  // microseconds-since-boot as an int64_t; a 32-bit ms field would wrap
+  // ~49 days after boot).
+  uint64_t lastSeenMs;
 };
 
 // Master routing info
@@ -25,9 +28,6 @@ struct MasterInfo {
 
 class PeerRegistry {
 public:
-  PeerInfo peerMacs[MAX_PEERS]{};
-  size_t peerCount{0};
-
   PeerRegistry();
   void setDeviceMac(const uint8_t* mac);
 
@@ -44,8 +44,15 @@ public:
   void removeAndPersist(const uint8_t* mac);
 
   size_t count() const { return peerCount; }
+  const PeerInfo& at(size_t i) const { return peerMacs[i]; }
+  PeerInfo* begin() { return peerMacs; }
+  PeerInfo* end() { return peerMacs + peerCount; }
+  const PeerInfo* begin() const { return peerMacs; }
+  const PeerInfo* end() const { return peerMacs + peerCount; }
 
 private:
+  PeerInfo peerMacs[MAX_PEERS]{};
+  size_t peerCount{0};
   uint8_t deviceMac[6]{};
 };
 
