@@ -36,7 +36,7 @@ namespace mac_table {
 // valid-gated scans' results exactly. Callers still re-check the flag at
 // the returned index defensively (see NeighborTable::findSlot etc.).
 inline size_t find(const void* entries, size_t n, size_t stride, size_t mac_offset,
-                   const uint8_t mac[6]) {
+                   const uint8_t* mac) {
   const uint8_t* base = static_cast<const uint8_t*>(entries);
   for (size_t i = 0; i < n; ++i) {
     if (lattice::mac::eq(base + i * stride + mac_offset, mac))

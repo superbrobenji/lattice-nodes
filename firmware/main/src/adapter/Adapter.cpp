@@ -29,7 +29,7 @@ adapter_types Adapter::getAdapterType() const {
   return _adapterType;
 }
 
-void Adapter::sendDataThroughMesh(const adapter_types type, const uint8_t data[64]) {
+void Adapter::sendDataThroughMesh(const adapter_types type, const uint8_t* data) {
   if (mesh_transmit_fn) {
     mesh_transmit_fn(type, data);
     LATTICE_LOGLN("Adapter", "Data sent through mesh", LogLevel::LOG_DEBUG);

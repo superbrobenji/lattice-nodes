@@ -42,12 +42,12 @@ inline bool g_deviceMacCached = false;
 } // namespace detail
 
 // Prime the boot-time cache. Called once from Mesh::readMacAddress().
-inline void cacheDeviceMac(const uint8_t mac[6]) {
+inline void cacheDeviceMac(const uint8_t* mac) {
   memcpy(detail::g_deviceMac, mac, 6);
   detail::g_deviceMacCached = true;
 }
 
-inline void readOwnMac(uint8_t out[6]) {
+inline void readOwnMac(uint8_t* out) {
   if (detail::g_deviceMacCached) {
     memcpy(out, detail::g_deviceMac, 6);
     return;
@@ -59,9 +59,9 @@ inline void readOwnMac(uint8_t out[6]) {
 #else // UNIT_TEST
 
 // No caching on host builds — see carve-out note above.
-inline void cacheDeviceMac(const uint8_t[6]) {}
+inline void cacheDeviceMac(const uint8_t*) {}
 
-inline void readOwnMac(uint8_t out[6]) {
+inline void readOwnMac(uint8_t* out) {
   esp_wifi_get_mac(WIFI_IF_STA, out);
 }
 
