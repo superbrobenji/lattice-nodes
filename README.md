@@ -197,7 +197,7 @@ protocol, message/adapter/opcode tables, and the enrollment handshake contract.
 ```bash
 cmake -B tests/build tests/ -DCMAKE_BUILD_TYPE=Release
 cmake --build tests/build --parallel 2
-ctest --test-dir tests/build --output-on-failure --label-exclude e2e
+ctest --test-dir tests/build --output-on-failure --parallel 4 --label-exclude e2e
 ```
 
 ### End-to-End Simulation Suite
