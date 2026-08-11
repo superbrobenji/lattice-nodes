@@ -1,212 +1,325 @@
-# ESP32 Memory & Storage Usage
+# ESP32 Firmware Memory & Flash Usage
 
-Board: `esp32:esp32:esp32` (ESP32 Dev Module). Toolchain: `arduino-cli` + `esp32:esp32@3.3.10`.
+Target: `esp32:esp32` (original ESP32, Xtensa dual-core). Toolchain: **ESP-IDF v5.5.1**
+(pinned in `firmware/dependencies.lock`), driven via `idf.py`.
 
-> **Status (2026-07-22): the hard numbers below are a stale baseline.**
-> They were measured **2026-07-13** — *before* the repo restructure (#24, 07-14)
-> and *before* Phases 1–5 (#33, #34, #35, #40, #41) landed end-to-end AEAD crypto,
-> the neighbor/route tables, dual-master failover, and the replay cache. A clean
-> firmware re-measure is currently **blocked** (see [Re-measurement is blocked](#re-measurement-is-currently-blocked));
-> the [static-allocation](#fixed-ram-allocations-current-source) and
-> [EEPROM](#eeprom-nvs-persistent-storage) sections are computed from *current* source and are live.
+## 1. Status (measured 2026-08-11)
 
-## Baseline Summary (measured 2026-07-13 — STALE)
+**Measurement is not blocked.** ESP-IDF has been this repo's build system since well
+before the current refactor phase — a previous version of this document described an
+`arduino-cli`-only toolchain with three build blockers and a "re-measurement is
+currently BLOCKED" framing. That framing predates the ESP-IDF migration and is stale;
+it has been removed rather than carried forward.
 
-| Region | Used | Total | % |
-|---|---|---|---|
-| Flash (program storage) | 972,596 B (950 KB) | 1,310,720 B (1,280 KB) | **74%** |
-| Static RAM (globals/BSS) | 48,532 B (47 KB) | 327,680 B (320 KB) | **14%** |
+Every number in this document was copied verbatim from a real, successful
+`idf.py build` + `idf.py size` + `idf.py size-components` run against the current tree
+on **2026-08-11**, or is a `firmware/main/project_config.h` constant confirmed by
+reading the current source during that same research pass. Nothing below is estimated,
+and nothing is reused from the old 2026-07-13 `arduino-cli` baseline — that baseline
+measured a different toolchain against a much earlier tree (pre-repo-restructure,
+pre-Phase-1-5) and is no longer a meaningful comparison point.
 
-Phases 1–5 have grown both figures (see [Changes since baseline](#changes-since-baseline-phases-15)).
-Static RAM is estimated ~+5.7 KB; flash is the region to watch — re-measure before trusting the 74%.
+## 2. Build prerequisite: `master_pubkey_pin.h`
 
-## Flash Breakdown (baseline)
+A first `idf.py build` on a fresh checkout **fails** unless
+`firmware/main/config/master_pubkey_pin.h` already exists. This is a deliberate,
+intentional `#error` gate, not a bug:
 
-### By ELF section
-
-| Section | Size | Purpose |
-|---|---|---|
-| `.flash.text` | 692 KB | Code in flash |
-| `.flash.rodata` | 152 KB | Constants, strings, lookup tables |
-| `.iram0.text` | 81 KB | Time-critical code mapped to IRAM |
-| `.iram0.vectors` | 1 KB | Interrupt vectors |
-| **Free** | **~338 KB** | 26% remaining |
-
-### By subsystem (`.text` symbols)
-
-| Subsystem | Flash |
-|---|---|
-| WiFi / ESP-NOW / lwIP stack | ~131 KB |
-| mbedTLS (ECDH, SHA-256, entropy, CTR-DRBG) | ~50 KB |
-| Application code (`lattice` namespace) | ~40 KB |
-| BT symbols (compiled-in despite `btStop()`) | ~10 KB |
-| nanopb | ~2.4 KB |
-| ESP-IDF SDK / FreeRTOS / HAL / misc | ~468 KB |
-
-## Static RAM Breakdown (baseline)
-
-### By ELF section
-
-| Section | Size | Purpose |
-|---|---|---|
-| `.dram0.data` | 23.5 KB | Initialized globals |
-| `.dram0.bss` | 23.9 KB | Zero-init globals |
-| `.rtc.force_slow` | 32 B | RTC slow RAM |
-| **Free for stack + heap** | **~279 KB** | 86% remaining |
-
-### By subsystem (`.data` + `.bss` symbols)
-
-| Subsystem | Static RAM |
-|---|---|
-| FreeRTOS / system | ~5.4 KB |
-| WiFi / Net static globals | ~4.0 KB |
-| Application globals (`mesh`, `adapter`, LEDs, etc.) | ~2.7 KB |
-| mbedTLS static globals | ~1.6 KB |
-
-At baseline the `mesh` object was the largest single app symbol at **868 B** BSS.
-Phases 2–5 have since grown it to an estimated **~5.7 KB** — see below.
-
-## Changes since baseline (Phases 1–5)
-
-Landed after the 07-13 measure. Directional flash/RAM impact (not yet re-measured):
-
-| Phase | Feature | Flash | Static RAM |
-|---|---|---|---|
-| 1 (#33) | Protocol v3 + end-to-end AEAD payload crypto (X25519 + AEAD) | **↑↑** new cipher + KDF paths in mbedTLS | `E2EKeyStore` ~710 B |
-| 2 (#34) | Multi-hop data uplink via `NeighborTable` | ↑ small | `NeighborTable` ~96 B |
-| 3 (#35) | Downlink source routing + `k_down` sealing | ↑ | `RouteTable` ~2.3 KB (master-side) + downlink LRU 24 B |
-| 4 (#40) | Dual-master data failover | ↑ | secondary-master MACs/keys, small |
-| 5 (#41) | Dual-master `CONFIG_SET`, relayed-target, nanopb regen | ↑ | proto fields widen `mesh_message` |
-| (#28/#23) | Replay protection + route reporting | ↑ | `ReplayCache` ~206 B |
-
-**Net:** static RAM is still trivial against the 320 KB budget. **Flash is the metric that
-actually moved** — the AEAD cipher, larger protobuf message, and dual-master paths all add
-`.text`/`.rodata`. The 74% figure is optimistic now; re-measure before the next crypto/adapter
-addition.
-
-## Fixed RAM allocations (current source)
-
-Tiger-style: every mesh data structure is a fixed-size array sized from `main/project_config.h`
-— **zero heap, allocated up-front whether or not a node uses it.** Computed from field layout
-(xtensa 4-byte alignment). All live inside the single `mesh` global (`main/src/mesh/Mesh.h`):
-
-| Structure | Bound (config) | Per entry | Total | Notes |
-|---|---|---|---|---|
-| `recvQueue` (RX ring) | `RECV_QUEUE_SIZE = 8` | 6 + 242 (`mesh_message`) | **~1.94 KB** | SPSC lock-free queue, WiFi-cb → loop |
-| `RouteTable` | `LATTICE_ROUTE_TABLE_MAX = 32` | 72 (incl. `path[60]`) | **~2.25 KB** | **Master-only use; dead weight on leaf nodes** |
-| `E2EKeyStore` | `LATTICE_E2E_KEYCACHE_MAX = 10` | 71 (`kUp[32]`+`kDown[32]`) | **~710 B** | Derived-key cache, X25519 |
-| `PeerRegistry` | `MAX_PEERS = 10` | 44 (`publicKey[32]`) | **~440 B** | Mirrors EEPROM peer list |
-| `ReplayCache` | `CACHE_SIZE = 16` | 12 | **~206 B** | Anti-replay (origin, epoch, seq) |
-| `NeighborTable` | `LATTICE_NEIGHBOR_MAX = 8` | 12 | **~96 B** | Uplink next-hop candidates |
-| `downlinkPeerLru` | `LATTICE_DOWNLINK_PEER_MAX = 4` | 6 | **24 B** | Bounds ESP-NOW peer-table exhaustion |
-| misc (MACs, `meshKey[16]`, fwd peer, scalars) | — | — | **~60 B** | |
-| **`mesh` object total** | | | **~5.7 KB** | vs 868 B at baseline |
-
-`mesh_message` is the in-RAM wire struct from the vendored `lattice-protocol/c` (242 B,
-`static_assert`-locked to the server proto), aliased in via `using ::mesh_message`. The `recvQueue`
-and any per-frame stack copies inherit its 242 B — the single largest lever on both RAM and stack
-depth.
-
-## EEPROM / NVS (persistent storage)
-
-Layout in `main/src/persistence/EepromManager.h`. `EEPROM.begin(TOTAL_SIZE)` maps a 512-byte NVS blob.
-
-| Region | Addr | Size |
-|---|---|---|
-| MASTER_FLAG / DEV_FLAG / ADAPTER_TYPE | 0,1,8 | 3 B |
-| MESH_KEY | 16 | 16 B |
-| PEER_LIST (10 × 38 B: MAC + pubkey) | 32 | 380 B |
-| REBOOT_REASON / COUNT + reserved | 412 | 5 B |
-| PRIVATE_KEY / PUBLIC_KEY / KEYPAIR_CRC | 417 | 66 B |
-| ENROLLED_FLAG / BOOT_EPOCH | 483 | 5 B |
-| KNOWN_MASTER_MAC (primary) | 488 | 6 B |
-| SCHEMA_VERSION / TX_POWER / NODE_ID | 494 | 3 B |
-| KNOWN_MASTER_MAC_SECONDARY | 497 | 6 B |
-| **Total used** | | **503 / 512 B (98%)** |
-
-> **EEPROM is the tightest budget in the whole system — 9 bytes free.**
-> `PEER_LIST` (380 B) dominates: raising `MAX_PEERS` past 10 overflows 512 B immediately
-> (each peer = 38 B). Any new persisted field needs the 3 reserved bytes (414–416) or an
-> `EEPROM.begin()` size bump + a schema-version migration (see `EepromManager::init()`).
-
-## Runtime Heap
-
-Runtime-only, not in the static figures. At steady state after `setup()`:
-
-- WiFi stack claims ~80–100 KB heap
-- FreeRTOS task stacks claim additional space
-- Effective usable heap for application: **~150–180 KB**
-
-E2E AEAD (Phase 1) runs X25519 on the stack per key derivation (~ms); the `E2EKeyStore` exists
-specifically to amortise that so it isn't re-run per frame.
-
-## Re-measurement is currently BLOCKED
-
-The firmware **does not build cleanly under `arduino-cli`** (only host unit/e2e tests and CodeQL
-build in CI — no CI job compiles the firmware). Three issues block a fresh `xtensa-esp32-elf-size`
-measure; the Arduino IDE hides all three via different include resolution:
-
-1. **nanopb include path** — `mesh.pb.h` does `#include "pb.h"` but `.../serialization/nanopb`
-   isn't on the default sketch include path. Fix: add it, or flatten nanopb into the sketch.
-2. **Non-self-contained headers** — `main/src/app/ButtonHandler.h` uses `Logger` / `LogLevel`
-   unqualified, relying on a `using namespace lattice::utils;` that `main.ino` declares *before*
-   including it. (The baseline doc noted the same class of bug for `Serial_Adapter`; it moved in
-   the restructure, not fixed.) Fix: each header includes what it uses and fully-qualifies names.
-3. **Duplicate `mesh_message` typedef** — the vendored `main/lib/lattice-protocol/c/mesh_message.h`
-   is auto-scanned from `lib/` and its `typedef struct … mesh_message` collides with the alias
-   pulled in via `using ::mesh_message`. Fix: keep the vendored C tree out of the Arduino
-   `lib/` auto-scan, or gate its inclusion.
-
-**Prerequisite for accurate optimization work:** fix 1–3 so `arduino-cli compile --fqbn
-esp32:esp32:esp32` succeeds, then add a CI firmware-build + size-report job so this doc can't
-silently rot again. Re-run:
-
-```sh
-arduino-cli compile --fqbn esp32:esp32:esp32 --build-path build/fw main
-xtensa-esp32-elf-size -A build/fw/main.ino.elf
+```
+firmware/main/config/master_pubkey_pin_wrapper.h:11:4: error: "firmware/main/config/master_pubkey_pin.h not found.
+Generate it via tools/gen_master_pubkey_pin.py or build with -DLATTICE_ALLOW_EXAMPLE_PIN=1 (DEV_MODE only)."
 ```
 
-## Optimization Plan
+The file compiles the hub's real master Curve25519 public key + MAC into the firmware
+so nodes can authenticate `JOIN_ACK` against a pinned identity. It is gitignored and
+per-deployment — generate it with:
 
-Prioritised by (constraint pressure × payoff). Do the measurement-unblock first — everything
-below is estimated until the firmware compiles under `arduino-cli`.
+```bash
+python3 tools/gen_master_pubkey_pin.py <path-to-masterkey.json> <master-mac-address>
+```
 
-### P0 — Unblock measurement (prerequisite)
-- Fix the three build blockers above; add a CI size-report job. **Without this every number here
-  is a guess.** Low effort, unlocks everything else.
+See `docs/getting_started.md` for the full first-build walkthrough (where to get
+`masterkey.json`, the `DEV_MODE`-only `-DLATTICE_ALLOW_EXAMPLE_PIN=1` escape hatch, and
+why it isn't shippable) — not duplicated here. The measurements below were taken after
+generating this header with a throwaway, non-production key; the generated header is a
+fixed-size `constexpr uint8_t[32]`/`uint8_t[6]` pair regardless of key content, so it
+does not distort the flash/RAM numbers that follow.
 
-### P1 — Flash (the real constraint, ~74%→higher)
-| Lever | Est. saving | Effort | Risk |
-|---|---|---|---|
-| **Drop BT** — `CONFIG_BT_ENABLED=n`. Needs an ESP-IDF (not Arduino) build; `btStop()` only disables at runtime. | ~10 KB + heap | High (toolchain switch) | Med |
-| **Trim mbedTLS** — Phase-1 AEAD pulled in a cipher; prune unused suites via `mbedtls_config` (drop RSA/DHE/unused curves, keep X25519 + the one AEAD). | 10–30 KB | Med (custom config on IDF) | Med |
-| **Strip logging in prod** — `DEFAULT_LOG_LEVEL = LOG_NONE` already; ensure format strings/`.rodata` are compiled out, not just gated at runtime (`#if` not `if`). | few–10 KB `.rodata` | Low | Low |
-| **`-Os` + LTO + `-ffunction-sections,-Wl,--gc-sections`** if not already set by the core. | 5–15 KB | Low | Low |
-| **Single AEAD** — if Phase 1 links both AES-GCM and ChaCha20-Poly1305, pick one. | 5–15 KB | Low | Low |
+## 3. Flash usage
 
-### P2 — EEPROM (98% full — hardest ceiling)
-| Lever | Payoff | Effort |
-|---|---|---|
-| **Shrink `PEER_LIST`** — 380 B / 512 is the whole squeeze. Store a peer-count + packed records instead of a fixed 10×38 B, or move peers to a dedicated NVS namespace and free the raw-EEPROM budget. | frees ~350 B | Med (migration) |
-| **Migrate raw EEPROM → NVS/Preferences** — key/value NVS avoids the 512 B fixed map and versioning gymnastics entirely. | removes the ceiling | Med-High (rewrite `EepromManager`) |
-| Use the 3 reserved bytes (414–416) for the *next* small field only — not a growth strategy. | 3 B | trivial |
+### Summary (`idf.py size`, verbatim)
 
-### P3 — Static RAM (~5.7 KB mesh object; not urgent, but wasteful)
-| Lever | Est. saving | Notes |
-|---|---|---|
-| **`RouteTable` on masters only** — 2.25 KB is allocated on every leaf but only the master routes downlink. Gate behind role (compile-time or a pointer allocated on promotion). | ~2.25 KB on leaves | Biggest single RAM win; needs role known before construction |
-| **Right-size the bounds** — `LATTICE_ROUTE_TABLE_MAX=32`, `RECV_QUEUE_SIZE=8`, `CACHE_SIZE=16` are generous. Tune to real deployment fan-out. | 0.5–2 KB | Measure real occupancy first |
-| **Shrink `mesh_message` residency** — 242 B copied into an 8-deep ring (~1.94 KB) and onto the stack per frame. If most fields are optional, a compact internal form or a smaller ring would cut both RAM and worst-case stack. | up to ~1 KB | Touches wire struct — coordinate with server proto `static_assert` |
+```
+                             Memory Type Usage Summary
+┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Memory Type/Section   ┃ Used [bytes] ┃ Used [%] ┃ Remain [bytes] ┃ Total [bytes] ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ Flash Code            │       471364 │          │                │               │
+│    .text              │       471364 │          │                │               │
+│ IRAM                  │       101111 │    77.14 │          29961 │        131072 │
+│    .text              │       100083 │    76.36 │                │               │
+│    .vectors           │         1028 │     0.78 │                │               │
+│ Flash Data            │        76628 │          │                │               │
+│    .rodata            │        76372 │          │                │               │
+│    .appdesc           │          256 │          │                │               │
+│ DRAM                  │        44084 │    24.39 │         136652 │        180736 │
+│    .bss               │        29088 │    16.09 │                │               │
+│    .data              │        14996 │      8.3 │                │               │
+│ RTC SLOW              │           56 │     0.68 │           8136 │          8192 │
+│    .force_slow        │           32 │     0.39 │                │               │
+│    .rtc_slow_reserved │           24 │     0.29 │                │               │
+└───────────────────────┴──────────────┴──────────┴────────────────┴───────────────┘
+Total image size: 664131 bytes (.bin may be padded larger)
+```
 
-### P4 — Hygiene (enables the above, no direct saving)
-- Make headers self-contained (blocker #2) — also the correctness fix for non-Arduino toolchains.
-- Keep the vendored `lattice-protocol` submodule out of Arduino `lib/` auto-scan (blocker #3).
-- **Re-run this analysis after every major dependency/feature change** and commit the diff, so
-  flash %, the mesh-object RAM total, and EEPROM headroom are always current.
+**Plain-English summary:**
 
-## Notes
+| Metric | Value |
+|---|---|
+| Flash Code (`.text`) | 471,364 B (~460 KB) |
+| Flash Data (`.rodata` + `.appdesc`) | 76,628 B (~74.8 KB) |
+| Total image size | 664,131 B |
+| App `.bin` file | `0xa22b0` bytes (664,240 B) |
+| Smallest app partition (`factory`, per `partitions.csv`) | `0x100000` bytes (1 MiB) |
+| Free in that partition | `0x5dd50` bytes (384,336 B) — **37% free**, i.e. the app uses 63% of its 1 MiB partition |
+| Bootloader binary | `0x6680` bytes (26,240 B), `0x980` bytes (2,432 B / 8%) free in its own region |
 
-- **Flash is the pressure point; EEPROM is the hard ceiling (98%).** RAM has huge headroom.
-- **BT ~10 KB flash** despite `btStop()` — compiled in, runtime-disabled only. Removing needs an
-  ESP-IDF build (`CONFIG_BT_ENABLED=n`), unavailable in the Arduino toolchain.
-- Baseline flash/RAM figures are **2026-07-13, pre-Phase 1–5** — treat as a floor, not current.
+(The 109-byte gap between "Total image size" 664,131 B and the `.bin` file's 664,240 B
+is padding — the tool's own note above says the `.bin` "may be padded larger.")
+
+### Per-library breakdown (`idf.py size-components`, verbatim)
+
+```
+                                                                              Per-archive contributions to ELF file
+┏━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ Archive File            ┃ Total Size ┃  DRAM ┃  .bss ┃ .data ┃  IRAM ┃ .text ┃ .vectors ┃ Flash Code ┃  .text ┃ Flash Data ┃ .rodata ┃ .appdesc ┃ RTC SLOW ┃ .rtc_slow_reserved ┃ .force_slow ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ libnet80211.a           │     138325 │  8822 │  7968 │   854 │  5256 │  5256 │        0 │     122721 │ 122721 │       1526 │    1526 │        0 │        0 │                  0 │           0 │
+│ libpp.a                 │      69175 │  4183 │  1544 │  2639 │ 21802 │ 21802 │        0 │      41881 │  41881 │       1309 │    1309 │        0 │        0 │                  0 │           0 │
+│ libmbedcrypto.a         │      67635 │    49 │    25 │    24 │     0 │     0 │        0 │      54924 │  54924 │      12662 │   12662 │        0 │        0 │                  0 │           0 │
+│ liblwip.a               │      65290 │  2491 │  2479 │    12 │     0 │     0 │        0 │      59904 │  59904 │       2895 │    2895 │        0 │        0 │                  0 │           0 │
+│ libphy.a                │      46222 │  3074 │   635 │  2439 │  8998 │  8998 │        0 │      34150 │  34150 │          0 │       0 │        0 │        0 │                  0 │           0 │
+│ libefuse.a              │      44852 │    64 │     4 │    60 │     0 │     0 │        0 │        909 │    909 │      43879 │   43879 │        0 │        0 │                  0 │           0 │
+│ libmain.a               │      41140 │ 12118 │ 12109 │     9 │   188 │   188 │        0 │      28012 │  28012 │        822 │     822 │        0 │        0 │                  0 │           0 │
+│ libwpa_supplicant.a     │      34159 │  1146 │  1146 │     0 │     0 │     0 │        0 │      32920 │  32920 │         93 │      93 │        0 │        0 │                  0 │           0 │
+│ libc_nano.a             │      23493 │   988 │   724 │   264 │     0 │     0 │        0 │      21533 │  21533 │        972 │     972 │        0 │        0 │                  0 │           0 │
+│ libfreertos.a           │      19887 │  3847 │   741 │  3106 │ 13782 │ 13782 │        0 │        643 │    643 │       1615 │    1615 │        0 │        0 │                  0 │           0 │
+│ libesp_hw_support.a     │      19610 │   460 │   129 │   331 │ 11472 │ 11472 │        0 │       6526 │   6526 │       1096 │    1096 │        0 │       56 │                 24 │          32 │
+│ libnvs_flash.a          │      12765 │    24 │    24 │     0 │     0 │     0 │        0 │      12594 │  12594 │        147 │     147 │        0 │        0 │                  0 │           0 │
+│ libesp_system.a         │      11535 │   721 │   313 │   408 │  3819 │  3819 │        0 │       6387 │   6387 │        608 │     608 │        0 │        0 │                  0 │           0 │
+│ libhal.a                │      10833 │  1327 │     8 │  1319 │  5324 │  5324 │        0 │       4069 │   4069 │        113 │     113 │        0 │        0 │                  0 │           0 │
+│ libesp_driver_uart.a    │      10550 │   337 │    33 │   304 │     0 │     0 │        0 │       9899 │   9899 │        314 │     314 │        0 │        0 │                  0 │           0 │
+│ libspi_flash.a          │       9807 │  1094 │    16 │  1078 │  7775 │  7775 │        0 │        688 │    688 │        250 │     250 │        0 │        0 │                  0 │           0 │
+│ libheap.a               │       9805 │    12 │     8 │     4 │  5827 │  5827 │        0 │       2388 │   2388 │       1578 │    1578 │        0 │        0 │                  0 │           0 │
+│ libespnow.a             │       4346 │    71 │    64 │     7 │     0 │     0 │        0 │       4275 │   4275 │          0 │       0 │        0 │        0 │                  0 │           0 │
+│ libvfs.a                │       4335 │   236 │    44 │   192 │     0 │     0 │        0 │       3956 │   3956 │        143 │     143 │        0 │        0 │                  0 │           0 │
+│ libesp_ringbuf.a        │       4331 │     0 │     0 │     0 │  3794 │  3794 │        0 │          0 │      0 │        537 │     537 │        0 │        0 │                  0 │           0 │
+│ libesp_driver_gpio.a    │       3531 │    36 │     0 │    36 │   339 │   339 │        0 │       2968 │   2968 │        188 │     188 │        0 │        0 │                  0 │           0 │
+│ libxtensa.a             │       3419 │  1044 │     0 │  1044 │  2240 │  1813 │      427 │         99 │     99 │         36 │      36 │        0 │        0 │                  0 │           0 │
+│ libnewlib.a             │       3090 │   360 │   200 │   160 │  1370 │  1370 │        0 │       1251 │   1251 │        109 │     109 │        0 │        0 │                  0 │           0 │
+│ libesp_wifi.a           │       2906 │   498 │    14 │   484 │   304 │   304 │        0 │       1308 │   1308 │        796 │     796 │        0 │        0 │                  0 │           0 │
+│ libesp_timer.a          │       2862 │    56 │    24 │    32 │  1402 │  1402 │        0 │       1280 │   1280 │        124 │     124 │        0 │        0 │                  0 │           0 │
+│ libesp_mm.a             │       2798 │   136 │   128 │     8 │   830 │   830 │        0 │       1667 │   1667 │        165 │     165 │        0 │        0 │                  0 │           0 │
+│ libesp_pm.a             │       2504 │   155 │   127 │    28 │  1290 │  1290 │        0 │       1010 │   1010 │         49 │      49 │        0 │        0 │                  0 │           0 │
+│ libbootloader_support.a │       1935 │     0 │     0 │     0 │  1818 │  1818 │        0 │         77 │     77 │         40 │      40 │        0 │        0 │                  0 │           0 │
+│ libesp_common.a         │       1836 │     0 │     0 │     0 │     0 │     0 │        0 │         46 │     46 │       1790 │    1790 │        0 │        0 │                  0 │           0 │
+│ libesp_partition.a      │       1631 │     8 │     8 │     0 │     0 │     0 │        0 │       1455 │   1455 │        168 │     168 │        0 │        0 │                  0 │           0 │
+│ libesp_phy.a            │       1611 │    53 │    36 │    17 │   205 │   205 │        0 │       1140 │   1140 │        213 │     213 │        0 │        0 │                  0 │           0 │
+│ liblog.a                │       1577 │   284 │   280 │     4 │   367 │   367 │        0 │        878 │    878 │         48 │      48 │        0 │        0 │                  0 │           0 │
+│ libsoc.a                │       1526 │    40 │     0 │    40 │    37 │    37 │        0 │         41 │     41 │       1408 │    1408 │        0 │        0 │                  0 │           0 │
+│ libstdc++.a             │       1477 │    21 │    17 │     4 │     0 │     0 │        0 │       1257 │   1257 │        199 │     199 │        0 │        0 │                  0 │           0 │
+│ libesp_event.a          │       1463 │     4 │     4 │     0 │     0 │     0 │        0 │       1402 │   1402 │         57 │      57 │        0 │        0 │                  0 │           0 │
+│ libesp_vfs_console.a    │        644 │    16 │    16 │     0 │     0 │     0 │        0 │        448 │    448 │        180 │     180 │        0 │        0 │                  0 │           0 │
+│ libxt_hal.a             │        475 │     0 │     0 │     0 │   443 │   443 │        0 │          0 │      0 │         32 │      32 │        0 │        0 │                  0 │           0 │
+│ libpthread.a            │        474 │    12 │     4 │     8 │     0 │     0 │        0 │        416 │    416 │         46 │      46 │        0 │        0 │                  0 │           0 │
+│ librtc.a                │        463 │     0 │     0 │     0 │   463 │   463 │        0 │          0 │      0 │          0 │       0 │        0 │        0 │                  0 │           0 │
+│ libesp_app_format.a     │        403 │    10 │    10 │     0 │     0 │     0 │        0 │        129 │    129 │        264 │       8 │      256 │        0 │                  0 │           0 │
+│ libcore.a               │        284 │     9 │     9 │     0 │     0 │     0 │        0 │        275 │    275 │          0 │       0 │        0 │        0 │                  0 │           0 │
+│ libesp_rom.a            │        251 │     0 │     0 │     0 │   219 │   219 │        0 │          0 │      0 │         32 │      32 │        0 │        0 │                  0 │           0 │
+│ libesp_coex.a           │        245 │     0 │     0 │     0 │    98 │    98 │        0 │        147 │    147 │          0 │       0 │        0 │        0 │                  0 │           0 │
+│ libesp_security.a       │        230 │     4 │     4 │     0 │     0 │     0 │        0 │        218 │    218 │          8 │       8 │        0 │        0 │                  0 │           0 │
+│ libapp_update.a         │        172 │     4 │     4 │     0 │     0 │     0 │        0 │        138 │    138 │         30 │      30 │        0 │        0 │                  0 │           0 │
+│ libesp_netif.a          │        165 │     9 │     8 │     1 │     0 │     0 │        0 │        156 │    156 │          0 │       0 │        0 │        0 │                  0 │           0 │
+│ libgcc.a                │         89 │     0 │     0 │     0 │     0 │     0 │        0 │         89 │     89 │          0 │       0 │        0 │        0 │                  0 │           0 │
+│ libcxx.a                │         50 │     4 │     4 │     0 │     0 │     0 │        0 │         46 │     46 │          0 │       0 │        0 │        0 │                  0 │           0 │
+│ libnvs_sec_provider.a   │          5 │     0 │     0 │     0 │     0 │     0 │        0 │          5 │      5 │          0 │       0 │        0 │        0 │                  0 │           0 │
+└─────────────────────────┴────────────┴───────┴───────┴───────┴───────┴───────┴──────────┴────────────┴────────┴────────────┴─────────┴──────────┴──────────┴────────────────────┴─────────────┘
+```
+
+**Reading this table:** `libmain.a` — **41,140 bytes** — is the *only* row that is
+lattice-nodes application code (28,012 B flash code + 822 B flash rodata + 12,109 B
+`.bss` + 9 B `.data`). Everything else is ESP-IDF/mbedTLS/WiFi framework pulled in
+transitively. The largest non-application contributors:
+
+- `libnet80211.a` (WiFi 802.11 MAC layer, pulled in because ESP-NOW rides on the WiFi
+  stack even though this firmware never associates to an AP): 138,325 B — the single
+  largest contributor in the whole image.
+- `libpp.a` (WiFi PHY packet processing): 69,175 B
+- `libmbedcrypto.a` (mbedTLS — ChaCha20/Poly1305/HKDF/SHA/Curve25519, per the Phase J
+  crypto revert): 67,635 B
+- `liblwip.a` (TCP/IP stack — mostly dead weight here since
+  `CONFIG_LWIP_TCP_ENABLED=n`/`CONFIG_LWIP_UDP_ENABLED=n`, but still linked in via the
+  WiFi/netif dependency chain): 65,290 B
+- `libphy.a` (WiFi radio PHY calibration): 46,222 B
+- `libefuse.a` (almost entirely `.rodata` lookup tables via
+  `esp_efuse_utility.c.obj`, 44,508 B of its 44,852 B total): 44,852 B
+- `libwpa_supplicant.a` (needed transitively for the WiFi/ESP-NOW crypto path even with
+  no AP association): 34,159 B
+- `libc_nano.a` (newlib-nano): 23,493 B
+- `libfreertos.a`: 19,887 B
+
+### Largest application object files (`idf.py size-files`, real captured data)
+
+The application code inside `libmain.a` breaks down per translation unit as follows
+(columns: Total | DRAM `.bss+.data` | Flash `.text` | Flash `.rodata`; all bytes,
+filtered from the full `idf.py size-files` run to `firmware/main/src/**` + `main.cpp`
+object files only):
+
+| Object file | Total | DRAM | Flash `.text` | Flash `.rodata` |
+|---|---|---|---|---|
+| `main.cpp.obj` | 15,332 | 12,073 (12,064 `.bss` / 9 `.data`) | 3,155 | 104 |
+| `Mesh.cpp.obj` | 3,202 | 4 | 3,173 | 25 |
+| `MeshMessenger.cpp.obj` | 2,367 | 0 | 2,329 | 38 |
+| `RouteReportHandler.cpp.obj` | 1,355 | 0 | 1,355 | 0 |
+| `SerialFraming.cpp.obj` | 1,111 | 0 | 823 | 288 |
+| `MeshTransport.cpp.obj` | 997 | 4 | 839 (+148 IRAM) | 6 |
+| `Enrollment.cpp.obj` | 884 | 0 | 852 | 32 |
+| `MasterBeacon.cpp.obj` | 857 | 0 | 851 | 6 |
+| `Adapter.cpp.obj` | 840 | 7 | 754 | 79 |
+| `EepromCore.cpp.obj` | 819 | 8 | 811 | 0 |
+| `PeerRegistry.cpp.obj` | 564 | 0 | 564 | 0 |
+| `DownlinkRouter.cpp.obj` | 480 | 0 | 480 | 0 |
+| `FrameAuthorizer.cpp.obj` | 319 | 0 | 319 | 0 |
+| `PeerEnrollment.cpp.obj` | 292 | 0 | 292 | 0 |
+| `UplinkRouter.cpp.obj` | 279 | 0 | 273 | 6 |
+| `PendingRelayQueue.cpp.obj` | 120 | 0 | 120 | 0 |
+
+`main.cpp.obj`'s **12,073 bytes of static DRAM** is the single largest "our code" RAM
+contributor by far, dominated by `.bss` (12,064 B) — this is the two static FreeRTOS
+task stacks declared in `main.cpp` (`mesh_task_stack[4096]` + `housekeeping_stack[4096]`
+= 8,192 B) plus the global `Mesh mesh` object, `mesh_message transmissionMessage`, and
+other file-scope globals declared there. This is also *why* the per-collaborator RAM
+sizes in §5 below can't simply be read off `idf.py size-files`: every mesh collaborator
+(`RouteTable`, `E2EKeyStore`, `PeerRegistry`, etc.) is a member subobject of the single
+global `Mesh mesh` instance, so their combined static RAM is attributed entirely to
+`main.cpp.obj`'s `.bss`, not split out per collaborator by the linker's per-object-file
+report. Notice each collaborator's own `.cpp.obj` DRAM column above is 0 or a few bytes
+(a static singleton pointer, e.g. `Mesh.cpp.obj`'s 4 bytes) — that's code-local statics,
+not the collaborator's own data members.
+
+Sum of the listed application object files' Total Size column ≈ 32,890 B — close to but
+not identical to `libmain.a`'s reported 41,140 B; the difference is per-object-file
+alignment/padding overhead that disappears once objects are merged into the archive,
+plus the vendored/generated nanopb serialization files (`pb_decode.c.obj` 3,210 B,
+`pb_encode.c.obj` 1,998 B, `pb_common.c.obj` 687 B) which also link into `libmain.a` but
+are third-party-generated code, not hand-written lattice-nodes logic, so they're
+excluded from the table above.
+
+## 4. RAM usage
+
+From the same `idf.py size` run (see §3's summary table):
+
+| Region | Used | Total | % | Free |
+|---|---|---|---|---|
+| IRAM (`.text` + `.vectors`) | 101,111 B | 131,072 B | **77.14%** | 29,961 B |
+| DRAM (`.bss` + `.data`, i.e. static RAM) | 44,084 B | 180,736 B | **24.39%** | 136,652 B |
+| RTC SLOW memory | 56 B | 8,192 B | 0.68% | 8,136 B |
+
+DRAM breaks down as `.bss` 29,088 B (16.09%) + `.data` 14,996 B (8.3%).
+
+**Important caveat (from the same research pass, not re-derived here):** the
+136,652-byte DRAM "free" figure is *static-link-time* headroom, not free heap at
+runtime. It does not yet account for FreeRTOS task-stack allocation beyond the two
+static 4,096-byte stacks already counted in `main.cpp.obj` above, nor for the general
+heap allocator's own overhead. True free-heap-at-runtime would require
+`esp_get_free_heap_size()` on real, flashed hardware — out of scope for this
+build-only measurement pass (no physical device was flashed to produce these numbers).
+
+## 5. Fixed RAM allocations by mesh collaborator
+
+The pre-Phase-B-split version of this document described a single "mesh object" with
+one flat table of fixed-size members. That framing is gone: `firmware/main/src/mesh/`
+is now ~16 distinct collaborator classes/namespaces (`RouteTable`, `E2EKeyStore`,
+`PeerRegistry`, `ReplayCache`, `NeighborTable`, `PendingRelayQueue`, `MeshTransport`,
+`MeshMessenger`, `Enrollment`, `MasterBeacon`, `UplinkRouter`, `DownlinkRouter`,
+`FrameAuthorizer`, `RouteReportHandler`, `PeerEnrollment`, plus a handful of
+header-only free-function namespaces), orchestrated by a thin `Mesh` class that owns
+one instance of each. All of them live as member subobjects of the single global
+`Mesh mesh` in `main.cpp` (see §3's note on why this defeats a simple per-object linker
+breakdown).
+
+The table below lists every collaborator confirmed (in this research pass) to own a
+fixed-size RAM structure, together with what is and isn't independently confirmed for
+each. **Per the task's accuracy bar, capacity bounds are only listed where a config
+constant was actually read from the current `firmware/main/project_config.h` (or
+equivalent) during this research pass; per-entry/total byte counts are listed only
+where the research materials give a concrete figure. Everywhere else, this table says
+"not confirmed this pass" rather than guessing.**
+
+| Collaborator | Fixed structure | Confirmed capacity (source) | Per-entry / total bytes | Notes |
+|---|---|---|---|---|
+| `RouteTable` | node MAC → downlink source-route path | `LATTICE_ROUTE_TABLE_MAX = 16` (`project_config.h`, confirmed this pass) | **Not confirmed this pass — see caveat below** | Master-only; allocated conditionally via `Mesh::reevaluateRouteTable()`; leaves never pay this cost. |
+| `E2EKeyStore` | per-peer derived key cache (`kUp`/`kDown`) | Role-conditional: `LATTICE_E2E_KEYCACHE_MAX = 10` (master), `LATTICE_E2E_KEYCACHE_MAX_LEAF = 2` (leaf) (`project_config.h`, confirmed this pass) | Not confirmed this pass | Resized via `setCapacity()` in `Mesh::reevaluateRouteTable()` on role change; round-robin eviction when full. |
+| `PeerRegistry` | enrolled peer list (MAC + Curve25519 pubkey + last-seen) | `MAX_PEERS = 10` (confirmed via `EepromPeers.h`, this session's persistence-layer research; matches the RAM mirror's bound) | Not confirmed this pass | RAM mirror of the EEPROM/NVS-persisted peer list; leaf class, no other `mesh/` dependencies. |
+| `ReplayCache` | per-origin replay high-water-mark (epoch, seq) | `LATTICE_REPLAY_MAX_ORIGINS = 12` (`project_config.h`, confirmed this pass) | Not confirmed this pass | LRU-evicted by origin when full. |
+| `NeighborTable` | beacon-learned forwarding neighbors (MAC + hop-distance + freshness) | `LATTICE_NEIGHBOR_MAX = 8` (`project_config.h`, confirmed this pass) | Not confirmed this pass | Header-only, leaf class; deliberately never holds key material (trust split from `PeerRegistry`). |
+| `DownlinkRouter`'s downlink-peer LRU | bounded auto-registered downlink-forwarding ESP-NOW peers | `LATTICE_DOWNLINK_PEER_MAX = 4` (`project_config.h`, confirmed this pass) | Not confirmed this pass | Bounds ESP-NOW peer-table exhaustion attacks; ownership moved here from a `Mesh`-level array since the Phase B split. |
+| `PendingRelayQueue` | buffered `(mac, pubKey)` enrollment-relay entries | Capacity 4 (stated directly in this session's mesh architecture research; appears to be a local class constant, not a `project_config.h` "Tiger Style" global) | Not confirmed this pass | New collaborator since the pre-split baseline — extracted from `Enrollment` to fix a single-slot-latch bug that dropped concurrent enrollment requests. |
+| `MeshTransport`'s RX ring (`recvQueue`) | ISR→task handoff ring buffer of `mesh_message` | Not confirmed this pass (the pre-split baseline cited `RECV_QUEUE_SIZE = 8`; not re-verified against current source in this research pass) | Not confirmed this pass | Ownership moved from a `Mesh`-level member into `MeshTransport` since the Phase B split; SPSC lock-free queue. |
+| `OutboundSequenceState` | this node's outbound sequence counter + relay-dedup + epoch-rollback guard | N/A — small fixed scalar/flag state, not a bounded array | Small; not independently confirmed this pass | Owned by `Mesh`, threaded through `MeshMessenger`/`RouteReportHandler`/`MasterBeacon` for sequencing and nonce-reuse guarding. |
+
+**Flagging a specific discrepancy rather than repeating it as fact:** this session's
+mesh architecture research (`phaseD-research-mesh.md`) mentions RouteTable's size in
+passing as "~2.25KB" ("leaves never pay its ~2.25KB"). That figure is not recomputed
+in this pass — it is a carry-over from the pre-Phase-B-split baseline, which itself
+assumed `LATTICE_ROUTE_TABLE_MAX = 32`. This research pass independently confirmed the
+*current* bound is **16**, not 32 (a real, source-verified change — whether from
+config tuning or unrelated drift, not established here). Since the bound that
+produced "~2.25KB" is now confirmed stale, and no per-field byte size for
+`RouteTable`'s entry struct was independently re-verified this pass, this document
+does not restate "~2.25KB" as a current figure. A trustworthy number would need either
+a fresh field-by-field read of `RouteTable.h`'s entry struct or a `sizeof()` print
+compiled into a real build — neither was done here, per the instruction not to
+estimate or reuse stale numbers.
+
+**Collaborators confirmed to hold no fixed RAM allocation of their own** (pure
+routing/security/dispatch logic, or free-function namespaces with no state):
+`MeshMessenger` (aside from the constants/typedefs it defines), `MeshTransport` (aside
+from `recvQueue` above), `UplinkRouter`, `DownlinkRouter` (aside from its LRU above),
+`FrameAuthorizer`, `RouteReportHandler`, `MasterBeacon`, `PeerEnrollment`,
+`E2EKeyLookup`, `RouteMac`, `MeshCrypto`, `E2ECrypto`. `Enrollment` additionally owns
+this node's own fixed-size keypair and TOFU-learned master MAC(s), but their exact
+combined byte total was not independently confirmed this pass either.
+
+One more collaborator worth naming for completeness: `CompactMessage` — a ≤220-byte
+in-RAM representation of `mesh_message`, `static_assert`-enforced — is **not wired
+into any active code path**. It exists with a dedicated unit test but zero production
+call sites (confirmed by grep across the whole `firmware/` tree during this session's
+mesh research). It should not be described as something actively shrinking queue RAM
+today.
+
+## 6. Re-measuring after future changes
+
+Exact command sequence used to produce every number in this document:
+
+```bash
+source ~/esp/esp-idf/export.sh   # or wherever ESP-IDF v5.5.1 is installed
+cd firmware
+idf.py build
+idf.py size
+idf.py size-components   # per-library/archive breakdown
+idf.py size-files        # per-object-file breakdown (note: idf.py size --files does
+                          # not exist on IDF 5.5.1 — size-files is the separate
+                          # subcommand that replaces it)
+```
+
+Prerequisite: `firmware/main/config/master_pubkey_pin.h` must already exist (see §2)
+or the build fails at compile time before you get anywhere near a size report.
+
+**Re-run this after any major feature addition and update the numbers in this
+document.** This doc went stale once already (the 2026-07-13 `arduino-cli` baseline
+sat unmeasured through five feature phases before this rewrite); the fix going forward
+is discipline, not tooling — there is currently no CI job that runs `idf.py build` +
+`idf.py size` and fails/flags on this doc going out of sync, so keeping it current is
+a manual step after any change that touches `firmware/main/src/mesh/`,
+`firmware/main/project_config.h`'s bound constants, or the crypto/WiFi dependency set.
