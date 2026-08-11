@@ -2,11 +2,15 @@
 #pragma once
 #include <cstdint>
 
-// WiFi modes
+// WiFi modes — may already be defined by esp_wifi_mock.h (Phase I Task 3
+// raw-init mocks) depending on include order. Guard against redefinition
+// either way round.
+#ifndef WIFI_STA
 #define WIFI_STA 1
-#define WIFI_AP  2
+#define WIFI_AP 2
 #define WIFI_MODE_STA WIFI_STA
-#define WIFI_MODE_AP  WIFI_AP
+#define WIFI_MODE_AP WIFI_AP
+#endif
 
 // Types used by Mesh.h callbacks
 typedef struct {
@@ -15,7 +19,7 @@ typedef struct {
 
 typedef enum {
   ESP_NOW_SEND_SUCCESS = 0,
-  ESP_NOW_SEND_FAIL    = 1,
+  ESP_NOW_SEND_FAIL = 1,
 } esp_now_send_status_t;
 
 class WiFiClass {

@@ -41,7 +41,18 @@ inline void attachInterrupt(int, void(*)(), int) {}
 inline void detachInterrupt(int)       {}
 inline void yield()                    {}
 inline void btStop()                   {}
-inline uint32_t esp_random()           { return 42; }  // Deterministic for tests
+// Deterministic for tests. NOT inline: MasterBeacon.cpp (a FIRMWARE_SOURCES
+// file linked into every test/e2e binary — see tests/CMakeLists.txt) reaches
+// this declaration only via tests/mocks/esp_random.h (Phase C finding 17
+// dropped Logger.h's transitive Arduino.h include, so MasterBeacon.cpp now
+// includes the real <esp_random.h> directly instead). An `inline` definition
+// here would only get emitted into a TU that both includes THIS header and
+// calls the function — Arduino.cpp (below) does neither on its own, so nothing
+// would ever emit the symbol and every such link would fail. Defining it as
+// an ordinary function in Arduino.cpp instead guarantees exactly one
+// always-emitted definition that both this header's and esp_random.h's
+// declarations resolve to at link time.
+uint32_t esp_random();
 inline void delayMicroseconds(uint32_t) {}  // no-op in tests
 inline int digitalPinToInterrupt(int pin) { return pin; }  // identity on host
 

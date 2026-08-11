@@ -7,7 +7,7 @@
 #include "harness/MasterKeypairFixture.h"
 #include "EEPROM.h"
 #include "esp_wifi_mock.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromCore.h"
 #include "src/mesh/Mesh.h"
 #include "src/adapter/AdapterFactory.h"
 #include "src/adapter/serial/SerialFraming.h"
@@ -218,11 +218,11 @@ TEST(FakeHubTest, ReceivesHealthReportAndAnswersHealthReq) {
   // approveEnrollment() exercises FakeHub's remaining surface (sendFrame via the
   // JOIN_ACK it builds) and drives a real Mesh::enrollPeer() call on the master.
   size_t masterPeersBefore = master->with(
-      [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.peerCount; });
+      [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.count(); });
   hub.approveEnrollment(node->mac(), enr->enrollment_public_key);
   world.run(50);
   size_t masterPeersAfter = master->with(
-      [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.peerCount; });
+      [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.count(); });
   EXPECT_EQ(masterPeersAfter, masterPeersBefore + 1)
       << "master must register the approved node as a peer";
 }
@@ -397,7 +397,7 @@ TEST(ServerBroadcastTest, ConfigSetReachesNodeAdapterAndPersists) {
   hub.approveEnrollment(sensor->mac(), enr->enrollment_public_key);
   world.run(50);
   size_t masterPeers = master->with(
-      [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.peerCount; });
+      [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.count(); });
   ASSERT_GE(masterPeers, 1u) << "sensor must be an enrolled peer of the master before broadcast";
 
   auto preType = sensor->with(
