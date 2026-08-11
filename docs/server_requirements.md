@@ -159,8 +159,8 @@ message MeshMessage {
   optional uint32 routeLen          = 12; // DEAD FIELD — never set by encode(); see §2
   optional bytes  routePath         = 13; // DEAD FIELD — never set; 60-byte capacity (stale size, see note below)
   optional bytes  authTag           = 14; // DEAD FIELD — never set; AEAD tag never reaches serial
-  optional bytes  secondaryMasterMac   = 15; // 6 bytes — dual-master, JOIN_ACK only, see §8/§9
-  optional bytes  secondaryPublicKey   = 16; // 32 bytes — dual-master, JOIN_ACK only, see §8/§9
+  optional bytes  secondaryMasterMac   = 15; // 6 bytes — dual-master, JOIN_ACK only, see §8/§10
+  optional bytes  secondaryPublicKey   = 16; // 32 bytes — dual-master, JOIN_ACK only, see §8/§10
 }
 ```
 
@@ -181,9 +181,9 @@ Field-by-field notes:
 | 11 | `public_key` | 32-byte X25519 pubkey. **Load-bearing for `ENROLLMENT`/`JOIN_ACK`** — see §8. |
 | 12 | `routeLen` | **Dead on the serial wire.** Never populated by `encode()`. Do not expect route-length data from the server-facing side. |
 | 13 | `routePath` | **Dead on the serial wire.** Never populated. Note the nanopb struct's byte-array capacity is `PB_BYTES_ARRAY_T(60)` — an even older size than the RF struct's current 48-byte (`MAX_HOPS(8) × 6`) capacity — this mismatch is harmless precisely because the field is never set, but is a sign this schema was hand-maintained rather than kept in lockstep with the RF proto. |
-| 14 | `authTag` | **Dead on the serial wire.** The AEAD tag never reaches the server — see §10. |
-| 15 | `secondaryMasterMac` | 6-byte MAC. Only meaningful (and only ever set) on `JOIN_ACK`, and only when a secondary/failover master is being designated. See §8/§9. |
-| 16 | `secondaryPublicKey` | 32-byte pubkey, paired with field 15. See §8/§9. |
+| 14 | `authTag` | **Dead on the serial wire.** The AEAD tag never reaches the server — see §9. |
+| 15 | `secondaryMasterMac` | 6-byte MAC. Only meaningful (and only ever set) on `JOIN_ACK`, and only when a secondary/failover master is being designated. See §8/§10. |
+| 16 | `secondaryPublicKey` | 32-byte pubkey, paired with field 15. See §8/§10. |
 
 ---
 
@@ -194,12 +194,12 @@ generated header — values below are exact).
 
 | Value | Name | Direction (corrected) | Notes |
 |---|---|---|---|
-| 0 | `MESH_TYPE_ADAPTER_DATA` | device↔device (RF), **and** device→server over serial (master forwards it as-is) | Normal sensor/telemetry/health data. Also the on-mesh translation target the master builds when it turns a downlink `SERIAL_CMD_BROADCAST` into an RF frame — see §7. Sealed type (AEAD) on RF; plaintext by the time it reaches the server (§10). |
+| 0 | `MESH_TYPE_ADAPTER_DATA` | device↔device (RF), **and** device→server over serial (master forwards it as-is) | Normal sensor/telemetry/health data. Also the on-mesh translation target the master builds when it turns a downlink `SERIAL_CMD_BROADCAST` into an RF frame — see §7. Sealed type (AEAD) on RF; plaintext by the time it reaches the server (§9). |
 | 1 | `MESH_TYPE_MASTER_BEACON` | device↔device (RF) **only** | Topology heartbeat from the master. **Never crosses the serial link in either direction.** The mesh dispatch switch routes it only to `MasterBeacon::process`, which never calls the callback that forwards frames to the server. If your server implementation is waiting to see beacon traffic, it never will. |
 | 2 | `MESH_TYPE_ENROLLMENT` | node→master (RF), then master→server (serial, via a dedicated relay path) | Enrollment request carrying the node's pubkey. See §8a. Reaches the server via a separate code path (`SerialAdapter::relayEnrollmentToServer`), not the general adapter-data forwarding path. |
 | 3 | `MESH_TYPE_SERIAL_CMD_BROADCAST` | server→master (serial) **only** | **Never appears on RF.** The master always translates it into `MESH_TYPE_ADAPTER_DATA` (broadcast plaintext or sealed unicast, depending on `targetMacAddress`) before transmitting on the mesh. Do not model this as being relayed verbatim to a node. See §7. |
 | 4 | `MESH_TYPE_JOIN_ACK` | server→master (serial), master→node (RF) | Enrollment approval. **The master does not relay the server's frame verbatim** — on receiving a valid server `JOIN_ACK`, it constructs an entirely new RF frame with different `origin_mac_address`/`enrollment_public_key`/`data` contents before broadcasting it. See §8c — this is a common source of confusion for a server implementer reading the RF-side code and assuming it describes what they send. |
-| 5 | `MESH_TYPE_ROUTE_REPORT` | node→master (RF), master→server (serial) | Chain-MAC-authenticated route report. Sealed type (AEAD) on RF. Currently carries essentially no usable route data by the time it reaches the server — see §10. |
+| 5 | `MESH_TYPE_ROUTE_REPORT` | node→master (RF), master→server (serial) | Chain-MAC-authenticated route report. Sealed type (AEAD) on RF. Currently carries essentially no usable route data by the time it reaches the server — see §9. |
 
 ---
 
@@ -325,8 +325,8 @@ implications (see the TOFU note in §8d), not just functional bugs.
 | `messageType` (1) | `4` (`MESH_TYPE_JOIN_ACK`) |
 | `targetMacAddress` (4) | MAC of the node being approved |
 | `public_key` (11) | **The enrolling node's own 32-byte pubkey**, exactly as received in §8a. Used only as a 4-byte fingerprint check further downstream — see §8d, step 1. |
-| `secondaryMasterMac` (15) — optional, dual-master only | MAC of a designated failover master, or omit/leave zero for single-master. See §9. |
-| `secondaryPublicKey` (16) — optional, dual-master only | Pubkey of that failover master, or omit/leave zero. See §9. |
+| `secondaryMasterMac` (15) — optional, dual-master only | MAC of a designated failover master, or omit/leave zero for single-master. See §10. |
+| `secondaryPublicKey` (16) — optional, dual-master only | Pubkey of that failover master, or omit/leave zero. See §10. |
 | `originMacAddress` (3), `data` (6), everything else | **Effectively unused/ignored** by the master's `JOIN_ACK` handler. It only checks `public_key` (non-zero = approve, all-zero = reject) and reads `targetMacAddress`; it does not inspect `originMacAddress` or the raw `data` bytes you send for this message type before acting. |
 
 **Rejection**: if the server sends a `JOIN_ACK` with an all-zero `public_key`, the master logs
@@ -369,7 +369,7 @@ In order:
    uplink/downlink traffic can happen), sets the node's `enrolled` flag, and TOFU-learns the master
    MAC if this is the node's first enrollment.
 5. **Dual-master**: reads `data[4..10]`/`data[10..42]`; if non-zero, registers the secondary master
-   as a peer too and TOFU-learns its MAC. See §9.
+   as a peer too and TOFU-learns its MAC. See §10.
 
 ---
 
