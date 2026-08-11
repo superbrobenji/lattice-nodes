@@ -170,10 +170,15 @@ transitively. The largest non-application contributors:
 
 ### Largest application object files (`idf.py size-files`, real captured data)
 
-The application code inside `libmain.a` breaks down per translation unit as follows
-(columns: Total | DRAM `.bss+.data` | Flash `.text` | Flash `.rodata`; all bytes,
-filtered from the full `idf.py size-files` run to `firmware/main/src/**` + `main.cpp`
-object files only):
+`firmware/main/src/**` (plus `main.cpp`) compiles to far more translation units than
+fit usefully in a doc; the table below lists only the **16 largest** of them, filtered
+from the full `idf.py size-files` run down to `firmware/main/src/**` + `main.cpp`
+object files and then further cut to the biggest entries (columns: Total | DRAM
+`.bss+.data` | Flash `.text` | Flash `.rodata`; all bytes). **This is not the complete
+per-object-file breakdown** — smaller application object files are omitted, including
+most of `adapter/` (only `Adapter.cpp.obj`/`SerialFraming.cpp.obj` made the cut),
+`hardware/`, `persistence/eeprom/` (only `EepromCore.cpp.obj` made the cut), `error/`,
+`logging/`, and `mesh/CompactMessage.cpp.obj` (unused per §5 regardless of size):
 
 | Object file | Total | DRAM | Flash `.text` | Flash `.rodata` |
 |---|---|---|---|---|
@@ -207,13 +212,17 @@ report. Notice each collaborator's own `.cpp.obj` DRAM column above is 0 or a fe
 (a static singleton pointer, e.g. `Mesh.cpp.obj`'s 4 bytes) — that's code-local statics,
 not the collaborator's own data members.
 
-Sum of the listed application object files' Total Size column ≈ 32,890 B — close to but
-not identical to `libmain.a`'s reported 41,140 B; the difference is per-object-file
-alignment/padding overhead that disappears once objects are merged into the archive,
-plus the vendored/generated nanopb serialization files (`pb_decode.c.obj` 3,210 B,
-`pb_encode.c.obj` 1,998 B, `pb_common.c.obj` 687 B) which also link into `libmain.a` but
-are third-party-generated code, not hand-written lattice-nodes logic, so they're
-excluded from the table above.
+Sum of the **16 rows shown above** (not the full application object-file list — see the
+omissions noted before the table) is **29,818 B**. This is well short of `libmain.a`'s
+reported 41,140 B, and the two numbers should not be read as "close": on top of the
+smaller application object files this table deliberately excludes, the vendored/generated
+nanopb serialization files (`pb_decode.c.obj` 3,210 B, `pb_encode.c.obj` 1,998 B,
+`pb_common.c.obj` 687 B — third-party-generated code, not hand-written lattice-nodes
+logic) also link into `libmain.a` but were excluded from the table above, and ordinary
+per-object-file alignment/padding overhead disappears once objects are merged into the
+archive. None of those three gap contributors were individually re-summed this pass, so
+the ≈11,322 B gap (41,140 − 29,818) is explained qualitatively here, not reconciled
+line-by-line.
 
 ## 4. RAM usage
 
