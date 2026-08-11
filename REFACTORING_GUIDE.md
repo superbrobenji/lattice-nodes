@@ -43,9 +43,9 @@ overview: `docs/adapter_development_guide.md` (writing a new `Adapter`), `docs/e
 
 ## Module Map — `firmware/main/src/mesh/`
 
-22 files, ~4,327 lines (excluding the vendored `serialization/` subdirectory), organized into
+22 collaborator modules (35 .h/.cpp files), ~4,327 lines (excluding the vendored `serialization/` subdirectory), organized into
 ~16 distinct collaborator classes/namespaces. `Mesh.h`+`Mesh.cpp` together are 863 of those 4,327
-lines (421 + 442, about 20%) — the other 80% (3,464 lines across the remaining 20 files) is the
+lines (421 + 442, about 20%) — the other 80% (3,464 lines across the remaining 21 collaborator modules, or 33 .h/.cpp files) is the
 extracted collaborators this section documents. `Mesh` is a genuinely thin orchestrator over these
 collaborators, not just an assertion — see the dedicated section below for the method-by-method
 evidence.
@@ -295,7 +295,7 @@ sequencing in `loop()`, (d) MAC/keypair/role bootstrap sequencing in `init()`, a
 genuinely orchestration-owned state (deferred-relay jitter timing, enrollment-retry timer, mesh-key
 EEPROM provisioning) that doesn't cleanly belong to any single extracted collaborator. It does
 **not** contain routing decisions, crypto, sequencing/replay logic, peer storage, beacon timing, or
-the send-construction pipeline — all of that lives in the 21 other files documented above.
+the send-construction pipeline — all of that lives in the 21 other collaborator modules (33 .h/.cpp files) documented above.
 
 ### `serialization/` subdirectory — vendored/generated code
 
