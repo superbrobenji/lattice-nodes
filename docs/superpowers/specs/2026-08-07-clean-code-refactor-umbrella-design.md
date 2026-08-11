@@ -155,12 +155,33 @@ implementation plan once Phase A lands.
 
 ### Phase D — Docs rewrite
 
-README + `docs/memory_usage.md`, `docs/error_codes.md`,
-`docs/server_requirements.md`, `docs/adapter_development_guide.md` rewritten
-to reflect the post-A/B/C architecture. Current docs are stale since
-2026-07-16 — they predate Phase 0 (ESP-IDF migration) through Phase J (crypto
-revert) and the TLS-disable follow-up entirely. Sequenced last so the docs
-describe the real end state instead of a moving target.
+**Scope is cross-repo, tracked per-repo.** The Lattice ecosystem is 3 repos
+(`lattice-nodes`, `lattice-hub`, `lattice-protocol`); each gets its own
+docs-rewrite effort, executed independently in its own repo. Each repo's docs
+should give an accurate high-level view of the whole stack, but go into deep
+detail only for the repo they live in.
+
+- **`lattice-nodes` (this repo) — DONE, merged PR #102.** README.md,
+  REFACTORING_GUIDE.md, `docs/memory_usage.md` (real `idf.py build`/`size`
+  numbers, not estimates), `docs/error_codes.md`, `docs/server_requirements.md`,
+  `docs/adapter_development_guide.md` rewritten; `docs/hardware_requirements.md`
+  and `docs/getting_started.md` added (new). All grounded in grep-verified
+  current source (post-A/B/C/E architecture) plus a brief, accurate
+  `lattice-hub`/`lattice-protocol` ecosystem overview. Old docs were stale
+  since 2026-07-16 — predated Phase 0 (ESP-IDF migration) through Phase J
+  (crypto revert) and this whole umbrella (A/B/C/E) entirely.
+- **`lattice-hub` — NOT STARTED.** Tracked at
+  [superbrobenji/lattice-hub#121](https://github.com/superbrobenji/lattice-hub/issues/121).
+  Deep hub detail (orchestrator/dashboard/artist-portal/sidecar, serial
+  transport, REST API, Kafka pipeline), brief accurate nodes+protocol overview.
+- **`lattice-protocol` — NOT STARTED.** Tracked at
+  [superbrobenji/lattice-protocol#40](https://github.com/superbrobenji/lattice-protocol/issues/40).
+  Deep protocol/codegen detail, brief accurate nodes+hub overview.
+
+**The umbrella-wide "Phase D" is not complete until all 3 land** — this
+repo's own Clean-Code refactor umbrella (Phases A-E) is fully done regardless,
+since `lattice-hub`/`lattice-protocol`'s docs efforts are separate work items
+in separate repos, not blocking this repo's own phase sequence.
 
 ## Deliverable structure
 
