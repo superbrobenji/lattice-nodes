@@ -36,7 +36,7 @@ public:
   // RegisterPeerFn/EnrollmentRelayFn pattern: the only production binding
   // (Mesh::drain()) goes through a static instance-trampoline
   // (Mesh::handleReceivedMessageTrampoline), not a capturing lambda.
-  using MessageHandler = void (*)(const uint8_t srcMac[6], const mesh_message& msg);
+  using MessageHandler = void (*)(const uint8_t* srcMac, const mesh_message& msg);
 
   MeshTransport();
 
@@ -69,7 +69,7 @@ public:
   // MeshCrypto.h (finding 19 — this is peering, not crypto). Static for the
   // same reason as sendBroadcast: Enrollment::enrollPeer() calls it directly
   // without holding a Mesh*/MeshTransport*.
-  static void registerPeerWithEspNow(const uint8_t mac[6]);
+  static void registerPeerWithEspNow(const uint8_t* mac);
 
   // Drain the RX ring buffer until empty, calling handler(srcMac, msg) once
   // per dequeued entry. Replaces the old Mesh::drainRecvQueue, which
