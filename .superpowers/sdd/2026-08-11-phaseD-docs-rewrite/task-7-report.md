@@ -2,7 +2,7 @@
 
 **Status:** DONE
 
-**Commit:** (see controller report) on branch `phaseD-task7-manual`
+**Commit:** `d06b5b4` on branch `phaseD-task7-manual`
 ("docs(phaseD): add hardware_requirements.md with pinout + wiring diagrams")
 
 ## What was done
