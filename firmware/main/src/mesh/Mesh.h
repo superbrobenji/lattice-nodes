@@ -187,13 +187,13 @@ private:
   // switch into Mesh-owned handlers (enrollment.processRequest,
   // beacon.process, processAdapterData, etc.) — this dispatch stays on Mesh
   // because MeshTransport has no visibility into those collaborators.
-  void handleReceivedMessage(const uint8_t srcMac[6], const mesh_message& msg);
+  void handleReceivedMessage(const uint8_t* srcMac, const mesh_message& msg);
 
   // Static trampoline binding handleReceivedMessage to
   // MeshTransport::MessageHandler's plain-function-pointer signature — routes
   // through the singleton `instance` the same way dataRecvTrampoline used to.
   // Used only by drain() below.
-  static void handleReceivedMessageTrampoline(const uint8_t srcMac[6], const mesh_message& msg) {
+  static void handleReceivedMessageTrampoline(const uint8_t* srcMac, const mesh_message& msg) {
     if (instance)
       instance->handleReceivedMessage(srcMac, msg);
   }

@@ -44,7 +44,7 @@ public:
   // lastMasterBeaconReceivedMs/STALE_MASTER_THRESHOLD_MS stay MasterBeacon's
   // own private members, shared with process() below (both need the same
   // field).
-  void checkTimeout(bool isMaster, MasterInfo& currentMaster, uint8_t lastSeenMasterMac[6]);
+  void checkTimeout(bool isMaster, MasterInfo& currentMaster, uint8_t* lastSeenMasterMac);
 
   // Was Mesh::processMasterBeacon — moved verbatim. enrollment/neighbors/
   // currentMaster/txState are collaborators Mesh already owns, threaded
@@ -56,7 +56,7 @@ public:
                bool dualMasterMode, Enrollment& enrollment, NeighborTable& neighbors,
                MasterInfo& currentMaster, OutboundSequenceState& txState,
                mesh_message& relayPendingMsgOut, uint64_t& relayPendingAtOut, bool& relayPendingOut,
-               uint8_t lastSeenMasterMac[6]);
+               uint8_t* lastSeenMasterMac);
 
 #ifdef UNIT_TEST
   // In unit test builds, all members are public so test bodies (which live in

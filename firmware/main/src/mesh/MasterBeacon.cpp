@@ -33,7 +33,7 @@ void MasterBeacon::send(const mesh_message& msg, MeshTransport& transport) {
 }
 
 void MasterBeacon::checkTimeout(bool isMaster, MasterInfo& currentMaster,
-                                uint8_t lastSeenMasterMac[6]) {
+                                uint8_t* lastSeenMasterMac) {
   if (isMaster)
     return;
   if (currentMaster.distance == 0xFF)
@@ -53,7 +53,7 @@ void MasterBeacon::process(const mesh_message& msg, const uint8_t* deviceMac, bo
                            bool dualMasterMode, Enrollment& enrollment, NeighborTable& neighbors,
                            MasterInfo& currentMaster, OutboundSequenceState& txState,
                            mesh_message& relayPendingMsgOut, uint64_t& relayPendingAtOut,
-                           bool& relayPendingOut, uint8_t lastSeenMasterMac[6]) {
+                           bool& relayPendingOut, uint8_t* lastSeenMasterMac) {
   // Guard: ignore echoes of our own beacon relayed back by neighbours (relays are
   // broadcast, so the originating master hears them too). Without this the master
   // would TOFU-learn itself as knownMasterMac and record a bogus route to itself.

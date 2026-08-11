@@ -131,7 +131,7 @@ void Mesh::loadPersistentState() {
 // Mesh::drainRecvQueue's post-pop logic, unchanged: proto-version check,
 // replay check, peers.updateLastSeen, then the message-type switch into
 // Mesh-owned handlers.
-void Mesh::handleReceivedMessage(const uint8_t srcMac[6], const mesh_message& msg) {
+void Mesh::handleReceivedMessage(const uint8_t* srcMac, const mesh_message& msg) {
   // Proto version check: drop anything that isn't exactly the current wire
   // version. There is no legitimate proto_version==0 case — buildMessage(),
   // Enrollment::sendRequest(), and the JOIN_ACK path all stamp PROTO_VERSION
