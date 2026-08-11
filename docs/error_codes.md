@@ -62,10 +62,18 @@ inline bool fail(::lattice::core::ErrorTypeDigit t, ::lattice::core::ModuleDigit
 
 Both take the same four arguments. `fail()` logs `msg` via `LATTICE_LOGLN` and calls
 `err_core::signalError(t, m, sub, msg)` (drives the display/LED — see §5), then **returns `false`**
-so the caller can keep going in a degraded state. `fatal()` does the same signaling, then **never
-returns**: under `UNIT_TEST` it throws `FatalError`; on real hardware it loops forever calling
-`err_core::tick()` + `vTaskDelay(1ms)` (keeps the LED blink pattern animating instead of freezing
-solid-on).
+so the caller can keep going in a degraded state — **except when `t` is `MEMORY`, `HARDWARE`, or
+`CRYPTO`.** For those three T-digit categories, `signalError(ErrorTypeDigit, ...)` maps (or, for
+`CRYPTO`, *folds*) onto an `ErrorType` for which `shouldRestart()` is true (see §5), so
+`err_core::signalError()` calls `restartDevice()` before ever returning control to `fail()`'s
+caller — under `UNIT_TEST` that throws `lattice::err::FatalError`; on real hardware it calls
+`esp_restart()` and the device reboots. In the §3 registry, 13 of the `fail()` call sites (11 in
+`firmware/main/src` + 2 in `main.cpp`) have T = MEMORY, HARDWARE, or CRYPTO and so actually behave
+this way rather than returning `false` — only the remaining `GENERIC`/`SENSOR`/`COMM`/`CONFIG`-tier
+`fail()` calls genuinely let the caller continue in a degraded state. `fatal()` does the same
+signaling, then **never returns** regardless of `t`: under `UNIT_TEST` it throws `FatalError`; on
+real hardware it loops forever calling `err_core::tick()` + `vTaskDelay(1ms)` (keeps the LED blink
+pattern animating instead of freezing solid-on).
 
 There are two thin convenience wrappers, also in `Error.h`, that funnel through the same `fail()`:
 
@@ -207,8 +215,14 @@ digits, useful when the display itself is disabled or unreadable:
 | CRYPTO | 6 (mapped to the same class as HARDWARE — an AEAD epoch-rollback is treated as security-critical enough to halt like a hardware fault) |
 | GENERIC, SENSOR (and anything else) | 1 (default fallthrough) |
 
-The `MEMORY` and `HARDWARE` blink categories additionally trigger `esp_restart()` via
-`shouldRestart()` — those two classes of error reboot the device after signaling, the rest do not.
+`shouldRestart()` (`ErrorCore.cpp`) checks the coarse `ErrorType`, not the original
+`ErrorTypeDigit`, and returns true only for `ErrorType::MEMORY_ERROR` and
+`ErrorType::HARDWARE_FAILURE`. Because `signalError(ErrorTypeDigit, ...)` folds `CRYPTO` into
+`ErrorType::HARDWARE_FAILURE` *before* that check runs (same fold used for the blink pattern
+above), the effective set of T-digit categories that trigger `esp_restart()` after signaling is
+**MEMORY, HARDWARE, and CRYPTO** — e.g. the `ReplayCache.h:159` AEAD epoch-rollback guard (code
+**731**, `CRYPTO`) does reboot the device, not just blink. `GENERIC`, `SENSOR`, `COMM`, and
+`CONFIG` do not restart.
 
 `err_core::tick()` pumps `Led::update()` every main-loop iteration (and inside `fatal()`'s halt
 loop, so the LED keeps animating even while halted) since `Led::pulse()` is non-blocking.
