@@ -480,6 +480,7 @@ add_unit_test(test_my_new_adapter unit/test_my_new_adapter.cpp)
 | EEPROM state leaking between tests | Call `EEPROM.reset()` and re-run `lattice::eeprom::init()` in `SetUp()`, as `test_pir_adapter.cpp` does |
 
 Once the host-test suite passes, verify on real hardware: from `firmware/`,
-run `idf.py build flash monitor` (standard ESP-IDF workflow), watch the
-serial log for the adapter's initialization message, and confirm mesh
-traffic and health reports appear as expected.
+run `idf.py build flash monitor` (the standard ESP-IDF invocation; not
+independently documented elsewhere in this repo), watch the serial log for
+the adapter's initialization message, and confirm mesh traffic and health
+reports appear as expected.
