@@ -16,7 +16,7 @@ namespace mesh {
 // drop-the-whole-frame behavior exactly (see the header doc comment).
 RouteDecision DownlinkRouter::classify(const mesh_message& msg, const uint8_t* deviceMac,
                                        bool isMaster, bool addressedToSelf, bool isBroadcastTarget,
-                                       bool addressedToMaster, uint8_t nextHopMacOut[6]) const {
+                                       bool addressedToMaster, uint8_t* nextHopMacOut) const {
   if (isMaster || addressedToSelf || isBroadcastTarget)
     return RouteDecision::NotRouted;
   if (addressedToMaster) {

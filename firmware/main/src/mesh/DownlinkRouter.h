@@ -64,7 +64,7 @@ public:
   // preserves the original drop-the-whole-frame semantics exactly.
   RouteDecision classify(const mesh_message& msg, const uint8_t* deviceMac, bool isMaster,
                          bool addressedToSelf, bool isBroadcastTarget, bool addressedToMaster,
-                         uint8_t nextHopMacOut[6]) const;
+                         uint8_t* nextHopMacOut) const;
 
   // Was Mesh::relayDownlink — moved verbatim except sendMessage(...) ->
   // transport.sendMessage(...). Flood-fallback broadcast relay to every
