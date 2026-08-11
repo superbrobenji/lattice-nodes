@@ -32,8 +32,8 @@ constexpr size_t AUTH_PATH_LEN = 8;
 // mesh_message is packed, and memcpy is the alignment-safe way to copy a
 // multi-byte field out of it on Xtensa). ESP32 is little-endian, so this
 // reproduces the prior output bit-for-bit.
-inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
-                            const uint8_t this_hop[6], uint8_t out_ctx[HOP_CTX_LEN]) {
+inline void buildHopContext(const mesh_message& msg, const uint8_t* prev_hop,
+                            const uint8_t* this_hop, uint8_t* out_ctx) {
   uint8_t* p = out_ctx;
   memcpy(p, msg.origin_mac_address, 6);
   p += 6;
@@ -53,8 +53,8 @@ inline void buildHopContext(const mesh_message& msg, const uint8_t prev_hop[6],
 // Tiger-Style: stack-only, fixed-size buffers, no heap, no dynamic length.
 //
 // Phase J: HMAC via lattice::crypto::hmac_sha256 (mbedtls one-shot).
-inline void chainStep(const uint8_t secret[32], const uint8_t hop_ctx[HOP_CTX_LEN],
-                      const uint8_t prev_mac[AUTH_PATH_LEN], uint8_t out_mac[AUTH_PATH_LEN]) {
+inline void chainStep(const uint8_t* secret, const uint8_t* hop_ctx, const uint8_t* prev_mac,
+                      uint8_t* out_mac) {
   uint8_t input[HOP_CTX_LEN + AUTH_PATH_LEN];
   memcpy(input, hop_ctx, HOP_CTX_LEN);
   memcpy(input + HOP_CTX_LEN, prev_mac, AUTH_PATH_LEN);

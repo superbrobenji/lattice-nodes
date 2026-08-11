@@ -46,7 +46,7 @@ inline int espRng(void*, unsigned char* out, size_t len) {
   return 0;
 }
 
-inline void reverse32(const uint8_t in[32], uint8_t out[32]) {
+inline void reverse32(const uint8_t* in, uint8_t* out) {
   for (int i = 0; i < 32; ++i) {
     out[i] = in[31 - i];
   }
@@ -61,7 +61,7 @@ inline void secure_zero(void* buf, size_t len) {
 // Fresh X25519 keypair, exported in the BE storage/wire convention.
 // mbedtls_ecp_gen_keypair produces a clamped private scalar (RFC 7748), same
 // as the old keygen — stored keys remain pre-clamped.
-inline bool x25519_keygen(uint8_t priv32BE[32], uint8_t pub32BE[32]) {
+inline bool x25519_keygen(uint8_t* priv32BE, uint8_t* pub32BE) {
   mbedtls_ecp_group grp;
   mbedtls_mpi d;
   mbedtls_ecp_point Q;
@@ -93,8 +93,7 @@ inline bool x25519_keygen(uint8_t priv32BE[32], uint8_t pub32BE[32]) {
 // (idempotent for the pre-clamped keys this codebase stores).
 // mbedtls_ecdh_read_public takes the TLS ECPoint wire form: for Montgomery
 // curves that is a 1-byte length prefix (32) + the 32-byte LE u-coordinate.
-inline bool x25519_shared(const uint8_t priv32BE[32], const uint8_t peerPub32BE[32],
-                          uint8_t secret32[32]) {
+inline bool x25519_shared(const uint8_t* priv32BE, const uint8_t* peerPub32BE, uint8_t* secret32) {
   uint8_t privLE[32];
   uint8_t peerTls[33];
   detail::reverse32(priv32BE, privLE);
@@ -127,15 +126,15 @@ inline bool hkdf_sha256(const uint8_t* ikm, size_t ikmLen, const uint8_t* salt, 
 
 // HMAC-SHA256, one-shot.
 inline bool hmac_sha256(const uint8_t* key, size_t keyLen, const uint8_t* data, size_t len,
-                        uint8_t out32[32]) {
+                        uint8_t* out32) {
   return mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), key, keyLen, data, len,
                          out32) == 0;
 }
 
 // ChaCha20-Poly1305 (IETF), detached tag, in-place buf (mbedtls documents
 // in-place src==dst as supported for chachapoly).
-inline bool aead_seal(const uint8_t key32[32], const uint8_t nonce12[12], const uint8_t* aad,
-                      size_t aadLen, uint8_t* buf, size_t len, uint8_t tag16[16]) {
+inline bool aead_seal(const uint8_t* key32, const uint8_t* nonce12, const uint8_t* aad,
+                      size_t aadLen, uint8_t* buf, size_t len, uint8_t* tag16) {
   mbedtls_chachapoly_context ctx;
   mbedtls_chachapoly_init(&ctx);
   bool ok =
@@ -145,8 +144,8 @@ inline bool aead_seal(const uint8_t key32[32], const uint8_t nonce12[12], const 
   return ok;
 }
 
-inline bool aead_open(const uint8_t key32[32], const uint8_t nonce12[12], const uint8_t* aad,
-                      size_t aadLen, uint8_t* buf, size_t len, const uint8_t tag16[16]) {
+inline bool aead_open(const uint8_t* key32, const uint8_t* nonce12, const uint8_t* aad,
+                      size_t aadLen, uint8_t* buf, size_t len, const uint8_t* tag16) {
   mbedtls_chachapoly_context ctx;
   mbedtls_chachapoly_init(&ctx);
   bool ok = mbedtls_chachapoly_setkey(&ctx, key32) == 0 &&
