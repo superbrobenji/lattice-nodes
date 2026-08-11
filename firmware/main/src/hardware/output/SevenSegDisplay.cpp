@@ -2,6 +2,11 @@
 #include "GpioOutput.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
+#include <esp_timer.h>
+#include <esp_rom_sys.h>
+#include <driver/gpio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 using lattice::core::ErrorTypeDigit;
 using lattice::core::ModuleDigit;
@@ -40,15 +45,15 @@ bool SevenSegDisplay::init() {
                        "7Seg invalid pins");
     return false;
   }
-  pinMode(_dioPin, OUTPUT);
-  pinMode(_clkPin, OUTPUT);
-  digitalWrite(_clkPin, HIGH);
-  digitalWrite(_dioPin, HIGH);
+  // Phase I Task 7 (RR): per-init pinMode() calls removed — DIO/CLK are part
+  // of main.cpp's bundled output-group gpio_config_t, applied once at boot.
+  gpio_set_level(static_cast<gpio_num_t>(_clkPin), 1);
+  gpio_set_level(static_cast<gpio_num_t>(_dioPin), 1);
   LATTICE_LOGLN("7SEG", "SevenSegDisplay initialized", lattice::utils::LogLevel::LOG_INFO);
   // Self-test: flash all segments 0x7F (88:88)
   uint8_t testSeg[4] = {0x7F, 0x7F, 0x7F, 0x7F};
   setSegments(testSeg);
-  delay(500);
+  vTaskDelay(pdMS_TO_TICKS(500));
   clear();
   return true;
 }
@@ -64,56 +69,59 @@ void SevenSegDisplay::setBrightness(uint8_t level) {
 
 // timing helper
 static inline void tmDelay() {
-  delayMicroseconds(3);
+  esp_rom_delay_us(3);
 }
 
 void SevenSegDisplay::start() {
-  digitalWrite(_dioPin, HIGH);
-  digitalWrite(_clkPin, HIGH);
+  gpio_set_level(static_cast<gpio_num_t>(_dioPin), 1);
+  gpio_set_level(static_cast<gpio_num_t>(_clkPin), 1);
   tmDelay();
-  digitalWrite(_dioPin, LOW);
+  gpio_set_level(static_cast<gpio_num_t>(_dioPin), 0);
   tmDelay();
-  digitalWrite(_clkPin, LOW);
+  gpio_set_level(static_cast<gpio_num_t>(_clkPin), 0);
 }
 
 void SevenSegDisplay::stop() {
-  digitalWrite(_clkPin, LOW);
+  gpio_set_level(static_cast<gpio_num_t>(_clkPin), 0);
   tmDelay();
-  digitalWrite(_dioPin, LOW);
+  gpio_set_level(static_cast<gpio_num_t>(_dioPin), 0);
   tmDelay();
-  digitalWrite(_clkPin, HIGH);
+  gpio_set_level(static_cast<gpio_num_t>(_clkPin), 1);
   tmDelay();
-  digitalWrite(_dioPin, HIGH);
+  gpio_set_level(static_cast<gpio_num_t>(_dioPin), 1);
   tmDelay();
 }
 
 bool SevenSegDisplay::writeByte(uint8_t b) {
   for (int i = 0; i < 8; ++i) {
-    digitalWrite(_clkPin, LOW);
-    digitalWrite(_dioPin, (b & 0x01) ? HIGH : LOW);
+    gpio_set_level(static_cast<gpio_num_t>(_clkPin), 0);
+    gpio_set_level(static_cast<gpio_num_t>(_dioPin), (b & 0x01) ? 1 : 0);
     tmDelay();
-    digitalWrite(_clkPin, HIGH);
+    gpio_set_level(static_cast<gpio_num_t>(_clkPin), 1);
     tmDelay();
     b >>= 1;
   }
-  // Wait for ACK
-  digitalWrite(_clkPin, LOW);
-  pinMode(_dioPin, INPUT);
-  digitalWrite(_dioPin, HIGH); // pull-up
+  // Wait for ACK. DIO briefly switches to input (with pull-up) to sample the
+  // chip's open-drain ACK pulse — a genuine runtime direction flip (not a
+  // per-init pinMode()), so it stays as an explicit native call here rather
+  // than folding into main.cpp's bundled output-group gpio_config_t.
+  gpio_set_level(static_cast<gpio_num_t>(_clkPin), 0);
+  (void)gpio_set_direction(static_cast<gpio_num_t>(_dioPin), GPIO_MODE_INPUT);
+  (void)gpio_set_pull_mode(static_cast<gpio_num_t>(_dioPin), GPIO_PULLUP_ONLY);
   tmDelay();
-  digitalWrite(_clkPin, HIGH);
+  gpio_set_level(static_cast<gpio_num_t>(_clkPin), 1);
   tmDelay();
 
-  unsigned long start = millis();
+  uint64_t start = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   bool ack = false;
-  while (millis() - start < 20) {
-    if (!digitalRead(_dioPin)) {
+  while (static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL - start < 20) {
+    if (!gpio_get_level(static_cast<gpio_num_t>(_dioPin))) {
       ack = true;
       break;
     }
   }
-  pinMode(_dioPin, OUTPUT);
-  digitalWrite(_clkPin, LOW);
+  (void)gpio_set_direction(static_cast<gpio_num_t>(_dioPin), GPIO_MODE_OUTPUT);
+  gpio_set_level(static_cast<gpio_num_t>(_clkPin), 0);
   if (!ack) {
     LATTICE_LOGLN("7SEG", "ACK timeout", lattice::utils::LogLevel::LOG_WARN);
     lattice::err::fail(lattice::core::ErrorTypeDigit::HARDWARE, lattice::core::ModuleDigit::HW, 2,

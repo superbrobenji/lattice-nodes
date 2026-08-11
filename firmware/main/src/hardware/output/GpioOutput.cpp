@@ -9,7 +9,9 @@ bool GpioOutput::init() {
   if (!isValidOutputPin(_pin)) {
     return false;
   }
-  pinMode(_pin, OUTPUT);
+  // Phase I Task 7 (RR): per-init pinMode() call removed — GpioOutput-derived
+  // pins are configured once at boot via main.cpp's bundled output-group
+  // gpio_config_t call.
   _initialized = true;
   return true;
 }

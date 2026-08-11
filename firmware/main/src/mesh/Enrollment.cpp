@@ -1,6 +1,8 @@
 #include "Enrollment.h"
 #include "MeshCrypto.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromIdentity.h"
+#include "src/persistence/eeprom/EepromSecurity.h"
+#include "src/persistence/eeprom/EepromEnrollment.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "../../lib/lattice-protocol/c/mesh_message.h"
@@ -9,11 +11,12 @@
 #include "src/network/mem.h"
 #include "config/master_pubkey_pin_wrapper.h"
 #include "project_config.h"
-// Mesh.h (post-Phase-G audit item U): only for the static Mesh::sendBroadcast
-// choke point below — Enrollment has no Mesh* of its own (see Enrollment.h),
-// so it calls the static overload directly rather than going through an
-// instance.
-#include "Mesh.h"
+// MeshTransport.h (post-Phase-G audit item U; Phase B Task 4): only for the
+// static MeshTransport::sendBroadcast/registerPeerWithEspNow choke points
+// below — Enrollment has no Mesh*/MeshTransport* of its own (see
+// Enrollment.h), so it calls the static overloads directly rather than going
+// through an instance.
+#include "MeshTransport.h"
 #include <esp_now.h>
 #include <cstring>
 
@@ -30,8 +33,9 @@ Enrollment::Enrollment() {
   memset(knownMasterMacSecondary, 0xFF, 6);
 }
 
-// NOTE: Enrollment::init() and Enrollment::enrollPeer() are mbedtls-heavy.
-// Host test builds compile them for real against a host-built mbedtls (see tests/CMakeLists.txt).
+// NOTE: Enrollment::init() and Enrollment::enrollPeer() are crypto-heavy (X25519
+// keygen via MeshCrypto.h::generateKeypair). Host test builds compile them for real
+// against a host-built mbedtls (Phase J revert; see tests/CMakeLists.txt).
 
 void Enrollment::init() {
   if (lattice::eeprom::loadKeypair(devicePrivateKey, devicePublicKey)) {
@@ -76,25 +80,26 @@ void Enrollment::sendRequest(const uint8_t* deviceMac, uint8_t protoVersion, uin
   msg.hop_count = 0;
   memcpy(msg.enrollment_public_key, devicePublicKey, 32);
 
-  Mesh::sendBroadcast(msg);
+  MeshTransport::sendBroadcast(msg);
   LATTICE_LOGLN("MESH", "Enrollment request sent", LogLevel::LOG_INFO);
 }
 
 void Enrollment::processRequest(const mesh_message& msg) {
-  enqueuePendingRelay(msg.origin_mac_address, msg.enrollment_public_key);
+  _relayQueue.push(msg.origin_mac_address, msg.enrollment_public_key);
   LATTICE_LOGLN("MESH", "Enrollment request received, deferring relay to loop()",
                 LogLevel::LOG_INFO);
 }
 
-void Enrollment::enqueuePendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
-  if (_pendingRelayCount >= PENDING_RELAY_QUEUE_SIZE) {
-    LATTICE_LOGLN("MESH", "Enrollment relay queue full — dropping request", LogLevel::LOG_WARN);
-    return;
-  }
-  size_t idx = (_pendingRelayHead + _pendingRelayCount) % PENDING_RELAY_QUEUE_SIZE;
-  memcpy(_pendingRelayQueue[idx].mac, mac, 6);
-  memcpy(_pendingRelayQueue[idx].pubKey, pubKey, 32);
-  _pendingRelayCount++;
+void Enrollment::learnMasterMac(const uint8_t* mac) {
+  memcpy(knownMasterMac, mac, 6);
+  hasMasterMac = true;
+  lattice::eeprom::saveKnownMasterMac(knownMasterMac);
+}
+
+void Enrollment::learnSecondaryMasterMac(const uint8_t* mac) {
+  memcpy(knownMasterMacSecondary, mac, 6);
+  hasMasterMacSecondary = true;
+  lattice::eeprom::saveKnownMasterMacSecondary(knownMasterMacSecondary);
 }
 
 void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*deviceMac*/,
@@ -131,7 +136,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
     return;
   }
 
-  // Register the approving master as a routable peer. Mesh::findNextHopToMaster()
+  // Register the approving master as a routable peer. UplinkRouter::findNextHopToMaster()
   // can only route through PeerRegistry entries, so without this the enrolled
   // node has no uplink route (adapter data / route reports toward the master).
   // The JOIN_ACK carries the master's public key in enrollment_public_key
@@ -151,9 +156,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
 
   // The node sending JOIN_ACK is the master — record its MAC (TOFU)
   if (!hasMasterMac) {
-    memcpy(knownMasterMac, msg.origin_mac_address, 6);
-    hasMasterMac = true;
-    lattice::eeprom::saveKnownMasterMac(knownMasterMac);
+    learnMasterMac(msg.origin_mac_address);
     LATTICE_LOGLN("MESH", "Master MAC learned and saved (TOFU)", LogLevel::LOG_INFO);
   }
 
@@ -175,9 +178,7 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   if (hasSecondary) {
     bool secondaryRegistered = registerFn && registerFn(secondaryMasterMac, secondaryPublicKey);
     if (secondaryRegistered && !hasMasterMacSecondary) {
-      memcpy(knownMasterMacSecondary, secondaryMasterMac, 6);
-      hasMasterMacSecondary = true;
-      lattice::eeprom::saveKnownMasterMacSecondary(knownMasterMacSecondary);
+      learnSecondaryMasterMac(secondaryMasterMac);
     }
   }
 }
@@ -187,7 +188,7 @@ void Enrollment::enrollPeer(const uint8_t* mac, const uint8_t* pubKey32, Registe
   if (esp_now_is_peer_exist(mac)) {
     esp_now_del_peer(mac);
   }
-  crypto::registerPeerWithEspNow(mac);
+  MeshTransport::registerPeerWithEspNow(mac);
   if (registerFn)
     registerFn(mac, pubKey32);
 }
@@ -197,19 +198,12 @@ void Enrollment::setRelayFn(EnrollmentRelayFn fn) {
 }
 
 void Enrollment::setPendingRelay(const uint8_t* mac, const uint8_t* pubKey) {
-  enqueuePendingRelay(mac, pubKey);
+  _relayQueue.push(mac, pubKey);
 }
 
 void Enrollment::drainPendingRelay() {
   // Drain EVERY queued entry per call so concurrent enrollments are not starved.
-  while (_pendingRelayCount > 0) {
-    const PendingRelay& e = _pendingRelayQueue[_pendingRelayHead];
-    if (_enrollmentRelayFn) {
-      _enrollmentRelayFn(e.mac, e.pubKey);
-    }
-    _pendingRelayHead = (_pendingRelayHead + 1) % PENDING_RELAY_QUEUE_SIZE;
-    _pendingRelayCount--;
-  }
+  _relayQueue.drainTo(_enrollmentRelayFn);
 }
 
 } // namespace mesh

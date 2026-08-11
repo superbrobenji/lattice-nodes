@@ -1,7 +1,7 @@
 #ifndef ADAPTER_H
 #define ADAPTER_H
 
-#include <Arduino.h>
+#include <cstdint>
 #include <cstddef>
 
 // Include generated mesh message type — no circular dependency since lattice-protocol
@@ -24,7 +24,6 @@ enum adapter_types : int32_t {
   UNKNOWN_ADAPTER = 0,
   SERIAL_ADAPTER = 1,
   PIR_ADAPTER = 2,
-  LED_ADAPTER = 3,
 };
 
 // Abstract base class for all adapters
@@ -44,7 +43,7 @@ public:
 
   adapter_types getAdapterType() const; // Returns the adapter type
   void sendDataThroughMesh(const adapter_types type,
-                           const uint8_t data[64]); // sends data through mesh
+                           const uint8_t* data); // sends data through mesh
   void setTransmitFn(TransmitPtr fn);
 
   virtual bool init() = 0; // To be implemented by derived classes
@@ -85,8 +84,8 @@ protected:
   // the timer early for another reason (e.g. SerialAdapter firing a report
   // immediately on hop-count change) should call resetHealthTick() themselves
   // once they've sent.
-  bool healthTickDue(uint32_t now);
-  void resetHealthTick(uint32_t now);
+  bool healthTickDue(uint64_t now);
+  void resetHealthTick(uint64_t now);
 
   // ------------------------------------------------------------------------
   // Phase H2 audit item V: shared control-op dispatch table.
@@ -130,7 +129,9 @@ private:
   // or the FF:FF:FF:FF:FF:FF broadcast placeholder.
   static bool isTargetedAtSelf(const uint8_t* candidateMac);
 
-  uint32_t _lastHealthMillis = 0;
+  // Phase I Task 6 (FF): widened uint32_t -> uint64_t alongside the
+  // millis() -> esp_timer_get_time()/1000ULL swap.
+  uint64_t _lastHealthMillis = 0;
 };
 
 } // namespace adapter

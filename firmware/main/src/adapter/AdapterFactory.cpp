@@ -1,7 +1,7 @@
 #include "AdapterFactory.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
-#include "src/persistence/EepromManager.h"
+#include "src/persistence/eeprom/EepromDeviceConfig.h"
 #include <cstdio>
 // Include all adapter headers
 #include "src/adapter/pir/PirAdapter.h"

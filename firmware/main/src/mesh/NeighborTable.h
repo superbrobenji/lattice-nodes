@@ -33,13 +33,13 @@ public:
 
   // Insert or update the neighbor. On a full table with no existing slot for
   // this mac, evict a stale entry first, else the entry farthest from the master.
-  void observe(const uint8_t* mac, uint8_t masterDistance, uint32_t nowMillis) {
+  void observe(const uint8_t* mac, uint8_t masterDistance, uint64_t nowMs) {
     Entry* slot = findSlot(mac);
     if (!slot)
-      slot = allocateSlot(nowMillis);
+      slot = allocateSlot(nowMs);
     memcpy(slot->mac, mac, 6);
     slot->masterDistance = masterDistance;
-    slot->lastSeenMillis = nowMillis;
+    slot->lastSeenMs = nowMs;
     slot->valid = true;
   }
 
@@ -49,15 +49,15 @@ public:
   // pass over `entries` — it locates (or picks) the slot for `mac` AND
   // accumulates the min masterDistance across the OTHER fresh entries in the
   // same loop, then folds the just-written entry's distance in afterwards (it
-  // is always "fresh" relative to nowMillis — age 0 — so it always
+  // is always "fresh" relative to nowMs — age 0 — so it always
   // participates in the min, mirroring minFreshDistance()'s semantics).
   // Returns the new min fresh masterDistance across the whole table (0xFF if
   // none are fresh), exactly what
-  // `observe(mac, masterDistance, nowMillis); return
-  // minFreshDistance(nowMillis);` would have returned. observe()/
+  // `observe(mac, masterDistance, nowMs); return
+  // minFreshDistance(nowMs);` would have returned. observe()/
   // minFreshDistance() are kept as-is for other callers (e.g. unit tests
   // exercising them independently).
-  uint8_t observeAndMinDistance(const uint8_t* mac, uint8_t masterDistance, uint32_t nowMillis) {
+  uint8_t observeAndMinDistance(const uint8_t* mac, uint8_t masterDistance, uint64_t nowMs) {
     size_t matchIdx = config::LATTICE_NEIGHBOR_MAX;
     size_t firstInvalidIdx = config::LATTICE_NEIGHBOR_MAX;
     size_t firstStaleIdx = config::LATTICE_NEIGHBOR_MAX;
@@ -79,7 +79,7 @@ public:
         matchIdx = i;
         continue;
       }
-      bool stale = (nowMillis - e.lastSeenMillis) >= config::STALE_PEER_THRESHOLD_MS;
+      bool stale = (nowMs - e.lastSeenMs) >= config::STALE_PEER_THRESHOLD_MS;
       if (stale) {
         if (firstStaleIdx == config::LATTICE_NEIGHBOR_MAX)
           firstStaleIdx = i;
@@ -109,27 +109,27 @@ public:
     Entry& slot = entries[slotIdx];
     memcpy(slot.mac, mac, 6);
     slot.masterDistance = masterDistance;
-    slot.lastSeenMillis = nowMillis;
+    slot.lastSeenMs = nowMs;
     slot.valid = true;
 
     return masterDistance < bestOther ? masterDistance : bestOther;
   }
 
   // Freshest in-range neighbor with masterDistance strictly less than ownDistance.
-  bool selectNextHop(uint8_t ownDistance, uint32_t nowMillis, uint8_t* outMac) const {
+  bool selectNextHop(uint8_t ownDistance, uint64_t nowMs, uint8_t* outMac) const {
     const Entry* best = nullptr;
     for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i) {
       const Entry& e = entries[i];
       if (!e.valid)
         continue;
-      if (nowMillis - e.lastSeenMillis >= config::STALE_PEER_THRESHOLD_MS)
+      if (nowMs - e.lastSeenMs >= config::STALE_PEER_THRESHOLD_MS)
         continue;
       if (e.masterDistance >= ownDistance)
         continue;
-      // Freshest = largest lastSeenMillis (most recent). nowMillis is monotonic
-      // per boot; observe() only ever stores nowMillis values, so no wrap concern
+      // Freshest = largest lastSeenMs (most recent). nowMs is monotonic
+      // per boot; observe() only ever stores nowMs values, so no wrap concern
       // within the staleness window.
-      if (!best || e.lastSeenMillis > best->lastSeenMillis)
+      if (!best || e.lastSeenMs > best->lastSeenMs)
         best = &e;
     }
     if (!best)
@@ -139,15 +139,15 @@ public:
   }
 
   // Smallest masterDistance across valid entries within STALE_PEER_THRESHOLD_MS
-  // of nowMillis. 0xFF if none are fresh. Used by Mesh::processMasterBeacon to
+  // of nowMs. 0xFF if none are fresh. Used by Mesh::processMasterBeacon to
   // derive currentMaster.distance from live neighbor state (issue #45).
-  uint8_t minFreshDistance(uint32_t nowMillis) const {
+  uint8_t minFreshDistance(uint64_t nowMs) const {
     uint8_t best = 0xFF;
     for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i) {
       const Entry& e = entries[i];
       if (!e.valid)
         continue;
-      if (nowMillis - e.lastSeenMillis >= config::STALE_PEER_THRESHOLD_MS)
+      if (nowMs - e.lastSeenMs >= config::STALE_PEER_THRESHOLD_MS)
         continue;
       if (e.masterDistance < best)
         best = e.masterDistance;
@@ -169,7 +169,7 @@ private:
     uint8_t mac[6];
     uint8_t masterDistance;
     bool valid;
-    uint32_t lastSeenMillis;
+    uint64_t lastSeenMs;
   };
   Entry entries[config::LATTICE_NEIGHBOR_MAX]{};
 
@@ -184,12 +184,12 @@ private:
 
   // Pick a slot for a new neighbor: first invalid, else a stale one, else the
   // entry with the largest masterDistance (farthest from master).
-  Entry* allocateSlot(uint32_t nowMillis) {
+  Entry* allocateSlot(uint64_t nowMs) {
     for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i)
       if (!entries[i].valid)
         return &entries[i];
     for (size_t i = 0; i < config::LATTICE_NEIGHBOR_MAX; ++i)
-      if (nowMillis - entries[i].lastSeenMillis >= config::STALE_PEER_THRESHOLD_MS)
+      if (nowMs - entries[i].lastSeenMs >= config::STALE_PEER_THRESHOLD_MS)
         return &entries[i];
     Entry* farthest = &entries[0];
     for (size_t i = 1; i < config::LATTICE_NEIGHBOR_MAX; ++i)

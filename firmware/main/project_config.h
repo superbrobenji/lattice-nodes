@@ -14,7 +14,7 @@
 #define LATTICE_DEFAULT_LOG_LEVEL 4 // mirrors lattice::utils::LogLevel::LOG_NONE
 #endif
 
-#include <Arduino.h>
+#include <cstdint>
 #include "src/logging/Logger.h"
 #include "src/adapter/Adapter.h"
 
@@ -158,7 +158,7 @@ inline constexpr size_t LATTICE_ROUTE_TABLE_MAX = 16;
 // Downlink auto-registered forwarding peers (spec §2: "20-peer cap,
 // LRU-evicted"). Bounds the number of non-enrolled, non-master ESP-NOW peers a
 // node will auto-register while relaying/sending source-routed downlink
-// frames (registerDownlinkPeer, Mesh.cpp) — without this bound, an
+// frames (DownlinkRouter::registerDownlinkPeer, DownlinkRouter.cpp) — without this bound, an
 // RF attacker can craft ADAPTER_DATA frames with fresh distinct next-hop MACs
 // to exhaust the ~20-slot ESP-NOW peer table (no self-heal, no reboot),
 // blackholing legitimate downlink forwarding. Keep small: enrolled peers
