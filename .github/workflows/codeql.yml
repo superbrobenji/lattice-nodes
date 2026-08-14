@@ -22,7 +22,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: github/codeql-action/init@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           languages: cpp
           build-mode: manual
@@ -48,7 +48,7 @@ jobs:
           cmake -B tests/build tests/ -DCMAKE_BUILD_TYPE=Release
           cmake --build tests/build --target lattice_e2e --parallel 2
 
-      - uses: github/codeql-action/analyze@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           category: '/language:cpp'
           upload: failure-only
