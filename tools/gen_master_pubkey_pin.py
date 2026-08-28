@@ -9,11 +9,12 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUT = REPO_ROOT / "firmware/main/config/master_pubkey_pin.h"
 
-def die(msg):
+def die(msg) -> NoReturn:
     print(f"gen_master_pubkey_pin: {msg}", file=sys.stderr)
     sys.exit(1)
 
@@ -26,11 +27,15 @@ def main(argv):
         die(f"masterkey.json not found: {keyfile}")
     data = json.loads(keyfile.read_text())
     pub_b64 = data.get("publicKey") or data.get("PublicKey")
-    if not pub_b64:
-        die("publicKey field not found in masterkey.json")
-    pub = base64.b64decode(pub_b64)
+    pub_array = data.get("public_key")
+    if pub_b64:
+        pub = base64.b64decode(pub_b64)
+    elif pub_array is not None:
+        pub = bytes(pub_array)
+    else:
+        die("publicKey/public_key field not found in masterkey.json")
     if len(pub) != 32:
-        die(f"publicKey wrong length: {len(pub)}")
+        die(f"public key wrong length: {len(pub)}")
     mac_hex = re.sub(r"[^0-9a-fA-F]", "", mac_str)
     if len(mac_hex) != 12:
         die(f"MAC must be 6 bytes (12 hex chars): got {mac_str}")

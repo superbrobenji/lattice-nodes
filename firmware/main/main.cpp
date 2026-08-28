@@ -157,21 +157,26 @@ extern "C" void housekeeping_task_fn(void*) {
     // Phase I Task 10: unlike the old loop(), which `return`ed immediately in
     // this branch (skipping the trailing delay(1) entirely and effectively
     // busy-looping while unenrolled), this task always falls through to the
-    // single vTaskDelay(pdMS_TO_TICKS(10)) at the bottom — only the
-    // adapter/button work below is conditionally skipped. Same behavior for
-    // everything that must keep ticking (mesh.loop(), checkMasterTimeout(),
-    // DisplayManager, WDT reset), with a real yield guaranteed every pass.
+    // single vTaskDelay(pdMS_TO_TICKS(10)) at the bottom — only adapter data
+    // forwarding is conditionally skipped. Same behavior for everything that
+    // must keep ticking (mesh.loop(), checkMasterTimeout(), DisplayManager,
+    // WDT reset), with a real yield guaranteed every pass.
+    //
+    // ButtonHandler::tick() must run unconditionally, NOT gated behind
+    // skipDataForwarding: the config button is the only way to become master
+    // (and isMaster() is itself what makes tickEnrollmentBroadcast() return
+    // false). Gating it here would mean a fresh, unenrolled solo node with no
+    // master on the mesh can never use the button to become master — the
+    // exact button press meant to escape that state would never be polled.
     bool skipDataForwarding = mesh.tickEnrollmentBroadcast(nowMs);
 
     esp_task_wdt_reset();
 
-    if (!skipDataForwarding) {
-      if (adapter) {
-        adapter->loop();
-      }
-      lattice::app::ButtonHandler::tick(configButton, resetButton, mesh, greenLed, redLed,
-                                        isDevMode, devMasterFlag);
+    if (!skipDataForwarding && adapter) {
+      adapter->loop();
     }
+    lattice::app::ButtonHandler::tick(configButton, resetButton, mesh, greenLed, redLed, isDevMode,
+                                      devMasterFlag);
 
     vTaskDelay(pdMS_TO_TICKS(10)); // 100 Hz — real yield
   }
