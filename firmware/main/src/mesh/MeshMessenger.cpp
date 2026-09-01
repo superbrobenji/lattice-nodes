@@ -222,14 +222,16 @@ void MeshMessenger::enrollPeer(const uint8_t* mac, const uint8_t* /*publicKey32*
                                MeshTransport& transport) {
   // `publicKey32` (as forwarded by SerialAdapter::handleCompleteFrame from the
   // server's JOIN_ACK) is NOT the enrolling node's key — per the server's wire
-  // contract that field carries this master's OWN public key, echoed back for
-  // the node's benefit (see Enrollment::processJoinAck, which registers the
-  // master with it). The node's real key was cached in `peers` when its
-  // original JOIN_REQUEST was first heard (Mesh::handleReceivedMessage,
-  // MESH_TYPE_ENROLLMENT/isMaster branch) — that cached copy is the only
-  // correct source for both the peer registration below and the JOIN_ACK
-  // fingerprint. Using the wrong key here meant no node could ever pass its
-  // own fingerprint check (lattice-hub#178).
+  // contract that field carries this master's server-side identity key
+  // (ms.masterPublicKey from masterkey.json), which is unrelated to and NOT
+  // interchangeable with the on-device keypair actually used below for E2E
+  // (see the ack.enrollment_public_key comment further down). It must not be
+  // used as the enrolling node's own key either: the node's real key was
+  // cached in `peers` when its original JOIN_REQUEST was first heard
+  // (Mesh::handleReceivedMessage, MESH_TYPE_ENROLLMENT/isMaster branch) — that
+  // cached copy is the only correct source for the peer registration and JOIN_ACK
+  // fingerprint below. Conflating the two meant no node could ever pass its own
+  // fingerprint check (lattice-hub#178).
   const PeerInfo* cachedPeer = peers.find(mac);
   if (!cachedPeer) {
     LATTICE_LOGLN("MESH", "enrollPeer: no cached public key for this MAC — dropping ACK",
@@ -263,8 +265,16 @@ void MeshMessenger::enrollPeer(const uint8_t* mac, const uint8_t* /*publicKey32*
   ack.hop_count = 0;
   // Include first 4 bytes of approved node's pubkey as fingerprint
   memcpy(ack.data, nodePublicKey, 4);
-  // Include OUR public key so the enrolling node can register this master as
-  // an encrypted, routable peer in its own registry (see Enrollment::processJoinAck).
+  // Include OUR public key — this node's own on-device keypair — so the
+  // enrolling node registers the ACTUAL key this master will use for E2E
+  // ECDH (peerE2EKeys/masterE2EKeys both key off enrollment.getPrivateKey();
+  // see E2EKeyLookup.h). This must be enrollment.getPublicKey(), not the
+  // server-relayed publicKey32 (ms.masterPublicKey from masterkey.json) — that
+  // is a separate identity the server holds no matching on-device private key
+  // for, so using it here would pass the leaf's master_pubkey_pin check while
+  // permanently breaking E2E (ECDH would never agree on both sides). The pin
+  // itself must be generated from THIS node's real on-device key, not
+  // masterkey.json, to be consistent with what's actually sent here.
   memcpy(ack.enrollment_public_key, enrollment.getPublicKey(), 32);
   // Stamp the server-provided secondary-master identity, if any, so the
   // enrolling node can TOFU-learn its failover master from this same ACK
