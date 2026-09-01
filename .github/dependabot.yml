@@ -7,6 +7,15 @@ updates:
     labels:
       - dependencies
       - ci
+    groups:
+      codeql-action:
+        # init/analyze/upload-sarif must land on the same version — CodeQL's
+        # init step stamps a config file with its own version, and
+        # analyze/upload-sarif refuse to run against a config from a
+        # different version ("Loaded a configuration file for version
+        # X, but running version Y"). One atomic PR avoids that skew.
+        patterns:
+          - "github/codeql-action/*"
 
   - package-ecosystem: gitsubmodule
     directory: /
