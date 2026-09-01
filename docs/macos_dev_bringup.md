@@ -150,6 +150,69 @@ one of only two places in the firmware that ever call it (the other being the re
 factory-wipe double-hold). A `rst:0x1 (POWERON_RESET)` means something else caused the reboot
 (power cycle), not the button.
 
+## Dual-master setup
+
+Bench-verified end to end this session with two real boards. `DUAL_MASTER_MODE` is a **compile-time**
+constant (`Mesh.cpp`: `_dualMasterMode(lattice::config::DUAL_MASTER_MODE)`), not something the
+config button or EEPROM can toggle at runtime (see
+[lattice-nodes#116](https://github.com/superbrobenji/lattice-nodes/issues/116), which proposes
+changing that) — so setting it up means:
+
+1. **Set `DUAL_MASTER_MODE = true` in `project_config.h` and rebuild.** This is a local, uncommitted
+   edit for bench testing — not something to push to `main` (the shipped default is `false`,
+   single-master).
+2. **Reflash *every* board with this build — including your already-working primary master.**
+   Easy to miss: the primary doesn't need the flag to keep functioning as primary, but every node
+   that needs to correctly recognize a *second* master (beacon-processing logic in
+   `MasterBeacon.cpp`/`FrameAuthorizer.cpp`) needs it compiled in. A primary still running an old
+   `DUAL_MASTER_MODE=false` build won't misbehave on its own, but the mesh as a whole isn't
+   correctly in dual-master mode until every board is.
+3. **Both boards get the exact same `master_pubkey_pin.h`** — the one generated in Step 3 above,
+   from the *primary's* MAC. Do **not** regenerate a pin file from the second board's own MAC; the
+   pin is a single mesh-wide primary identity, not a per-board thing (see
+   [lattice-nodes#118](https://github.com/superbrobenji/lattice-nodes/issues/118) for how a board
+   knows whether *it itself* is primary or secondary — it's a local comparison against this same
+   pinned MAC, no second pin needed).
+4. **Read the second board's MAC and flash it**, same as Steps 1/5/6 above, using its own device
+   path.
+5. **Bring it up as master via the config button**, same as Step 7. It boots as leaf first, same
+   as any fresh board.
+6. **Wire up the hub side** — see `lattice-hub`'s
+   [`docs/macos_native_dev.md`](https://github.com/superbrobenji/lattice-hub/blob/main/docs/macos_native_dev.md)
+   "Dual-master setup" section for `SECONDARY_MASTER_MAC`/`DUAL_MASTER_ENABLED`/`SERIAL_PORT_SECONDARY`.
+
+### Worked example (this session's actual boards)
+
+| Role | MAC | Device path (at time of testing — **can shift on replug**, always re-check with `esptool.py read_mac`, don't assume) |
+|---|---|---|
+| Primary master | `ec:64:c9:5d:ac:18` | `/dev/cu.usbserial-3` (later `/dev/cu.usbserial-4` after a replug) |
+| Secondary master | `ec:64:c9:5d:22:20` | `/dev/cu.usbserial-0001` |
+
+Both boards were flashed from the identical build (`DUAL_MASTER_MODE=true`, same
+`master_pubkey_pin.h` pinned to the primary's MAC above). Bench-verified failover in both
+directions: unplugging either master left the other's health-report stream to the hub completely
+uninterrupted (confirmed via `/tmp/orchestrator.log` — each board's reports kept arriving on
+schedule regardless of the other's state). Replugging never self-healed on the hub side in either
+direction — see the hub doc's "Known issues" for why and how to recover.
+
+### Gotcha: verify your fixes actually survived, if you've been juggling git branches
+
+Hit this directly this session: after opening a PR from a fix branch, running
+`git reset --hard origin/main` to keep the local branch clean **reverted the fix in the working
+tree** — the PR wasn't merged yet at that point, so `origin/main` didn't have it. Every subsequent
+build silently used the unfixed code. It only surfaced because a *second* board with blank EEPROM
+hit the exact bug the fix was supposed to prevent — a board with already-populated EEPROM (like an
+existing working primary) won't show the regression at all, since the buggy code path only
+triggers on a truly first-time boot.
+
+If you've been resetting/switching branches mid-session and something that used to work stops
+working (or a bug that was supposedly fixed comes back) — grep the actual file content for the fix
+before assuming it's a new bug:
+```bash
+git log --oneline -1 -- <file>   # confirms which commit last touched it
+grep -n '<a line from the fix>' <file>   # confirms the fix is actually there right now
+```
+
 ## Known issues affecting this workflow
 
 - [lattice-nodes#111](https://github.com/superbrobenji/lattice-nodes/issues/111) — if a node's
@@ -158,5 +221,19 @@ factory-wipe double-hold). A `rst:0x1 (POWERON_RESET)` means something else caus
   affect a `SERIAL_ADAPTER` master, but will bite if you're also bringing up leaf/sensor nodes.
 - [lattice-hub#161](https://github.com/superbrobenji/lattice-hub/issues/161) /
   [#162](https://github.com/superbrobenji/lattice-hub/issues/162) — the orchestrator does not
-  auto-reconnect after a board is unplugged/replugged. After any physical disconnect, restart the
-  orchestrator process manually.
+  auto-reconnect after a board is unplugged/replugged, even on the exact same device path. After
+  any physical disconnect, restart the orchestrator process manually.
+- [lattice-hub#167](https://github.com/superbrobenji/lattice-hub/issues/167) — occasionally a
+  *restart* itself doesn't fully recover a connection (read loop gets stuck silently). If a fresh
+  restart doesn't produce a health report within the normal ~30-60s interval, try restarting again
+  rather than assuming the board itself is broken.
+- [lattice-nodes#116](https://github.com/superbrobenji/lattice-nodes/issues/116) — `DUAL_MASTER_MODE`
+  should be a runtime setting, not a compile-time flag requiring a mesh-wide reflash to toggle.
+- [lattice-nodes#117](https://github.com/superbrobenji/lattice-nodes/issues/117) — raising
+  `DEFAULT_LOG_LEVEL` above `LOG_NONE` for bench debugging currently doesn't compile cleanly out of
+  the box (several files, plus the override mechanism itself is fragile to include order). If you
+  need to bench-debug with real log output, read that issue first.
+- [lattice-nodes#118](https://github.com/superbrobenji/lattice-nodes/issues/118) — the display's
+  master indicator (decimal point) doesn't currently render for a master whose node ID is 0, which
+  is every master today. Don't rely on the display to distinguish master from leaf yet, let alone
+  primary from secondary.
