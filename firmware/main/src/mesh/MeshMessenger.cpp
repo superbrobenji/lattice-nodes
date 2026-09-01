@@ -241,8 +241,8 @@ void MeshMessenger::enrollPeer(const uint8_t* mac, const uint8_t* /*publicKey32*
   uint8_t nodePublicKey[32];
   memcpy(nodePublicKey, cachedPeer->publicKey, 32);
 
-  if (!lattice::mesh::registerPeerWithKey(mac, nodePublicKey, /*allowRekey=*/true, peers, enrollment,
-                                          dualMasterMode))
+  if (!lattice::mesh::registerPeerWithKey(mac, nodePublicKey, /*allowRekey=*/true, peers,
+                                          enrollment, dualMasterMode))
     return; // registry full — do not ACK an enrollment we could not record
 
   // Send JOIN_ACK unicast to new node

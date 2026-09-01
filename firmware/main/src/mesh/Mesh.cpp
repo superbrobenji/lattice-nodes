@@ -168,8 +168,7 @@ void Mesh::handleReceivedMessage(const uint8_t* srcMac, const mesh_message& msg)
       // allowRekey=false: a later forged ENROLLMENT for the same MAC must
       // not override the first key seen.
       lattice::mesh::registerPeerWithKey(msg.origin_mac_address, msg.enrollment_public_key,
-                                         /*allowRekey=*/false, peers, enrollment,
-                                         _dualMasterMode);
+                                         /*allowRekey=*/false, peers, enrollment, _dualMasterMode);
       enrollment.processRequest(msg);
     } else
       messenger.relayEnrollmentUplink(msg, deviceMacAddress, currentMaster, txState, peers,
