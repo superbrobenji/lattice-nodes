@@ -215,12 +215,31 @@ void MeshMessenger::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32,
              dualMasterMode, transport);
 }
 
-void MeshMessenger::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32,
+void MeshMessenger::enrollPeer(const uint8_t* mac, const uint8_t* /*publicKey32*/,
                                const uint8_t* secondaryMac, const uint8_t* secondaryPubKey32,
                                const uint8_t* deviceMac, OutboundSequenceState& txState,
                                PeerRegistry& peers, Enrollment& enrollment, bool dualMasterMode,
                                MeshTransport& transport) {
-  if (!lattice::mesh::registerPeerWithKey(mac, publicKey32, /*allowRekey=*/true, peers, enrollment,
+  // `publicKey32` (as forwarded by SerialAdapter::handleCompleteFrame from the
+  // server's JOIN_ACK) is NOT the enrolling node's key — per the server's wire
+  // contract that field carries this master's OWN public key, echoed back for
+  // the node's benefit (see Enrollment::processJoinAck, which registers the
+  // master with it). The node's real key was cached in `peers` when its
+  // original JOIN_REQUEST was first heard (Mesh::handleReceivedMessage,
+  // MESH_TYPE_ENROLLMENT/isMaster branch) — that cached copy is the only
+  // correct source for both the peer registration below and the JOIN_ACK
+  // fingerprint. Using the wrong key here meant no node could ever pass its
+  // own fingerprint check (lattice-hub#178).
+  const PeerInfo* cachedPeer = peers.find(mac);
+  if (!cachedPeer) {
+    LATTICE_LOGLN("MESH", "enrollPeer: no cached public key for this MAC — dropping ACK",
+                  LogLevel::LOG_ERROR);
+    return;
+  }
+  uint8_t nodePublicKey[32];
+  memcpy(nodePublicKey, cachedPeer->publicKey, 32);
+
+  if (!lattice::mesh::registerPeerWithKey(mac, nodePublicKey, /*allowRekey=*/true, peers, enrollment,
                                           dualMasterMode))
     return; // registry full — do not ACK an enrollment we could not record
 
@@ -243,7 +262,7 @@ void MeshMessenger::enrollPeer(const uint8_t* mac, const uint8_t* publicKey32,
   memcpy(ack.last_hop_mac_address, deviceMac, 6);
   ack.hop_count = 0;
   // Include first 4 bytes of approved node's pubkey as fingerprint
-  memcpy(ack.data, publicKey32, 4);
+  memcpy(ack.data, nodePublicKey, 4);
   // Include OUR public key so the enrolling node can register this master as
   // an encrypted, routable peer in its own registry (see Enrollment::processJoinAck).
   memcpy(ack.enrollment_public_key, enrollment.getPublicKey(), 32);
