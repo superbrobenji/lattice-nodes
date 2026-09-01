@@ -1,4 +1,5 @@
 #include "AdapterFactory.h"
+#include "project_config.h"
 #include "src/logging/Logger.h"
 #include "src/error/Error.h"
 #include "src/persistence/eeprom/EepromDeviceConfig.h"
@@ -81,10 +82,13 @@ void AdapterFactory::initializeDefaultsIfUnset() {
     return; // Don't initialize EEPROM in dev mode
   }
 
-  // Check if adapter type is unset (0xFF) and set default if needed
+  // loadAdapterType() itself returns 0 (UNKNOWN_ADAPTER) when the NVS key was
+  // never written (EepromDeviceConfig.cpp's nvsGetU8(..., 0)) — that's the
+  // real "unset" sentinel on a blank board, not 0xFF. Persist the configured
+  // default so createFromEEPROM() has a valid type to load afterward.
   uint8_t currentType = lattice::eeprom::loadAdapterType();
-  if (currentType == 0xFF) {
-    lattice::eeprom::saveAdapterType(adapterTypeToEEPROM(adapter_types::PIR_ADAPTER));
+  if (currentType == adapterTypeToEEPROM(adapter_types::UNKNOWN_ADAPTER)) {
+    lattice::eeprom::saveAdapterType(adapterTypeToEEPROM(lattice::config::DEFAULT_ADAPTER));
   }
 }
 
