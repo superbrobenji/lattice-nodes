@@ -126,6 +126,13 @@ first-time-setup step (including a build-free walkthrough for readers without pr
 experience) is covered in full in
 [`docs/getting_started.md`](docs/getting_started.md).
 
+**On macOS, bringing up a real master node against a real `lattice-hub`** needs a different path
+than the one above — Docker Desktop can't pass a host USB-serial device into `lattice-hub`'s
+orchestrator container, and a fresh board's first boot has its own set of gotchas (manual
+BOOT-button entry, the config-button toggle-not-set role semantics, generating a pin file against
+a *real* hub key vs. the docs' synthetic bench-test one). See
+[`docs/macos_dev_bringup.md`](docs/macos_dev_bringup.md) for the full walkthrough.
+
 ---
 
 ## `project_config.h` Reference
