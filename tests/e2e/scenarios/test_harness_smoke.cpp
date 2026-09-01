@@ -181,6 +181,8 @@ TEST(FakeHubTest, ReceivesHealthReportAndAnswersHealthReq) {
 
   // DEFAULT_PEERS placeholder MACs are now stripped automatically by
   // SimNode::boot() (see SimNode.cpp) -- no per-test workaround needed.
+  size_t masterPeersBeforeRequest = master->with(
+      [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.count(); });
 
   // Nothing sent yet: the 30s periodic interval hasn't elapsed and no
   // HEALTH_REQ has been issued. Unrelated to the Task 6b fix.
@@ -217,14 +219,27 @@ TEST(FakeHubTest, ReceivesHealthReportAndAnswersHealthReq) {
 
   // approveEnrollment() exercises FakeHub's remaining surface (sendFrame via the
   // JOIN_ACK it builds) and drives a real Mesh::enrollPeer() call on the master.
-  size_t masterPeersBefore = master->with(
-      [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.count(); });
+  //
+  // The master now caches the node's real public key as soon as it first
+  // relays the node's JOIN_REQUEST (Mesh::handleReceivedMessage,
+  // MESH_TYPE_ENROLLMENT/isMaster branch) rather than waiting for approval --
+  // MeshMessenger::enrollPeer needs that cached copy to build a correct
+  // JOIN_ACK fingerprint, since the server's JOIN_ACK response never carries
+  // the node's own key back down (lattice-hub#178). So `node` is already a
+  // registered peer by this point in the flow, before approval; assert
+  // against the pre-request baseline instead of a before/after-approval delta.
+  EXPECT_EQ(masterPeersBeforeRequest + 1, master->with([](lattice::mesh::Mesh& m,
+                                                           lattice::adapter::Adapter*) {
+              return m.peers.count();
+            }))
+      << "master must register the node as a peer by the time its JOIN_REQUEST is relayed";
+
   hub.approveEnrollment(node->mac(), enr->enrollment_public_key);
   world.run(50);
   size_t masterPeersAfter = master->with(
       [](lattice::mesh::Mesh& m, lattice::adapter::Adapter*) { return m.peers.count(); });
-  EXPECT_EQ(masterPeersAfter, masterPeersBefore + 1)
-      << "master must register the approved node as a peer";
+  EXPECT_EQ(masterPeersAfter, masterPeersBeforeRequest + 1)
+      << "master must still have exactly the approved node registered as a peer after approval";
 }
 
 // Exercises the surface the previous test's reconciliation note flagged as

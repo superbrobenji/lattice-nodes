@@ -156,9 +156,21 @@ void Mesh::handleReceivedMessage(const uint8_t* srcMac, const mesh_message& msg)
 
   switch (msg.message_type) {
   case MESH_TYPE_ENROLLMENT:
-    if (isMaster)
+    if (isMaster) {
+      // Cache the enrolling node's real Curve25519 public key now, while we
+      // have it (this is the only point the master ever sees it directly —
+      // the server's later JOIN_ACK response echoes back only a 4-byte
+      // fingerprint plus this master's OWN public key, never the node's).
+      // Without this, MeshMessenger::enrollPeer had nothing correct to build
+      // the outbound JOIN_ACK's fingerprint from, so every node's
+      // Enrollment::processJoinAck fingerprint check failed permanently —
+      // no leaf could ever complete enrollment (lattice-hub#178).
+      // allowRekey=false: a later forged ENROLLMENT for the same MAC must
+      // not override the first key seen.
+      lattice::mesh::registerPeerWithKey(msg.origin_mac_address, msg.enrollment_public_key,
+                                         /*allowRekey=*/false, peers, enrollment, _dualMasterMode);
       enrollment.processRequest(msg);
-    else
+    } else
       messenger.relayEnrollmentUplink(msg, deviceMacAddress, currentMaster, txState, peers,
                                       enrollment, e2eKeys, uplinkRouter, neighbors, transport);
     break;
