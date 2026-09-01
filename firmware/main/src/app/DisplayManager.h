@@ -46,9 +46,10 @@ struct DisplayManager {
       return;
     }
 
-    if (nodeId == 0) {
-      display.show(0, false);
-    } else if (isMaster) {
+    // isMaster decides the indicator, not nodeId: masters bypass hub ID
+    // assignment, so a real master's nodeId is 0 (issue #118) — checking
+    // nodeId == 0 first used to swallow the decimal point on every master.
+    if (isMaster) {
       display.showWithDP(value, false);
     } else {
       display.show(value, false);

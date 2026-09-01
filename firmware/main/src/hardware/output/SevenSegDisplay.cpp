@@ -139,6 +139,10 @@ uint8_t SevenSegDisplay::encodeDigit(int d) {
 }
 
 void SevenSegDisplay::setSegments(const uint8_t (&segs)[4]) {
+#ifdef UNIT_TEST
+  for (int i = 0; i < 4; ++i)
+    _lastSegs[i] = segs[i];
+#endif
   start();
   writeByte(0x40); // automatic address increment mode
   stop();

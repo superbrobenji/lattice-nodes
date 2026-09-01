@@ -96,7 +96,7 @@ TEST_F(DisplayManagerTest, RedrawsOnceEnrolledAfterPreEnrollBlink) {
   int afterEnrolledDraw = _mockDigitalWriteCallCount;
   EXPECT_GT(afterEnrolledDraw, 0);
 
-  advanceMillis(500); // cross the blink toggle's 500ms threshold
+  advanceMillis(500);                          // cross the blink toggle's 500ms threshold
   DisplayManager::tick(disp, false, false, 0); // drop out of enrolled -> blink path
   int afterBlink = _mockDigitalWriteCallCount;
   EXPECT_GT(afterBlink, afterEnrolledDraw);
@@ -105,4 +105,17 @@ TEST_F(DisplayManagerTest, RedrawsOnceEnrolledAfterPreEnrollBlink) {
   // the display currently shows a blink dash, not the number.
   DisplayManager::tick(disp, true, false, 5);
   EXPECT_GT(_mockDigitalWriteCallCount, afterBlink);
+}
+
+// Issue #118: masters bypass the hub's ID-assignment flow, so every real
+// master's nodeId is 0. tick() used to check nodeId == 0 *before* isMaster,
+// so the documented decimal-point master indicator never rendered on an
+// actual master — it showed a plain "0", indistinguishable from an unset ID.
+TEST_F(DisplayManagerTest, MasterWithNodeIdZeroRendersDecimalPoint) {
+  SevenSegDisplay disp(4, 5);
+
+  DisplayManager::tick(disp, /*enrolled=*/true, /*isMaster=*/true, /*nodeId=*/0);
+  EXPECT_GT(_mockDigitalWriteCallCount, 0) << "master must draw something";
+  EXPECT_NE(disp.testLastSegments()[3] & 0x80, 0)
+      << "master with nodeId 0 must light the decimal point (bit7 of the last digit)";
 }

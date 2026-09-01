@@ -26,9 +26,20 @@ public:
 
   void clear();
 
+#ifdef UNIT_TEST
+  // Host-test hook: the raw segment bytes most recently pushed to the chip by
+  // setSegments() (bit7 = DP). Lets DisplayManager tests assert *what* was
+  // rendered (e.g. the master decimal point, issue #118), not just that a
+  // write happened. Compiled out of firmware.
+  const uint8_t* testLastSegments() const { return _lastSegs; }
+#endif
+
 private:
   uint8_t _dioPin, _clkPin;
   uint8_t _brightness;
+#ifdef UNIT_TEST
+  uint8_t _lastSegs[4] = {0, 0, 0, 0};
+#endif
 
   void start();
   void stop();
