@@ -174,6 +174,11 @@ void SerialAdapter::handleCompleteFrame(const uint8_t* data, size_t len) {
         meshRef->debugDumpRadio();
         for (size_t i = 0; i < meshRef->getPeerCount(); ++i) {
           const lattice::mesh::PeerInfo& p = meshRef->getPeerList()[i];
+          // Only read inside LATTICE_LOGF below, which compiles to a no-op
+          // when LATTICE_DEFAULT_LOG_LEVEL is NONE (the production
+          // default) — the explicit cast keeps p from flagging as unused
+          // in that build ([[maybe_unused]] isn't honored by CodeQL here).
+          (void)p;
           // Phase I Task 6 (NN): %lu -> %llu — lastSeenMs widened uint32_t ->
           // uint64_t (FF); nano-format (CONFIG_LIBC_NEWLIB_NANO_FORMAT=y)
           // requires an exact-width specifier match.

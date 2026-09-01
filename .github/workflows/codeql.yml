@@ -63,8 +63,8 @@ jobs:
         with:
           patterns: |
             -tests/build/**
-            -main/src/mesh/serialization/nanopb/**
-            -main/lib/lattice-protocol/**
+            -firmware/main/src/mesh/serialization/nanopb/**
+            -firmware/main/lib/lattice-protocol/**
           input: sarif-results/cpp.sarif
           output: sarif-results/cpp.sarif
 
