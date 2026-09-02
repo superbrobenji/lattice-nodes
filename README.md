@@ -159,7 +159,7 @@ Every constant a first-time user should review before their first flash
 | `SEVSEG_DATA_PIN` / `SEVSEG_CLK_PIN` | `23` / `22` | TM1637 seven-segment display DIO/CLK. |
 | `ENABLE_SEVSEG_DISPLAY` | `true` | Set `false` if no display is wired up. |
 | `DEFAULT_PEERS` | *(2 placeholder MACs)* | Initial ESP-NOW peer list written to EEPROM on first boot (non-dev-mode, only if EEPROM has none yet). Replace with your real device MACs before flashing. |
-| `DEFAULT_LOG_LEVEL` | `LogLevel::LOG_NONE` | Verbosity of serial log output. **Must stay `LOG_NONE`** on any `SERIAL_ADAPTER` node talking to the hub — log text would corrupt the framed protocol on the shared UART. |
+| `DEFAULT_LOG_LEVEL` | `LogLevel::LOG_NONE` | Verbosity of serial log output. **Must stay `LOG_NONE`** on any `SERIAL_ADAPTER` node talking to the hub — log text would corrupt the framed protocol on the shared UART. Derived from `LATTICE_DEFAULT_LOG_LEVEL` in `src/logging/LogLevelConfig.h`; for bench debugging raise it there or build with `idf.py -DLATTICE_DEFAULT_LOG_LEVEL=0 build` (0=DEBUG … 4=NONE). |
 | `DEFAULT_TX_POWER_PRESET` | `TxPowerPreset::OUTDOOR` | Named RF power preset (`SHORT_RANGE`=2dBm, `INDOOR`=14dBm, `OUTDOOR`=20dBm), persisted to EEPROM. |
 | `SIMULATE_MODE` | `0` | Enables serial-injected fake sensor events for hardware-free dev/testing. Never enable in production. |
 | `MAX_HOPS` | `8` | Maximum relay hops across the mesh. |

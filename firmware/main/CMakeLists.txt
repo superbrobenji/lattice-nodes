@@ -92,3 +92,15 @@ target_include_directories(${COMPONENT_LIB} PUBLIC
   src/persistence
   src/persistence/eeprom
 )
+
+# Compile-time log level override (issue #117). `idf.py -DLATTICE_DEFAULT_LOG_LEVEL=<0..4> build`
+# creates a CMake cache entry; forward it as a preprocessor define so it wins over the #ifndef
+# default in src/logging/LogLevelConfig.h in every translation unit of this component, with no
+# source edit (0=DEBUG 1=INFO 2=WARN 3=ERROR 4=NONE). Unset (the shipped default) changes nothing.
+# CI's build-log-error job uses this to compile the LATTICE_LOG* call sites that fold to ((void)0)
+# under the default. The cache entry persists in the build directory — use a separate `-B <dir>`
+# or `idf.py fullclean` to return to the default.
+if(DEFINED LATTICE_DEFAULT_LOG_LEVEL)
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    LATTICE_DEFAULT_LOG_LEVEL=${LATTICE_DEFAULT_LOG_LEVEL})
+endif()

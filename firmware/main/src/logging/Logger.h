@@ -5,42 +5,19 @@
 #include <cstdarg>
 #include <cstdio>
 
-#ifndef LATTICE_LOG_LEVEL
-#define LATTICE_LOG_LEVEL 3 // 0=none 1=error 2=warn 3=info 4=debug
-#endif
-
-#if LATTICE_LOG_LEVEL >= 4
-#define LOG_D(tag, fmt, ...)                                                                       \
-  do {                                                                                             \
-    char _buf[128];                                                                                \
-    snprintf(_buf, sizeof(_buf), fmt, ##__VA_ARGS__);                                              \
-    Logger::logln(tag, _buf, LogLevel::LOG_DEBUG);                                                 \
-  } while (0)
-#else
-#define LOG_D(tag, fmt, ...)                                                                       \
-  do {                                                                                             \
-  } while (0)
-#endif
-
 // ---------------------------------------------------------------------------------------------
 // LATTICE_LOG / LATTICE_LOGLN — compile-time log-level gating (design doc §1, Phase G).
 //
-// Numeric values mirror lattice::utils::LogLevel exactly (DEBUG=0 .. NONE=4) so the #if below
-// can compare against it directly, without needing the enum type available yet at this point in
-// the header. When LATTICE_DEFAULT_LOG_LEVEL == LOG_NONE (the production default — see
-// project_config.h §6 "Logging"), both macros fold to ((void)0): the tag/message/level arguments
-// are never evaluated, so format strings and String concatenations at call sites never reach the
-// translation unit's .rodata / heap. Otherwise they route to the existing runtime-dispatched
-// Logger::log/logln (unchanged behaviour).
-#define LATTICE_LOG_LEVEL_NONE 4
-
-// project_config.h defines LATTICE_DEFAULT_LOG_LEVEL above its own #include of this header, so
-// that value is authoritative when present. This fallback only covers translation units that
-// include Logger.h directly without going through project_config.h first; it is pinned to
-// LOG_NONE (the production default) so such a TU never silently gets logging turned on.
-#ifndef LATTICE_DEFAULT_LOG_LEVEL
-#define LATTICE_DEFAULT_LOG_LEVEL LATTICE_LOG_LEVEL_NONE
-#endif
+// LATTICE_DEFAULT_LOG_LEVEL and LATTICE_LOG_LEVEL_NONE come from LogLevelConfig.h — the single
+// source of truth shared with project_config.h (issue #117) — so the #if below sees the same value
+// in every translation unit regardless of include order. Numeric values mirror
+// lattice::utils::LogLevel exactly (DEBUG=0 .. NONE=4; static_assert'd after the enum below) so the
+// #if can compare against them without needing the enum type available yet at this point in the
+// header. When LATTICE_DEFAULT_LOG_LEVEL == LOG_NONE (the production default), both macros fold
+// to ((void)0): the tag/message/level arguments are never evaluated, so format strings and String
+// concatenations at call sites never reach the translation unit's .rodata / heap. Otherwise they
+// route to the existing runtime-dispatched Logger::log/logln (unchanged behaviour).
+#include "LogLevelConfig.h"
 
 #if LATTICE_DEFAULT_LOG_LEVEL == LATTICE_LOG_LEVEL_NONE
 #define LATTICE_LOG(tag, msg, level) ((void)0)
@@ -60,15 +37,14 @@
 // LOG_NONE they ran (and the format strings stayed in .rodata) even though the
 // LOGLN call itself folded to ((void)0). LATTICE_LOGF closes that gap by gating the
 // snprintf and its format string inside the same #if as LATTICE_LOG/LATTICE_LOGLN
-// above (mirrors the LOG_D pattern), so under LOG_NONE the whole call — buffer,
+// above, so under LOG_NONE the whole call — buffer,
 // snprintf, and format-string literal — folds to ((void)0) and is eligible for the
 // linker to drop from .rodata via -fdata-sections/--gc-sections.
 //
 // Buffer size: 128 bytes. Audited every existing snprintf+LATTICE_LOGLN call site
 // being migrated onto this macro; the largest local buffer among them was 96 bytes
 // (Error.h checkEsp, ErrorCore.cpp signalError, EepromCore.cpp persistOrEscalate,
-// SerialAdapter.cpp onMeshDataImpl). 128 covers all of them with headroom, and
-// matches LOG_D's existing buffer size above for consistency.
+// SerialAdapter.cpp onMeshDataImpl). 128 covers all of them with headroom.
 #if LATTICE_DEFAULT_LOG_LEVEL == LATTICE_LOG_LEVEL_NONE
 #define LATTICE_LOGF(tag, level, fmt, ...) ((void)0)
 #else
@@ -90,6 +66,9 @@ enum class LogLevel : uint8_t {
   LOG_ERROR = 3,
   LOG_NONE = 4
 };
+static_assert(static_cast<int>(LogLevel::LOG_NONE) == LATTICE_LOG_LEVEL_NONE,
+              "LATTICE_LOG_LEVEL_NONE (LogLevelConfig.h) must mirror LogLevel::LOG_NONE — the "
+              "LATTICE_LOG* compile-time gating above compares the macros, not the enum.");
 
 class Logger {
 public:

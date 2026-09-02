@@ -53,3 +53,30 @@ jobs:
           path: |
             firmware/build/*.bin
             firmware/build/size_info/
+
+  # Issue #117: at the shipped LATTICE_DEFAULT_LOG_LEVEL (LOG_NONE) the LATTICE_LOG /
+  # LATTICE_LOGLN / LATTICE_LOGF call sites fold to ((void)0) and are never compiled, so
+  # the job above cannot catch errors in them (nor in anything behind
+  # `#if LATTICE_DEFAULT_LOG_LEVEL != LATTICE_LOG_LEVEL_NONE`). Build once more at
+  # LOG_ERROR so that code is type-checked. The level is injected as a CMake cache entry
+  # that firmware/main/CMakeLists.txt forwards as a -D define; the shipped default and
+  # the job above are unchanged. Compile check only: no size report, no artifacts.
+  build-log-error:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Stub master_pubkey_pin.h from placeholder for CI
+        run: cp firmware/main/config/master_pubkey_pin.h.example firmware/main/config/master_pubkey_pin.h
+
+      - name: Build with ESP-IDF at LATTICE_DEFAULT_LOG_LEVEL=3 (LOG_ERROR)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.1
+          target: esp32
+          path: firmware
+          command: idf.py -DLATTICE_DEFAULT_LOG_LEVEL=3 build

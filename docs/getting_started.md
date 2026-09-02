@@ -371,7 +371,7 @@ tune it.
 | `SEVSEG_DATA_PIN` / `SEVSEG_CLK_PIN` | GPIO pins for the optional seven-segment status display. | Defaults are `23` / `22`. |
 | `ENABLE_SEVSEG_DISPLAY` | Whether the firmware drives a seven-segment display at all. | `true` if you have the display wired up; `false` if you don't (saves a little overhead and frees those pins). |
 | `DEFAULT_PEERS` | The initial list of other nodes' MAC addresses, written into storage on first boot. Ships with two obvious placeholder addresses and a `TODO: Replace these` comment. | Fine to leave as placeholders for your very first single-board smoke test (a lone node has no peers to talk to yet). Once you have real hardware to pair, get each node's real MAC address from its own serial output on first boot (see [Step 7](#9-step-7-first-boot--provisioning)) and update this list, then reflash. |
-| `DEFAULT_LOG_LEVEL` | How much debug text the firmware prints over serial. **For any node using `SERIAL_ADAPTER` to talk to the hub, this must stay `LOG_NONE`** — any extra text corrupts the binary protocol the hub expects on that same wire. | Leave at `LOG_NONE`. Only change this (to `LOG_DEBUG` or similar) for bench-testing a node that is *not* simultaneously talking to a hub over the same USB connection. |
+| `DEFAULT_LOG_LEVEL` | How much debug text the firmware prints over serial. **For any node using `SERIAL_ADAPTER` to talk to the hub, this must stay `LOG_NONE`** — any extra text corrupts the binary protocol the hub expects on that same wire. | Leave at `LOG_NONE`. Only raise it for bench-testing a node that is *not* simultaneously talking to a hub over the same USB connection — and do that via `LATTICE_DEFAULT_LOG_LEVEL` in `src/logging/LogLevelConfig.h`, or without a source edit with `idf.py -DLATTICE_DEFAULT_LOG_LEVEL=0 build` (0=`LOG_DEBUG` … 4=`LOG_NONE`). This constant is derived from that macro, so editing it here is not the knob. |
 | `DEFAULT_TX_POWER_PRESET` | Named radio transmit-power preset: `SHORT_RANGE` (same room), `INDOOR` (through walls), `OUTDOOR` (maximum range). | Ships as `OUTDOOR` — reasonable to leave as-is unless you specifically want to reduce range/interference. |
 | `SIMULATE_MODE` | Enables fake, serial-injected sensor events for testing without real sensor hardware. | Leave at `0` (off) for a real flash. |
 
@@ -683,8 +683,9 @@ data transfer, not a charge-only cable.
 
 **Flashing succeeds, but I never see `LATTICE_PUBKEY:...` or anything else
 in the monitor.**
-Make sure `DEFAULT_LOG_LEVEL` in `project_config.h` wasn't left at something
-other than intended, and that you're opening the monitor at the same port
+Make sure `LATTICE_DEFAULT_LOG_LEVEL` in `src/logging/LogLevelConfig.h` (or a
+`-DLATTICE_DEFAULT_LOG_LEVEL` build flag) wasn't left at something other than
+intended, and that you're opening the monitor at the same port
 you flashed to. If truly nothing prints at all and no LED lights either,
 see the "Total hardware failure" row in the [LED table](#10-step-8-understanding-the-leds-and-display) —
 double check your board is genuinely powered and your LED/board wiring

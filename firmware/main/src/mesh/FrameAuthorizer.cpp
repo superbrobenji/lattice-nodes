@@ -9,6 +9,8 @@
 namespace lattice {
 namespace mesh {
 
+using namespace lattice::utils;
+
 AuthResult FrameAuthorizer::authorize(const mesh_message& msg, bool isMaster, bool addressedToSelf,
                                       const MasterInfo& currentMaster, PeerRegistry& peers,
                                       Enrollment& enrollment, E2EKeyStore& e2eKeys,

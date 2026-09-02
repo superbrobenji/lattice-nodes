@@ -4,6 +4,8 @@
 namespace lattice {
 namespace mesh {
 
+using namespace lattice::utils;
+
 PendingRelayQueue::PendingRelayQueue() {
   _queue = xRingbufferCreateStatic(sizeof(_storage), RINGBUF_TYPE_NOSPLIT, _storage, &_queueStruct);
 }
