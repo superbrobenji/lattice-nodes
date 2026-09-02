@@ -4,7 +4,8 @@ Lattice follows Tiger-Style engineering principles: safety first, performance al
 
 ## 0. Quick checklist before opening a PR
 
-- [ ] `arduino-cli compile -e --fqbn esp32:esp32:esp32da main` builds with **no warnings** (run locally — not in CI).
+- [ ] `cd firmware && idf.py build` (ESP-IDF v5.5.1) builds with **no warnings** — CI's
+      **Firmware Build** job compiles it too, but check locally first.
 - [ ] `clang-format -style=file` applied; `git diff --check` shows no whitespace errors.
 - [ ] No `new`, `malloc`, or unbounded `std::vector` growth after setup.
 - [ ] All errors funnel through `src/error/Error.h` (`lattice::err::*`).
@@ -43,17 +44,22 @@ Assertions live in unit-tests, not production.
 
 ## 6. CI pipeline (GitHub Actions)
 
-The workflow runs automatically on every push and PR:
+The workflows run automatically on every push to `main`/`develop` and every PR:
 
 - **unit-tests** — CMake build + CTest (Linux native, no ESP32 toolchain needed)
+- **e2e** — the host-side multi-node mesh simulation suite (ctest label `e2e`)
+- **firmware-build** — ESP-IDF v5.5.1 `idf.py build` + size report (stubs `master_pubkey_pin.h`
+  from the committed `.example`)
 - **lint-format** — `clang-format --dry-run --Werror` over all `main/src/*.{h,cpp}`
 - **static-analysis** — `cppcheck` with `--error-exitcode=1`
+- **proto-sync** — regenerates `mesh.pb.h`/`.c` from the `lattice-protocol` submodule and fails on
+  drift (`tools/gen_mesh_pb.sh --check`)
 
-PR merges are blocked until all three jobs are green.
+PR merges are blocked until every job is green. (CodeQL and Dependency Review run alongside
+these as security gates.)
 
-> **Note:** Arduino / ESP32 toolchain compilation is not in CI (large binary
-> download, ~10 min). Run `arduino-cli compile --fqbn esp32:esp32:esp32da main`
-> locally before submitting a PR that touches firmware source.
+> **Note:** the firmware is built with ESP-IDF only — there is no Arduino IDE / `arduino-cli`
+> path. See the README's Requirements / Quick Start for toolchain setup.
 
 ---
 Thank you for keeping Lattice rock-solid! 💪

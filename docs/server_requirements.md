@@ -55,33 +55,33 @@ There are **two different, related-but-distinct wire schemas** in this system:
    == 200)`. This is protocol v5 of the RF mesh wire format. It has 15 fields, including several
    (`route_len`, `route_path`, `auth_tag`, `auth_path`) that carry mesh-internal routing/crypto
    metadata.
-2. **`mesh_MeshMessage`** (`firmware/main/src/mesh/serialization/mesh.pb.h`) — a separate,
-   hand-maintained **nanopb** (protobuf-C) message that the master encodes to / decodes from over
-   the USB-serial link. **This is the schema the server actually implements.** No `.proto` source
-   file for this schema is checked into this repo — `mesh.pb.h`/`mesh.pb.c` are hand-authored
-   nanopb output, not generated from a tracked `.proto`.
+2. **`mesh_MeshMessage`** (`firmware/main/src/mesh/serialization/mesh.pb.h`) — a separate
+   **nanopb** (protobuf-C) message that the master encodes to / decodes from over the USB-serial
+   link. **This is the schema the server actually implements.** `mesh.pb.h`/`mesh.pb.c` are
+   generated from the submodule's `proto/mesh.proto` + `proto/mesh.options` by
+   `tools/gen_mesh_pb.sh`, and CI (`.github/workflows/proto-sync.yml`) fails if they drift from
+   the submodule pin — so the serial schema's *field set* is exactly the RF proto's field set.
 
 These two schemas are **not the same**, and not just in field count:
 
-- The RF struct's `route_len`/`route_path`/`auth_tag`/`auth_path` fields exist in the submodule's
-  canonical `proto/mesh.proto` (tags 12–14, 17) but the serial-side `mesh.pb.h` schema only carries
-  three of them — `routeLen`(12)/`routePath`(13)/`authTag`(14) — as *dead, always-unset* fields (no
-  `authPath` at all). `SerialFraming::encode()` (`firmware/main/src/adapter/serial/
-  SerialFraming.cpp`) simply never populates them when building an outbound serial frame. **The
+- The RF struct's `route_len`/`route_path`/`auth_tag`/`auth_path` fields exist in the serial-side
+  `mesh.pb.h` schema too (tags 12–14, 17), but only as *dead, always-unset* fields.
+  `SerialFraming::encode()` (`firmware/main/src/adapter/serial/SerialFraming.cpp`) simply never
+  populates them when building an outbound serial frame, and `decode()` ignores them. **The
   server cannot see mesh topology (route paths) or AEAD tags today — full stop.** See §4 and §9.
-- The serial schema additionally defines two fields the RF struct's canonical proto does not have
-  at the top level at all: `secondaryMasterMac`(15) and `secondaryPublicKey`(16). These are a
-  serial-only convenience projection of two 6/32-byte ranges inside the RF struct's `data[64]`
-  payload (`data[4..10]` and `data[10..42]`) — see §8 for why.
+- There are **no** top-level secondary-master fields: protocol v0.6.0 retired tags 15/16
+  (`secondaryMasterMac`/`secondaryPublicKey`) from both schemas. The dual-master secondary identity
+  travels *inside* a `JOIN_ACK`'s `data[64]` payload (`data[4..10]` = MAC, `data[10..42]` =
+  pubkey) — see §8b/§10.
 - Even the fields both schemas nominally share are handled asymmetrically by the encoder/decoder —
   see §3.
 
 **Why two schemas exist**: `mesh_message` is the RF/ESP-NOW mesh protocol, designed around what
 relaying nodes need (routing metadata, AEAD tags, hop tracking). The serial link only ever talks to
 one endpoint (the master) and one message shape flows in each direction, so the serial schema is
-deliberately narrower — but because it was hand-authored rather than derived mechanically from the
-RF proto, it has its own quirks (dead fields, an outdated `routePath` byte-array size — see §4) that
-a server implementer needs to know about rather than infer from the RF proto.
+deliberately narrower in what it actually *populates* — the field set itself is generated from the
+RF proto, but several fields are dead on the serial wire (see §4), which a server implementer needs
+to know about rather than infer from the RF proto.
 
 ---
 
@@ -94,20 +94,18 @@ Source: `firmware/main/src/adapter/serial/SerialFraming.h`/`.cpp`.
   - Master→server writes: `SerialAdapter::onMeshDataImpl` / `relayEnrollmentToServer`
     (`SerialAdapter.cpp`).
   - Server→master reads: `SerialFraming::injectByte()`'s state machine (`SerialFraming.cpp`).
-- **Max payload**: 256 bytes (`MAX_PAYLOAD`). The nanopb schema's theoretical worst-case encoded
-  size, if every optional field were set simultaneously, is 289 bytes (`mesh_MeshMessage_size` in
-  `mesh.pb.h`) — larger than `MAX_PAYLOAD`. In practice this never happens: `routeLen`/`routePath`/
-  `authTag` are never populated by `encode()` at all (§2/§4), and `public_key`/`secondaryMasterMac`/
-  `secondaryPublicKey` are only ever populated together on a `JOIN_ACK`, which comfortably fits
-  within 256 bytes on its own. The server does not need to special-case this — just be aware the
-  master will reject/reset-parse any incoming frame declaring a length over 256 bytes.
+- **Max payload**: 256 bytes (`MAX_PAYLOAD`). `mesh.pb.h` publishes no static
+  `mesh_MeshMessage_size` (field 17 `authPath` is callback-typed, see §4), but the fields
+  `encode()` can actually populate — everything except `routeLen`/`routePath`/`authTag`/`authPath`,
+  which are never set (§2/§4) — total well under 256 bytes even on a `JOIN_ACK` carrying a
+  `public_key` and a full 64-byte `data`. The server does not need to special-case this — just be
+  aware the master will reject/reset-parse any incoming frame declaring a length over 256 bytes.
 - **Field population is asymmetric by direction and by message type** — this matters for what the
   server must and must not rely on:
   - **`SerialFraming::encode()`** (master→server, i.e. what the server reads) always sets:
     `messageType`, `dataType`, `hopCount`, `epochNum`, `seqNum`, `protoVersion`, all three MAC
     fields, and `data` (always the full 64 bytes). It conditionally includes `public_key` (only for
-    `ENROLLMENT`/`JOIN_ACK` frames, and only if non-zero) and `secondaryMasterMac`/
-    `secondaryPublicKey` (only for `JOIN_ACK`, and only if non-zero).
+    `ENROLLMENT`/`JOIN_ACK` frames, and only if non-zero). Nothing else is ever set.
   - **`SerialFraming::decode()`** (server→master, i.e. what the server writes) has an important
     asymmetry: for **`JOIN_ACK` and `SERIAL_CMD_BROADCAST`** frames it trusts the server's
     `originMacAddress`/`lastHopMacAddress` values as sent. For **every other message type** it
@@ -124,10 +122,11 @@ Source: `firmware/main/src/adapter/serial/SerialFraming.h`/`.cpp`.
 firmware code paths actually consume, by message type:
   - `SERIAL_CMD_BROADCAST` (server→node commands): `messageType`, `dataType`, `targetMacAddress`,
     `data`. See §6/§7.
-  - `JOIN_ACK` (enrollment approval): `messageType`, `targetMacAddress`, `public_key`, optionally
-    `secondaryMasterMac`/`secondaryPublicKey`. See §8.
+  - `JOIN_ACK` (enrollment approval): `messageType`, `targetMacAddress`, `public_key`, and — for
+    dual-master deployments only — the secondary master's identity inside `data[4..42]`. See §8.
   - Everything else on an outbound frame (`originMacAddress`, `lastHopMacAddress`, `hopCount`,
-    `epochNum`, `seqNum`, `protoVersion`, `routeLen`/`routePath`/`authTag`) is either overwritten,
+    `epochNum`, `seqNum`, `protoVersion`, `routeLen`/`routePath`/`authTag`/`authPath`) is either
+    overwritten,
     ignored, or not consumed by any current firmware code path for server→master traffic — don't
     spend engineering effort populating these precisely; leaving them zero-valued is safe.
 
@@ -135,12 +134,13 @@ firmware code paths actually consume, by message type:
 
 ## 4. Wire schema — the nanopb `mesh_MeshMessage` (what the server actually implements)
 
-Source: `firmware/main/src/mesh/serialization/mesh.pb.h` (nanopb-generated; verified directly, not
-just from research notes).
+Source: the submodule's `firmware/main/lib/lattice-protocol/proto/mesh.proto` +
+`proto/mesh.options`, from which `firmware/main/src/mesh/serialization/mesh.pb.h` is generated by
+`tools/gen_mesh_pb.sh` (CI-enforced, see `.github/workflows/proto-sync.yml`). Annotated copy:
 
 ```proto
-// NOT a tracked .proto file in this repo — this is the schema mesh.pb.h/.c
-// implement, reconstructed here for the server team to generate code from.
+// Mirror of the submodule's proto/mesh.proto with serial-wire annotations;
+// the byte capacities come from proto/mesh.options.
 syntax = "proto3";
 package mesh;
 
@@ -157,10 +157,10 @@ message MeshMessage {
   uint32 protoVersion        = 10;
   optional bytes public_key         = 11; // 32 bytes — enrollment/JOIN_ACK pubkey, see §8
   optional uint32 routeLen          = 12; // DEAD FIELD — never set by encode(); see §2
-  optional bytes  routePath         = 13; // DEAD FIELD — never set; 60-byte capacity (stale size, see note below)
+  optional bytes  routePath         = 13; // DEAD FIELD — never set; 48-byte capacity (MAX_HOPS 8 × 6)
   optional bytes  authTag           = 14; // DEAD FIELD — never set; AEAD tag never reaches serial
-  optional bytes  secondaryMasterMac   = 15; // 6 bytes — dual-master, JOIN_ACK only, see §8/§10
-  optional bytes  secondaryPublicKey   = 16; // 32 bytes — dual-master, JOIN_ACK only, see §8/§10
+  optional bytes  authPath          = 17; // DEAD FIELD — never set; no max_size in mesh.options, so
+                                          // nanopb makes it callback-typed; master skips it on decode
 }
 ```
 
@@ -180,10 +180,9 @@ Field-by-field notes:
 | 10 | `protoVersion` | Not validated on serial-received frames (§3). |
 | 11 | `public_key` | 32-byte X25519 pubkey. **Load-bearing for `ENROLLMENT`/`JOIN_ACK`** — see §8. |
 | 12 | `routeLen` | **Dead on the serial wire.** Never populated by `encode()`. Do not expect route-length data from the server-facing side. |
-| 13 | `routePath` | **Dead on the serial wire.** Never populated. Note the nanopb struct's byte-array capacity is `PB_BYTES_ARRAY_T(60)` — an even older size than the RF struct's current 48-byte (`MAX_HOPS(8) × 6`) capacity — this mismatch is harmless precisely because the field is never set, but is a sign this schema was hand-maintained rather than kept in lockstep with the RF proto. |
+| 13 | `routePath` | **Dead on the serial wire.** Never populated. Capacity `PB_BYTES_ARRAY_T(48)`, matching the RF struct's `MAX_HOPS(8) × 6`. |
 | 14 | `authTag` | **Dead on the serial wire.** The AEAD tag never reaches the server — see §9. |
-| 15 | `secondaryMasterMac` | 6-byte MAC. Only meaningful (and only ever set) on `JOIN_ACK`, and only when a secondary/failover master is being designated. See §8/§10. |
-| 16 | `secondaryPublicKey` | 32-byte pubkey, paired with field 15. See §8/§10. |
+| 17 | `authPath` | **Dead on the serial wire.** Never populated. `mesh.options` gives it no `max_size`, so nanopb emits it as a callback field with no handler installed — the master ignores it on decode and never encodes it. (Tags 15/16, the old top-level `secondaryMasterMac`/`secondaryPublicKey`, were retired in protocol v0.6.0; that data now rides in `data[4..42]` — see §8b.) |
 
 ---
 
@@ -325,9 +324,8 @@ implications (see the TOFU note in §8d), not just functional bugs.
 | `messageType` (1) | `4` (`MESH_TYPE_JOIN_ACK`) |
 | `targetMacAddress` (4) | MAC of the node being approved |
 | `public_key` (11) | **The enrolling node's own 32-byte pubkey**, exactly as received in §8a. Used only as a 4-byte fingerprint check further downstream — see §8d, step 1. |
-| `secondaryMasterMac` (15) — optional, dual-master only | MAC of a designated failover master, or omit/leave zero for single-master. See §10. |
-| `secondaryPublicKey` (16) — optional, dual-master only | Pubkey of that failover master, or omit/leave zero. See §10. |
-| `originMacAddress` (3), `data` (6), everything else | **Effectively unused/ignored** by the master's `JOIN_ACK` handler. It only checks `public_key` (non-zero = approve, all-zero = reject) and reads `targetMacAddress`; it does not inspect `originMacAddress` or the raw `data` bytes you send for this message type before acting. |
+| `data` (6) — dual-master only | `data[4..10]` = MAC of a designated failover master, `data[10..42]` = that master's 32-byte pubkey. Leave all-zero (or omit `data`) for single-master. These two ranges are the only bytes of `data` the master reads on a `JOIN_ACK`. See §10. |
+| `originMacAddress` (3), everything else | **Effectively unused/ignored** by the master's `JOIN_ACK` handler. It only checks `public_key` (non-zero = approve, all-zero = reject), reads `targetMacAddress`, and reads the secondary-master ranges of `data`; it does not inspect `originMacAddress` for this message type before acting. |
 
 **Rejection**: if the server sends a `JOIN_ACK` with an all-zero `public_key`, the master logs
 "Server rejected enrollment request" and takes no further action.
