@@ -1,8 +1,19 @@
 #pragma once
 #include <cstdint>
 namespace lattice { namespace mesh { namespace pin {
-// PLACEHOLDER. Regenerate the real header via
-//   python3 tools/gen_master_pubkey_pin.py <masterkey.json> <aa:bb:cc:dd:ee:ff>
+// PLACEHOLDER — compiles, never ships. Regenerate the real header via
+//   python3 tools/gen_master_pubkey_pin.py <LATTICE_PUBKEY> <aa:bb:cc:dd:ee:ff>
+// where <LATTICE_PUBKEY> is the 64-hex key the MASTER BOARD prints over serial
+// at boot ("LATTICE_PUBKEY:..."; or a monitor capture containing that line)
+// and the MAC is that board's WiFi MAC (esptool.py read_mac).
+//
+// MASTER_PUBKEY is the master board's OWN on-device public key: the value it
+// stamps into every JOIN_ACK (MeshMessenger::enrollPeer) and the key leaves
+// derive E2E keys against (E2EKeyLookup.h). It is NOT the hub's
+// data/masterkey.json — that is the hub process's own identity, which no board
+// holds the private half of, so a pin derived from it never matches a real
+// JOIN_ACK (lattice-nodes#126). A factory reset / erase-flash of the master
+// regenerates its keypair: re-run the tool and re-flash every leaf.
 constexpr uint8_t MASTER_PUBKEY[32] = {
     0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

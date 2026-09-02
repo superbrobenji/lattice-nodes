@@ -111,7 +111,10 @@ void Enrollment::processJoinAck(const mesh_message& msg, const uint8_t* /*device
   }
 
   // Master pubkey pin (Phase D, #42): the JOIN_ACK's enrollment_public_key must
-  // match the deployment-provisioned master pubkey pinned at build time. Strong
+  // match the deployment-provisioned master pubkey pinned at build time. That
+  // pin is the master BOARD's own on-device key (its serial LATTICE_PUBKEY:
+  // line, via tools/gen_master_pubkey_pin.py) — the same key E2E ECDH derives
+  // against — never the hub's masterkey.json identity (#126). Strong
   // authentication — an RF-present attacker cannot forge a JOIN_ACK the pin will
   // accept without the master's private key. Runs BEFORE the TOFU origin gate
   // (below) and any state mutation / peer registration. DEV_MODE (compile-time)

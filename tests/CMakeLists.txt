@@ -151,6 +151,17 @@ add_unit_test(test_frame_authorizer   unit/test_frame_authorizer.cpp)
 
 add_unit_test(test_mbedtls_kat        unit/test_mbedtls_kat.cpp)
 
+# tools/gen_master_pubkey_pin.py (#126): the pin must be generated from the
+# master board's LATTICE_PUBKEY line, never the hub's masterkey.json. Pure
+# stdlib unittest; skipped (with a notice) if no python3 is available.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME test_gen_master_pubkey_pin
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_gen_master_pubkey_pin.py)
+else()
+  message(STATUS "python3 not found — skipping test_gen_master_pubkey_pin")
+endif()
+
 # ---- E2E simulation target — SIMULATE_MODE recompiles all firmware sources ----
 add_executable(lattice_e2e
   e2e/scenarios/test_harness_smoke.cpp

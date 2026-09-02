@@ -101,15 +101,21 @@ void FakeHub::approveEnrollment(const uint8_t* nodeMac, const uint8_t* nodePubKe
   mesh_message ack{};
   ack.proto_version = 2;
   ack.message_type = MESH_TYPE_JOIN_ACK;
+  memcpy(ack.origin_mac_address, master_->mac(), 6); // ms.masterMAC
   memcpy(ack.target_mac_address, nodeMac, 6);
-  memcpy(ack.enrollment_public_key, nodePubKey32, 32);
+  // Real wire contract (#126): the hub puts ITS OWN identity here
+  // (ms.masterPublicKey), not the node's key. SerialAdapter::handleCompleteFrame
+  // only checks this non-zero; MeshMessenger::enrollPeer must ignore its value
+  // and stamp the master's on-device key into the mesh-side JOIN_ACK instead.
+  memcpy(ack.enrollment_public_key, HUB_IDENTITY_PUBLIC_KEY, 32);
   // data[0..3] fingerprint: NOT checked here. SerialAdapter::handleCompleteFrame
   // (the master's serial-side JOIN_ACK handler this frame drives) only checks
   // enrollment_public_key non-zero before calling Mesh::enrollPeer. That call
   // in turn sends its OWN mesh-side JOIN_ACK (over ESP-NOW, master -> enrolling
-  // node) with this same pubkey's first 4 bytes as the fingerprint; it is THAT
-  // later frame's data[0..3] that Enrollment::processJoinAck checks, on the
-  // enrolling node, against its own device public key.
+  // node) with the node key it cached from the JOIN_REQUEST, first 4 bytes as
+  // the fingerprint; it is THAT later frame's data[0..3] that
+  // Enrollment::processJoinAck checks, on the enrolling node, against its own
+  // device public key.
   memcpy(ack.data, nodePubKey32, 4);
   // Server-designated secondary master (Phase 4 dual-master failover). Left
   // zeroed by the 2-arg overload above, which SerialAdapter::handleCompleteFrame

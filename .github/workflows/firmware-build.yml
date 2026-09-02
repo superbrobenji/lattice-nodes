@@ -18,7 +18,8 @@ jobs:
           submodules: recursive
 
       # Phase D: real master_pubkey_pin.h is deployer-generated + gitignored.
-      # CI has no masterkey.json, so copy the committed placeholder into place
+      # CI has no master board to read a LATTICE_PUBKEY line from (#126), so copy
+      # the committed placeholder into place
       # so the build compiles. Deployer flashes with the real header.
       - name: Stub master_pubkey_pin.h from placeholder for CI
         run: cp firmware/main/config/master_pubkey_pin.h.example firmware/main/config/master_pubkey_pin.h

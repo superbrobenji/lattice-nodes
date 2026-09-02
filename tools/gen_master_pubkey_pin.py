@@ -1,64 +1,163 @@
 #!/usr/bin/env python3
-"""Generate firmware/main/config/master_pubkey_pin.h from a masterkey.json
-+ master MAC string. Idempotent — overwrites in place.
+"""Generate firmware/main/config/master_pubkey_pin.h from the MASTER BOARD's own
+on-device public key + its MAC. Idempotent — overwrites in place.
 
-Usage: gen_master_pubkey_pin.py <masterkey.json> <aa:bb:cc:dd:ee:ff>
+Usage:
+  gen_master_pubkey_pin.py <LATTICE_PUBKEY> <aa:bb:cc:dd:ee:ff> [--output PATH]
+
+  <LATTICE_PUBKEY>   The master board's public key, as it prints over serial at
+                     boot ("LATTICE_PUBKEY:" + 64 hex chars). Accepted forms:
+                       * the 64 hex chars, with or without the LATTICE_PUBKEY: prefix
+                       * a path to a serial-monitor capture containing that line
+                         (if several appear, the LAST one is used)
+                       * "-" to read such a capture from stdin
+  <aa:bb:cc:dd:ee:ff> The master board's WiFi MAC (esptool.py read_mac).
+
+Which key this is, and why (lattice-nodes#126):
+  Enrollment::processJoinAck compares a JOIN_ACK's enrollment_public_key against
+  lattice::mesh::pin::MASTER_PUBKEY, and E2E ECDH (E2EKeyLookup.h) uses that same
+  field as the master's key. The master stamps its own on-device key there
+  (MeshMessenger::enrollPeer -> enrollment.getPublicKey()), because that is the
+  only key it holds the private half of. So the pin MUST be that key — the one
+  the board prints as LATTICE_PUBKEY: — not the hub's data/masterkey.json.
+  masterkey.json is the hub process's own identity; no board holds its private
+  half, and a pin derived from it can never match what a real master sends.
+
+  A factory reset (reset-button double hold) or `idf.py erase-flash` of the
+  master regenerates its keypair: re-run this tool with the new LATTICE_PUBKEY
+  line and re-flash every leaf. A plain `idf.py flash` keeps the keypair (NVS).
 """
-import base64
-import json
+import argparse
 import re
 import sys
 from pathlib import Path
-from typing import NoReturn
+from typing import IO, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OUT = REPO_ROOT / "firmware/main/config/master_pubkey_pin.h"
+DEFAULT_OUT = REPO_ROOT / "firmware/main/config/master_pubkey_pin.h"
 
-def die(msg) -> NoReturn:
-    print(f"gen_master_pubkey_pin: {msg}", file=sys.stderr)
-    sys.exit(1)
+PUBKEY_LINE_RE = re.compile(r"LATTICE_PUBKEY:\s*([0-9A-Fa-f]{64})")
+BARE_HEX_RE = re.compile(r"^\s*(?:LATTICE_PUBKEY:)?\s*([0-9A-Fa-f]{64})\s*$")
+MASTERKEY_JSON_HELP = (
+    "that looks like the hub's masterkey.json — it is NOT the pin source.\n"
+    "  masterkey.json is the hub process's own identity; no board holds its private half,\n"
+    "  so a pin derived from it never matches the key a real master sends in JOIN_ACK\n"
+    "  (lattice-nodes#126). Use the master BOARD's key instead: boot it with\n"
+    "  `idf.py monitor` and copy its `LATTICE_PUBKEY:<64 hex>` line (or pass a capture\n"
+    "  of that monitor output)."
+)
 
-def main(argv):
-    if len(argv) != 3:
-        die(f"usage: {argv[0]} <masterkey.json> <aa:bb:cc:dd:ee:ff>")
-    keyfile = Path(argv[1])
-    mac_str = argv[2]
-    if not keyfile.is_file():
-        die(f"masterkey.json not found: {keyfile}")
-    data = json.loads(keyfile.read_text())
-    pub_b64 = data.get("publicKey") or data.get("PublicKey")
-    pub_array = data.get("public_key")
-    if pub_b64:
-        pub = base64.b64decode(pub_b64)
-    elif pub_array is not None:
-        pub = bytes(pub_array)
-    else:
-        die("publicKey/public_key field not found in masterkey.json")
-    if len(pub) != 32:
-        die(f"public key wrong length: {len(pub)}")
-    mac_hex = re.sub(r"[^0-9a-fA-F]", "", mac_str)
+
+class PinError(Exception):
+    """Bad input; message is user-facing."""
+
+
+def _pubkey_from_capture(text: str, source: str) -> bytes:
+    found = PUBKEY_LINE_RE.findall(text)
+    if not found:
+        raise PinError(
+            f"no `LATTICE_PUBKEY:<64 hex>` line found in {source}.\n"
+            "  The master board prints it over serial on every boot until enrolled (a\n"
+            "  master never enrolls, so it prints every boot): `idf.py -p <port> monitor`,\n"
+            "  press EN/reset, and copy that line."
+        )
+    distinct = list(dict.fromkeys(k.upper() for k in found))
+    if len(distinct) > 1:
+        print(
+            f"gen_master_pubkey_pin: {source} contains {len(distinct)} different "
+            "LATTICE_PUBKEY values (a factory reset regenerates the key); using the last one.",
+            file=sys.stderr,
+        )
+    return bytes.fromhex(distinct[-1])
+
+
+def resolve_pubkey(arg: str, stdin: Optional[IO[str]] = None) -> bytes:
+    """Turn the first CLI argument into the 32 raw public-key bytes."""
+    m = BARE_HEX_RE.match(arg)
+    if m:
+        return bytes.fromhex(m.group(1))
+    if arg.strip() == "-":
+        return _pubkey_from_capture((stdin or sys.stdin).read(), "stdin")
+    path = Path(arg)
+    if not path.is_file():
+        raise PinError(
+            f"{arg!r} is neither a 64-hex LATTICE_PUBKEY value nor a readable file"
+        )
+    text = path.read_text(errors="replace")
+    if path.suffix.lower() == ".json" or text.lstrip().startswith("{"):
+        raise PinError(f"{path}: {MASTERKEY_JSON_HELP}")
+    return _pubkey_from_capture(text, str(path))
+
+
+def parse_mac(mac_str: str) -> bytes:
+    mac_hex = re.sub(r"[^0-9a-fA-F]", "", mac_str.split("MAC:")[-1])
     if len(mac_hex) != 12:
-        die(f"MAC must be 6 bytes (12 hex chars): got {mac_str}")
-    mac = bytes.fromhex(mac_hex)
+        raise PinError(f"MAC must be 6 bytes (12 hex chars): got {mac_str!r}")
+    return bytes.fromhex(mac_hex)
 
-    def as_c_array(b, per_line=8):
+
+def render_header(pub: bytes, mac: bytes) -> str:
+    if len(pub) != 32 or len(mac) != 6:
+        raise PinError(f"internal: key {len(pub)}B / mac {len(mac)}B")
+
+    def as_c_array(b: bytes, per_line: int = 8) -> str:
         rows = []
         for i in range(0, len(b), per_line):
-            row = ", ".join(f"0x{byte:02X}" for byte in b[i:i+per_line])
+            row = ", ".join(f"0x{byte:02X}" for byte in b[i : i + per_line])
             rows.append("    " + row + ",")
         return "\n".join(rows)
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(
+    mac_str = ":".join(f"{b:02x}" for b in mac)
+    return (
         "#pragma once\n"
         "#include <cstdint>\n"
         "// Generated by tools/gen_master_pubkey_pin.py — do not edit by hand.\n"
+        "// Pins the MASTER BOARD's own on-device identity (its serial LATTICE_PUBKEY:\n"
+        "// line + WiFi MAC), NOT the hub's masterkey.json — see lattice-nodes#126.\n"
+        "// A factory reset / erase-flash of the master regenerates its key: re-run\n"
+        "// the tool and re-flash every leaf.\n"
+        f"//   LATTICE_PUBKEY:{pub.hex().upper()}\n"
+        f"//   MAC: {mac_str}\n"
         "namespace lattice { namespace mesh { namespace pin {\n"
         f"constexpr uint8_t MASTER_PUBKEY[32] = {{\n{as_c_array(pub)}\n}};\n"
         f"constexpr uint8_t MASTER_MAC[6] = {{ {', '.join(f'0x{b:02X}' for b in mac)} }};\n"
         "}}}\n"
     )
-    print(f"wrote {OUT}")
+
+
+def main(argv: List[str], stdin: Optional[IO[str]] = None, stderr: IO[str] = sys.stderr) -> int:
+    parser = argparse.ArgumentParser(
+        prog=Path(argv[0]).name,
+        description="Generate the per-deployment master-pubkey pin header from the master "
+        "board's LATTICE_PUBKEY line and MAC (see module docstring for why not masterkey.json).",
+    )
+    parser.add_argument(
+        "pubkey",
+        metavar="LATTICE_PUBKEY",
+        help="64 hex chars (LATTICE_PUBKEY: prefix optional), a serial-capture file "
+        "containing that line, or '-' for stdin",
+    )
+    parser.add_argument("mac", metavar="aa:bb:cc:dd:ee:ff", help="master board's WiFi MAC")
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=DEFAULT_OUT,
+        help=f"header to write (default: {DEFAULT_OUT.relative_to(REPO_ROOT)})",
+    )
+    args = parser.parse_args(argv[1:])
+    try:
+        pub = resolve_pubkey(args.pubkey, stdin)
+        mac = parse_mac(args.mac)
+        text = render_header(pub, mac)
+    except PinError as e:
+        print(f"gen_master_pubkey_pin: {e}", file=stderr)
+        return 1
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(text)
+    print(f"wrote {args.output}")
+    return 0
+
 
 if __name__ == "__main__":
-    main(sys.argv)
+    sys.exit(main(sys.argv))

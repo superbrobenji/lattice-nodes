@@ -10,6 +10,10 @@
 #include "EEPROM.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "config/master_pubkey_pin_wrapper.h"
+// The (priv, pub) Curve25519 pair whose public half IS the host-test pin
+// (tests/mocks/master_pubkey_pin.h) — i.e. a master provisioned the way
+// tools/gen_master_pubkey_pin.py now requires (#126). Shared with the e2e sim.
+#include "../e2e/harness/MasterKeypairFixture.h"
 
 using namespace lattice::mesh;
 
@@ -1385,6 +1389,88 @@ TEST_F(JoinAckRelayTest, EnrollPeerTwoArgLeavesSecondaryZero) {
   uint8_t zero6[6] = {}, zero32[32] = {};
   EXPECT_EQ(0, memcmp(ack.data + 4, zero6, 6));
   EXPECT_EQ(0, memcmp(ack.data + 10, zero32, 32));
+}
+
+// ─── enrollPeer: JOIN_ACK key == on-device key == pin == E2E identity (#126) ─
+// Enrollment::processJoinAck's master_pubkey_pin check and E2E ECDH
+// (E2EKeyLookup.h: peerE2EKeys/masterE2EKeys key off enrollment.getPrivateKey())
+// both read the JOIN_ACK's enrollment_public_key, so the only value that field
+// can carry is the master's own on-device public key — which is therefore what
+// tools/gen_master_pubkey_pin.py pins (from the board's LATTICE_PUBKEY: line).
+// The server-relayed key on the serial JOIN_ACK (ms.masterPublicKey, the hub's
+// masterkey.json identity) must never be echoed into the mesh-side ACK: it
+// would pass a masterkey.json-derived pin while leaving the leaf sealing
+// uplinks to a key the master holds no private half for — the silent bench
+// failure in #126. This test models a correctly provisioned deployment (pin ==
+// master's on-device key, via the e2e fixture keypair) and asserts the whole
+// chain agrees: ACK key, pin acceptance, registered peer key, and the E2E keys
+// derived on both ends.
+TEST_F(JoinAckRelayTest, EnrollPeerJoinAckCarriesOnDeviceKeyThatPinAndE2EAgreeOn) {
+  lattice::mesh::pin::setTestBypass(false); // pin ACTIVE, as in production
+
+  // Master whose on-device keypair is the fixture pair — its public half IS the
+  // test pin, exactly as a pin generated from a real board's LATTICE_PUBKEY is.
+  Mesh master;
+  memcpy(master.deviceMacAddress, kMasterMac, 6);
+  master.isMaster = true;
+  memcpy(master.enrollment.devicePrivateKey, sim::fixture::MASTER_PRIVATE_KEY, 32);
+  memcpy(master.enrollment.devicePublicKey, sim::fixture::MASTER_PUBLIC_KEY, 32);
+  master.reevaluateRouteTable();
+  ASSERT_EQ(0, memcmp(master.enrollment.getPublicKey(), lattice::mesh::pin::MASTER_PUBKEY, 32))
+      << "fixture precondition: the sim master's on-device pubkey must equal the test pin";
+
+  // Leaf with its own fresh keypair. Constructed AFTER the master so the
+  // Mesh::instance singleton (used by registerPeerWithKeyTrampoline inside
+  // processJoinAck below) is the leaf. The master already cached the leaf's key
+  // from its JOIN_REQUEST (Mesh::handleReceivedMessage, MESH_TYPE_ENROLLMENT).
+  Mesh leaf;
+  memcpy(leaf.deviceMacAddress, kMyMac, 6);
+  leaf.isMaster = false;
+  uint8_t leafPriv[32], leafPub[32];
+  lattice::mesh::crypto::generateKeypair(leafPriv, leafPub);
+  memcpy(leaf.enrollment.devicePrivateKey, leafPriv, 32);
+  memcpy(leaf.enrollment.devicePublicKey, leafPub, 32);
+  ASSERT_TRUE(lattice::mesh::registerPeerWithKey(kMyMac, leafPub, /*allowRekey=*/false,
+                                                 master.peers, master.enrollment, false));
+
+  // The hub's own identity as relayed on the serial JOIN_ACK: a real, unrelated
+  // keypair that no board holds the private half of (masterkey.json).
+  uint8_t hubPriv[32], hubIdentityKey[32];
+  lattice::mesh::crypto::generateKeypair(hubPriv, hubIdentityKey);
+  ASSERT_NE(0, memcmp(hubIdentityKey, lattice::mesh::pin::MASTER_PUBKEY, 32));
+
+  resetEspNowMock();
+  master.enrollPeer(kMyMac, hubIdentityKey);
+  ASSERT_TRUE(sawBroadcastOfType(MESH_TYPE_JOIN_ACK));
+  mesh_message ack = lastEspNowBroadcastOfType(MESH_TYPE_JOIN_ACK);
+
+  EXPECT_EQ(0, memcmp(ack.enrollment_public_key, master.enrollment.getPublicKey(), 32))
+      << "JOIN_ACK must carry the master's own on-device public key";
+  EXPECT_EQ(0, memcmp(ack.enrollment_public_key, lattice::mesh::pin::MASTER_PUBKEY, 32))
+      << "...which is exactly what a correctly generated pin holds";
+  EXPECT_NE(0, memcmp(ack.enrollment_public_key, hubIdentityKey, 32))
+      << "the server-relayed hub identity key must never be echoed into the mesh JOIN_ACK";
+
+  // Leaf side, pin active: the ACK must pass the pin and register the master
+  // under its on-device key.
+  leaf.processJoinAck(ack);
+  ASSERT_TRUE(leaf.isEnrolled()) << "pin check must accept the master's on-device key";
+  PeerInfo* masterPeer = leaf.peers.find(kMasterMac);
+  ASSERT_NE(masterPeer, nullptr) << "master must be registered as the leaf's peer";
+  EXPECT_EQ(0, memcmp(masterPeer->publicKey, master.enrollment.getPublicKey(), 32));
+
+  // And E2E agrees end to end: the leaf's k_up/k_down toward its master equal
+  // the master's k_up/k_down for this leaf — an uplink the leaf seals is one the
+  // master can actually open (the half that failed silently in #126).
+  memcpy(leaf.currentMaster.mac, kMasterMac, 6);
+  const uint8_t *leafUp = nullptr, *leafDown = nullptr;
+  const uint8_t *masterUp = nullptr, *masterDown = nullptr;
+  ASSERT_TRUE(masterE2EKeys(leaf.currentMaster, leaf.peers, leaf.enrollment, leaf.e2eKeys, &leafUp,
+                            &leafDown));
+  ASSERT_TRUE(
+      peerE2EKeys(kMyMac, master.peers, master.enrollment, master.e2eKeys, &masterUp, &masterDown));
+  EXPECT_EQ(0, memcmp(leafUp, masterUp, 32)) << "k_up must agree on both ends";
+  EXPECT_EQ(0, memcmp(leafDown, masterDown, 32)) << "k_down must agree on both ends";
 }
 
 // ─── Config-opcode injection resistance (CRITICAL finding) ──────────────────
