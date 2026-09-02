@@ -153,8 +153,10 @@ hold you don't remember, or one that happened mid-flash-noise), holding it again
 leaf. If you get 2 blinks and wanted master, hold it again.
 
 The device restarts automatically ~2 seconds after the blink. Once back up, the display should
-show a steady value (not flashing dashes) — the hub side will confirm connectivity via
-`/api/v1/status`'s `mesh.masterOnline`.
+show `0` with its decimal point lit (not flashing dashes) — solid for the pinned primary, blinking
+if this board's MAC isn't the pinned `MASTER_MAC` (see the display table in
+[`getting_started.md`](getting_started.md#seven-segment-display-optional)) — and the hub side will
+confirm connectivity via `/api/v1/status`'s `mesh.masterOnline`.
 
 ## Verifying it worked
 
@@ -184,10 +186,10 @@ changing that) — so setting it up means:
    correctly in dual-master mode until every board is.
 3. **Both boards get the exact same `master_pubkey_pin.h`** — the one generated in Step 3 above,
    from the *primary's* `LATTICE_PUBKEY` and MAC. Do **not** regenerate a pin file from the second
-   board's own key or MAC; the pin is a single mesh-wide primary identity, not a per-board thing (see
-   [lattice-nodes#118](https://github.com/superbrobenji/lattice-nodes/issues/118) for how a board
-   knows whether *it itself* is primary or secondary — it's a local comparison against this same
-   pinned MAC, no second pin needed).
+   board's own key or MAC; the pin is a single mesh-wide primary identity, not a per-board thing. A
+   board works out whether *it itself* is primary or secondary by comparing its own MAC against this
+   same pinned MAC — no second pin needed — and shows the result on the seven-segment display: solid
+   decimal point = primary, blinking decimal point = secondary.
 4. **Read the second board's MAC and flash it**, same as Steps 1/5/6 above, using its own device
    path.
 5. **Bring it up as master via the config button**, same as Step 7. It boots as leaf first, same
@@ -250,7 +252,3 @@ grep -n '<a line from the fix>' <file>   # confirms the fix is actually there ri
   [#121](https://github.com/superbrobenji/lattice-nodes/issues/121).
 - [lattice-nodes#116](https://github.com/superbrobenji/lattice-nodes/issues/116) — `DUAL_MASTER_MODE`
   should be a runtime setting, not a compile-time flag requiring a mesh-wide reflash to toggle.
-- [lattice-nodes#118](https://github.com/superbrobenji/lattice-nodes/issues/118) — the display's
-  master indicator (decimal point) doesn't currently render for a master whose node ID is 0, which
-  is every master today. Don't rely on the display to distinguish master from leaf yet, let alone
-  primary from secondary.
