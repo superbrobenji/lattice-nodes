@@ -298,7 +298,9 @@ static void initDrivers() {
       .parity = UART_PARITY_DISABLE,
       .stop_bits = UART_STOP_BITS_1,
       .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+      .rx_flow_ctrl_thresh = 0,
       .source_clk = UART_SCLK_DEFAULT,
+      .flags = {},
   };
   ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, 1024, 0, 0, NULL, 0)); // RX 1024, TX unbuffered
   ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uartCfg));

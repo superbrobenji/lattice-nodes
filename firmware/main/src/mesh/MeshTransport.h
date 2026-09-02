@@ -154,10 +154,8 @@ private:
   TaskHandle_t drainNotifyHandle_ = nullptr;
 
   static void onDataSentCallback(const wifi_tx_info_t* mac_addr, esp_now_send_status_t status);
-  void IRAM_ATTR onDataRecvCallback(const esp_now_recv_info* mac, const uint8_t* incomingData,
-                                    int len);
-  static void IRAM_ATTR dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data,
-                                           int len);
+  void onDataRecvCallback(const esp_now_recv_info* mac, const uint8_t* incomingData, int len);
+  static void dataRecvTrampoline(const esp_now_recv_info* mac_addr, const uint8_t* data, int len);
 };
 
 } // namespace mesh
