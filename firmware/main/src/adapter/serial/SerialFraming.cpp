@@ -53,34 +53,10 @@ size_t SerialFraming::encode(const lattice::mesh::mesh_message& msg, uint8_t* ou
     }
   }
 
-  // secondary master identity (Phase 4 dual-master failover): the server
-  // stamps this onto a JOIN_ACK to designate a failover master alongside
-  // enrollment approval (see SerialAdapter::handleCompleteFrame /
-  // Mesh::enrollPeer's 4-arg overload). Protocol v0.6.0 (wire shrink §8)
-  // packs this into the JOIN_ACK data[] payload rather than top-level
-  // MeshMessage fields: data[4..10] = secondaryMasterMac,
-  // data[10..42] = secondaryPublicKey. Only present, and only meaningful, on
-  // JOIN_ACK; encode only when non-zero so ordinary single-master JOIN_ACKs
-  // stay byte-identical to before this field existed.
-  if (msg.message_type == MESH_TYPE_JOIN_ACK) {
-    const uint8_t* secondaryMasterMac = msg.data + 4;
-    const uint8_t* secondaryPublicKey = msg.data + 10;
-    bool hasSecondary = false;
-    for (int i = 0; i < 6; ++i) {
-      if (secondaryMasterMac[i]) {
-        hasSecondary = true;
-        break;
-      }
-    }
-    if (hasSecondary) {
-      pbMsg.has_secondaryMasterMac = true;
-      pbMsg.secondaryMasterMac.size = 6;
-      memcpy(pbMsg.secondaryMasterMac.bytes, secondaryMasterMac, 6);
-      pbMsg.has_secondaryPublicKey = true;
-      pbMsg.secondaryPublicKey.size = 32;
-      memcpy(pbMsg.secondaryPublicKey.bytes, secondaryPublicKey, 32);
-    }
-  }
+  // Dual-master secondary identity (Phase 4 failover) has no dedicated
+  // fields since protocol v0.6.0 (wire shrink §8): it rides inside the
+  // JOIN_ACK data[] payload copied above (data[4..10] = secondary MAC,
+  // data[10..42] = secondary pubkey), so nothing more to encode here.
 
   pb_ostream_t stream = pb_ostream_from_buffer(out, maxLen);
   if (!pb_encode(&stream, mesh_MeshMessage_fields, &pbMsg)) {
@@ -125,20 +101,9 @@ bool SerialFraming::decode(const uint8_t* data, size_t len, lattice::mesh::mesh_
     memcpy(outMsg.enrollment_public_key, pbMsg.public_key.bytes, 32);
   }
 
-  // Protocol v0.6.0 (wire shrink §8): secondary master identity lives in
-  // outMsg.data[4..42], not top-level fields. See encode() above. data[] is
-  // now a general-purpose payload shared by every message type, so also
-  // gate on message_type == JOIN_ACK (defense in depth): if the hub ever
-  // mis-sets these has_* flags on a non-JOIN_ACK frame, this must not
-  // silently corrupt that frame's data payload.
-  if (outMsg.message_type == MESH_TYPE_JOIN_ACK) {
-    if (pbMsg.has_secondaryMasterMac) {
-      memcpy(outMsg.data + 4, pbMsg.secondaryMasterMac.bytes, 6);
-    }
-    if (pbMsg.has_secondaryPublicKey) {
-      memcpy(outMsg.data + 10, pbMsg.secondaryPublicKey.bytes, 32);
-    }
-  }
+  // Protocol v0.6.0 (wire shrink §8): a JOIN_ACK's secondary master identity
+  // arrives inside data[4..42], already copied above — there are no
+  // top-level fields for it (SerialAdapter reads it from outMsg.data).
 
   // For server-to-device messages (JOIN_ACK, SERIAL_CMD_BROADCAST) the MAC
   // fields on the wire are meaningful and must not be overwritten.

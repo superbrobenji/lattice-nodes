@@ -1,0 +1,46 @@
+name: Proto Sync
+
+# Guards the checked-in serial-link nanopb codec
+# (firmware/main/src/mesh/serialization/mesh.pb.{h,c}) against drifting from
+# the lattice-protocol submodule's proto/mesh.proto + proto/mesh.options.
+# The generated files are committed so the firmware builds without a Python
+# toolchain, which is exactly how retired v0.6.0 fields (15/16) lingered in
+# firmware unnoticed (#113). Regenerates with the pinned nanopb generator and
+# fails if the result differs from what is committed — same pattern as
+# lattice-protocol's `make check` and lattice-hub's `proto-sync` job.
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  proto-sync:
+    name: Proto sync (mesh.pb.h)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned nanopb generator (+ protoc via grpcio-tools)
+        # The generator must match the vendored runtime version in
+        # nanopb/pb.h (tools/gen_mesh_pb.sh refuses to run otherwise), so
+        # read the pin from there rather than duplicating it here.
+        # grpcio-tools supplies the protoc binary nanopb_generator shells
+        # out to; the emitted header does not depend on the protoc version.
+        run: |
+          ver=$(sed -n 's/^#define NANOPB_VERSION "nanopb-\(.*\)"$/\1/p' \
+            firmware/main/src/mesh/serialization/nanopb/pb.h)
+          echo "nanopb runtime pin: ${ver}"
+          python -m pip install "nanopb==${ver}" "grpcio-tools==1.80.0"
+
+      - name: Regenerate mesh.pb.h/.c and fail if drifted from committed
+        run: tools/gen_mesh_pb.sh --check

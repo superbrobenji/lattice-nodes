@@ -48,6 +48,8 @@ The workflow runs automatically on every push and PR:
 - **unit-tests** — CMake build + CTest (Linux native, no ESP32 toolchain needed)
 - **lint-format** — `clang-format --dry-run --Werror` over all `main/src/*.{h,cpp}`
 - **static-analysis** — `cppcheck` with `--error-exitcode=1`
+- **proto-sync** — regenerates `mesh.pb.h`/`.c` from the `lattice-protocol` submodule and fails on
+  drift (`tools/gen_mesh_pb.sh --check`)
 
 PR merges are blocked until all three jobs are green.
 

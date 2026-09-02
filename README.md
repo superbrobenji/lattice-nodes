@@ -21,7 +21,10 @@ This repo is the **firmware** piece of a three-repo system:
 - **[`lattice-protocol`](https://github.com/superbrobenji/lattice-protocol)** — the shared
   wire-format source of truth. Vendored here as a git submodule at
   [`firmware/main/lib/lattice-protocol`](firmware/main/lib/lattice-protocol) (currently pinned to
-  `v0.6.0`); `lattice-hub` imports the same schema as a Go module.
+  `v0.6.0`); `lattice-hub` imports the same schema as a Go module. The master's serial-link
+  nanopb codec (`firmware/main/src/mesh/serialization/mesh.pb.{h,c}`) is generated from that
+  submodule — after bumping the pin, regenerate it with `tools/gen_mesh_pb.sh` (see
+  [Regenerating the serial nanopb codec](#regenerating-the-serial-nanopb-codec)).
 
 See each sibling repo's own README for details — this repo only describes the firmware.
 
@@ -223,6 +226,26 @@ They run on every PR to `main` in their own **E2E Tests** GitHub Action (also av
 via `workflow_dispatch`); the unit-test job stays unit-only via `--label-exclude e2e`. A few
 scenarios are committed disabled where they depend on unimplemented multi-hop data routing — see
 [`docs/design-gaps/multihop-data-uplink.md`](docs/design-gaps/multihop-data-uplink.md).
+
+### Regenerating the serial nanopb codec
+
+The master ↔ server serial link carries a nanopb-encoded `mesh_MeshMessage`. Its codec is generated
+from the `lattice-protocol` submodule's `proto/mesh.proto` + `proto/mesh.options` and checked in at
+`firmware/main/src/mesh/serialization/mesh.pb.{h,c}` so the firmware builds without a Python
+toolchain. Whenever the submodule pin changes, regenerate and commit the result — never hand-edit
+the generated files:
+
+```bash
+python3 -m pip install "nanopb==0.4.9.1"   # must match NANOPB_VERSION in
+                                           # firmware/main/src/mesh/serialization/nanopb/pb.h
+tools/gen_mesh_pb.sh          # regenerate in place
+tools/gen_mesh_pb.sh --check  # what CI runs: exit 1 if the committed files are stale
+```
+
+`nanopb_generator` shells out to `protoc`; if you don't have one installed,
+`python3 -m pip install grpcio-tools` supplies a bundled fallback. The **Proto Sync** GitHub Action
+(`.github/workflows/proto-sync.yml`) runs the `--check` form on every PR, so a submodule bump
+without a matching regen fails CI.
 
 ### Adding a New Adapter
 
