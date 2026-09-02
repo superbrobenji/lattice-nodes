@@ -5,23 +5,6 @@
 #include <cstdarg>
 #include <cstdio>
 
-#ifndef LATTICE_LOG_LEVEL
-#define LATTICE_LOG_LEVEL 3 // 0=none 1=error 2=warn 3=info 4=debug
-#endif
-
-#if LATTICE_LOG_LEVEL >= 4
-#define LOG_D(tag, fmt, ...)                                                                       \
-  do {                                                                                             \
-    char _buf[128];                                                                                \
-    snprintf(_buf, sizeof(_buf), fmt, ##__VA_ARGS__);                                              \
-    Logger::logln(tag, _buf, LogLevel::LOG_DEBUG);                                                 \
-  } while (0)
-#else
-#define LOG_D(tag, fmt, ...)                                                                       \
-  do {                                                                                             \
-  } while (0)
-#endif
-
 // ---------------------------------------------------------------------------------------------
 // LATTICE_LOG / LATTICE_LOGLN — compile-time log-level gating (design doc §1, Phase G).
 //
@@ -54,15 +37,14 @@
 // LOG_NONE they ran (and the format strings stayed in .rodata) even though the
 // LOGLN call itself folded to ((void)0). LATTICE_LOGF closes that gap by gating the
 // snprintf and its format string inside the same #if as LATTICE_LOG/LATTICE_LOGLN
-// above (mirrors the LOG_D pattern), so under LOG_NONE the whole call — buffer,
+// above, so under LOG_NONE the whole call — buffer,
 // snprintf, and format-string literal — folds to ((void)0) and is eligible for the
 // linker to drop from .rodata via -fdata-sections/--gc-sections.
 //
 // Buffer size: 128 bytes. Audited every existing snprintf+LATTICE_LOGLN call site
 // being migrated onto this macro; the largest local buffer among them was 96 bytes
 // (Error.h checkEsp, ErrorCore.cpp signalError, EepromCore.cpp persistOrEscalate,
-// SerialAdapter.cpp onMeshDataImpl). 128 covers all of them with headroom, and
-// matches LOG_D's existing buffer size above for consistency.
+// SerialAdapter.cpp onMeshDataImpl). 128 covers all of them with headroom.
 #if LATTICE_DEFAULT_LOG_LEVEL == LATTICE_LOG_LEVEL_NONE
 #define LATTICE_LOGF(tag, level, fmt, ...) ((void)0)
 #else
