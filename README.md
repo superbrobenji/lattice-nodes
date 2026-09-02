@@ -120,8 +120,9 @@ idf.py -p <PORT> flash
 ```
 
 The **first** `idf.py build` on a fresh clone will fail until you generate
-`firmware/main/config/master_pubkey_pin.h` (a gitignored, per-deployment file that pins the hub's
-master identity into the firmware) via `tools/gen_master_pubkey_pin.py` — this and every other
+`firmware/main/config/master_pubkey_pin.h` (a gitignored, per-deployment file that pins the master
+board's own identity — its serial `LATTICE_PUBKEY:` line + MAC, *not* the hub's `masterkey.json` —
+into the firmware) via `tools/gen_master_pubkey_pin.py` — this and every other
 first-time-setup step (including a build-free walkthrough for readers without prior ESP32
 experience) is covered in full in
 [`docs/getting_started.md`](docs/getting_started.md).
@@ -130,7 +131,7 @@ experience) is covered in full in
 than the one above — Docker Desktop can't pass a host USB-serial device into `lattice-hub`'s
 orchestrator container, and a fresh board's first boot has its own set of gotchas (manual
 BOOT-button entry, the config-button toggle-not-set role semantics, generating a pin file against
-a *real* hub key vs. the docs' synthetic bench-test one). See
+the master board's *real* printed key vs. the docs' synthetic bench-test one). See
 [`docs/macos_dev_bringup.md`](docs/macos_dev_bringup.md) for the full walkthrough.
 
 ---
