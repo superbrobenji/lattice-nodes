@@ -48,36 +48,51 @@ esptool.py --port /dev/cu.usbserial-0001 read_mac
 
 Note the `MAC: xx:xx:xx:xx:xx:xx` line.
 
-## Step 2: Get a real `masterkey.json` from the hub
+## Step 2: Get the master board's own public key (`LATTICE_PUBKEY`)
 
-Follow `lattice-hub`'s doc to get its orchestrator running with `MASTER_MAC` set to the value from
-Step 1. Once it's started once, it will have generated
-`../lattice-hub/server/orchestrator/data/masterkey.json` (or wherever `MASTER_KEY_PATH` points).
+The pin every leaf compiles in is the **master board's own on-device key** — the one it prints
+over serial at boot as `LATTICE_PUBKEY:<64 hex chars>` — together with its MAC from Step 1. It is
+**not** the hub's `data/masterkey.json`: that file is the hub process's *own* identity, no board
+holds its private half, and a pin derived from it can never match the key a real master sends in
+its JOIN_ACK (the leaf drops every ACK with `JOIN_ACK master pubkey mismatch pin`; see
+[lattice-nodes#126](https://github.com/superbrobenji/lattice-nodes/issues/126)). Leave
+`masterkey.json` where the hub put it — you never need to copy it anywhere.
 
-Copy it into this repo temporarily:
+The board only prints its key once it's running firmware, so the very first build of the master
+uses a placeholder pin (the master never checks the pubkey pin against itself, so this is safe):
 
 ```bash
-cp ../lattice-hub/server/orchestrator/data/masterkey.json ./masterkey.json
+cp firmware/main/config/master_pubkey_pin.h.example firmware/main/config/master_pubkey_pin.h
 ```
 
-**⚠️ This file contains the hub's private key.** Delete it again as soon as Step 3 is done — don't
-commit it, don't leave it lying around.
+then build, flash and boot the master once (Steps 4–6 below) and copy its `LATTICE_PUBKEY:` line
+from `idf.py monitor`. A master prints this line on **every** boot (it never "enrolls", so the
+line never goes away) — reset the board with the monitor open if you missed it. Keeping the
+monitor output in a file is handy: `idf.py -p /dev/cu.usbserial-0001 monitor | tee master-boot.log`.
 
 ## Step 3: Generate the pin file
 
+With the key from Step 2 and the MAC from Step 1:
+
 ```bash
-python3 tools/gen_master_pubkey_pin.py masterkey.json <MAC from Step 1>
-rm masterkey.json
+python3 tools/gen_master_pubkey_pin.py LATTICE_PUBKEY:<64 hex chars> <MAC from Step 1>
+# or let it pull the line out of a monitor capture:
+python3 tools/gen_master_pubkey_pin.py master-boot.log <MAC from Step 1>
 ```
 
-This writes `firmware/main/config/master_pubkey_pin.h` (gitignored, per-deployment).
+This (re)writes `firmware/main/config/master_pubkey_pin.h` (gitignored, per-deployment). Rebuild,
+and flash **every leaf** with this build. Re-flash the master too so all boards share one build —
+a plain `idf.py flash` keeps the master's keypair (it lives in NVS), so its `LATTICE_PUBKEY` does
+not change.
 
-> **Gotcha:** the real `masterkey.json` a running hub produces is `{"public_key": [int, int, ...],
-> "private_key": [...]}` — plain JSON int arrays, from Go's `[32]byte` struct fields. It is **not**
-> the `{"publicKey": "<base64>"}` shape used by `getting_started.md`'s throwaway-key bench-test
-> example. `gen_master_pubkey_pin.py` handles both formats as of `15bf003` — if you're on an older
-> checkout, this step will fail with `publicKey field not found in masterkey.json` against a real
-> hub key even though it works fine against the docs' synthetic example.
+> **Gotcha — the master's key is not permanent.** A factory reset (reset-button double hold, see
+> `getting_started.md` §11) or `idf.py erase-flash` on the master regenerates its keypair. Every
+> leaf's compiled-in pin is then stale and enrollment silently fails until you repeat Steps 2–3
+> and re-flash all leaves. Prefer `idf.py flash` over `erase-flash` on a working master.
+
+> **Gotcha:** if you're on a checkout older than this section, `gen_master_pubkey_pin.py` took a
+> `masterkey.json` and produced a pin that could never match a real board — that was #126. The
+> current tool refuses `.json` input outright and tells you what to pass instead.
 
 ## Step 4: Configure `project_config.h`
 
@@ -168,8 +183,8 @@ changing that) — so setting it up means:
    `DUAL_MASTER_MODE=false` build won't misbehave on its own, but the mesh as a whole isn't
    correctly in dual-master mode until every board is.
 3. **Both boards get the exact same `master_pubkey_pin.h`** — the one generated in Step 3 above,
-   from the *primary's* MAC. Do **not** regenerate a pin file from the second board's own MAC; the
-   pin is a single mesh-wide primary identity, not a per-board thing (see
+   from the *primary's* `LATTICE_PUBKEY` and MAC. Do **not** regenerate a pin file from the second
+   board's own key or MAC; the pin is a single mesh-wide primary identity, not a per-board thing (see
    [lattice-nodes#118](https://github.com/superbrobenji/lattice-nodes/issues/118) for how a board
    knows whether *it itself* is primary or secondary — it's a local comparison against this same
    pinned MAC, no second pin needed).
@@ -189,7 +204,7 @@ changing that) — so setting it up means:
 | Secondary master | `ec:64:c9:5d:22:20` | `/dev/cu.usbserial-0001` |
 
 Both boards were flashed from the identical build (`DUAL_MASTER_MODE=true`, same
-`master_pubkey_pin.h` pinned to the primary's MAC above). Bench-verified failover in both
+`master_pubkey_pin.h` pinned to the primary's key and MAC above). Bench-verified failover in both
 directions: unplugging either master left the other's health-report stream to the hub completely
 uninterrupted (confirmed via `/tmp/orchestrator.log` — each board's reports kept arriving on
 schedule regardless of the other's state). Replugging never self-healed on the hub side in either
@@ -227,6 +242,12 @@ grep -n '<a line from the fix>' <file>   # confirms the fix is actually there ri
   *restart* itself doesn't fully recover a connection (read loop gets stuck silently). If a fresh
   restart doesn't produce a health report within the normal ~30-60s interval, try restarting again
   rather than assuming the board itself is broken.
+- [lattice-nodes#126](https://github.com/superbrobenji/lattice-nodes/issues/126) — the pin and
+  E2E crypto share one JOIN_ACK field, so the pin *must* be the master board's own key (Steps 2–3
+  above). Pins generated from `masterkey.json` by older checkouts never enrolled anything on a real
+  bench. A cleaner split of the two identities is tracked in
+  [#120](https://github.com/superbrobenji/lattice-nodes/issues/120) /
+  [#121](https://github.com/superbrobenji/lattice-nodes/issues/121).
 - [lattice-nodes#116](https://github.com/superbrobenji/lattice-nodes/issues/116) — `DUAL_MASTER_MODE`
   should be a runtime setting, not a compile-time flag requiring a mesh-wide reflash to toggle.
 - [lattice-nodes#117](https://github.com/superbrobenji/lattice-nodes/issues/117) — raising

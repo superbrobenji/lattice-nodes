@@ -11,6 +11,12 @@
 // so it loads it instead of generating a random one. MASTER_PUBLIC_KEY below
 // must equal tests/mocks/master_pubkey_pin.h's MASTER_PUBKEY exactly.
 //
+// That identity (pin == the master board's own on-device key) is exactly what
+// a real deployment must satisfy too (#126): tools/gen_master_pubkey_pin.py
+// derives the pin from the board's serial LATTICE_PUBKEY: line, never from the
+// hub's masterkey.json. tests/tools/test_gen_master_pubkey_pin.py checks the
+// two committed fixtures agree byte-for-byte.
+//
 // MUST be a real (priv, pub) pair — priv's Curve25519 scalar-mult public point
 // must equal pub — otherwise ECDH between the master and any enrolled node
 // produces mismatched shared secrets and E2E-sealed traffic silently fails to

@@ -30,16 +30,18 @@ firmware/main/config/master_pubkey_pin_wrapper.h:11:4: error: "firmware/main/con
 Generate it via tools/gen_master_pubkey_pin.py or build with -DLATTICE_ALLOW_EXAMPLE_PIN=1 (DEV_MODE only)."
 ```
 
-The file compiles the hub's real master Curve25519 public key + MAC into the firmware
-so nodes can authenticate `JOIN_ACK` against a pinned identity. It is gitignored and
-per-deployment — generate it with:
+The file compiles the master board's own Curve25519 public key (the `LATTICE_PUBKEY:`
+line it prints over serial at boot — *not* the hub's `masterkey.json`, see
+[#126](https://github.com/superbrobenji/lattice-nodes/issues/126)) + its MAC into the
+firmware so nodes can authenticate `JOIN_ACK` against a pinned identity. It is gitignored
+and per-deployment — generate it with:
 
 ```bash
-python3 tools/gen_master_pubkey_pin.py <path-to-masterkey.json> <master-mac-address>
+python3 tools/gen_master_pubkey_pin.py <LATTICE_PUBKEY hex or monitor capture> <master-mac-address>
 ```
 
-See `docs/getting_started.md` for the full first-build walkthrough (where to get
-`masterkey.json`, the `DEV_MODE`-only `-DLATTICE_ALLOW_EXAMPLE_PIN=1` escape hatch, and
+See `docs/getting_started.md` for the full first-build walkthrough (where the
+`LATTICE_PUBKEY` comes from, the `DEV_MODE`-only `-DLATTICE_ALLOW_EXAMPLE_PIN=1` escape hatch, and
 why it isn't shippable) — not duplicated here. The measurements below were taken after
 generating this header with a throwaway, non-production key; the generated header is a
 fixed-size `constexpr uint8_t[32]`/`uint8_t[6]` pair regardless of key content, so it
