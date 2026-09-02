@@ -177,7 +177,7 @@ init failure or an unset transmit callback from the code alone — the numeric c
 disambiguate. The only thing that distinguishes them is the log message passed to `fail()`
 (e.g. "PIR_Adapter: PIR hardware failed to initialize." vs. "Adapter: Transmit function not set"),
 and by default that message is **compiled out**: `LATTICE_LOGLN` folds to `((void)0)` when
-`LATTICE_DEFAULT_LOG_LEVEL` is `LATTICE_LOG_LEVEL_NONE` (the `project_config.h` default), so on a
+`LATTICE_DEFAULT_LOG_LEVEL` is `LATTICE_LOG_LEVEL_NONE` (the `src/logging/LogLevelConfig.h` default), so on a
 production build there is genuinely no way to tell these apart remotely — only the on-device
 7-segment code, full stop. If you need to disambiguate a collision in the field, temporarily raise
 the log level and reproduce, or narrow by which subsystem could plausibly be active at the time.

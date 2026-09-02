@@ -229,10 +229,6 @@ grep -n '<a line from the fix>' <file>   # confirms the fix is actually there ri
   rather than assuming the board itself is broken.
 - [lattice-nodes#116](https://github.com/superbrobenji/lattice-nodes/issues/116) — `DUAL_MASTER_MODE`
   should be a runtime setting, not a compile-time flag requiring a mesh-wide reflash to toggle.
-- [lattice-nodes#117](https://github.com/superbrobenji/lattice-nodes/issues/117) — raising
-  `DEFAULT_LOG_LEVEL` above `LOG_NONE` for bench debugging currently doesn't compile cleanly out of
-  the box (several files, plus the override mechanism itself is fragile to include order). If you
-  need to bench-debug with real log output, read that issue first.
 - [lattice-nodes#118](https://github.com/superbrobenji/lattice-nodes/issues/118) — the display's
   master indicator (decimal point) doesn't currently render for a master whose node ID is 0, which
   is every master today. Don't rely on the display to distinguish master from leaf yet, let alone

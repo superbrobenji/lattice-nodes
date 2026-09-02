@@ -204,7 +204,7 @@ static inline void validateServerConfiguration() {
         "CONFIG",
         "WARNING: SERIAL_ADAPTER with logging enabled will interfere with server communication",
         LogLevel::LOG_WARN);
-    Logger::logln("CONFIG", "Set DEFAULT_LOG_LEVEL = LOG_NONE in project_config.h",
+    Logger::logln("CONFIG", "Set LATTICE_DEFAULT_LOG_LEVEL = LOG_NONE (4) in LogLevelConfig.h",
                   LogLevel::LOG_WARN);
   }
 }
