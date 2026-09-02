@@ -11,6 +11,8 @@
 namespace lattice {
 namespace mesh {
 
+using namespace lattice::utils;
+
 mesh_message MeshMessenger::buildMessage(adapter_types type, const uint8_t* data,
                                          MeshMessageType msgType, const uint8_t* deviceMac,
                                          const MasterInfo& currentMaster,

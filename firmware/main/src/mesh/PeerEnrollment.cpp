@@ -10,6 +10,8 @@
 namespace lattice {
 namespace mesh {
 
+using namespace lattice::utils;
+
 // Moved verbatim from Mesh::registerPeerWithKey (Mesh.cpp:756-794 pre-Task-10)
 // — only change: `peers`/`enrollment`/`dualMasterMode` are now explicit
 // parameters instead of implicit Mesh member access. The

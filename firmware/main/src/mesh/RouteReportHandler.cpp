@@ -11,6 +11,8 @@
 namespace lattice {
 namespace mesh {
 
+using namespace lattice::utils;
+
 bool RouteReportHandler::sendRouteReport(bool isMaster, UplinkRouter& uplinkRouter,
                                          MasterInfo& currentMaster, PeerRegistry& peers,
                                          NeighborTable& neighbors, Enrollment& enrollment,
