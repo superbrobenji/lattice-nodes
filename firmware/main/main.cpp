@@ -14,6 +14,9 @@
 #include "src/app/BootManager.h"
 #include "src/app/DisplayManager.h"
 #include "src/app/ButtonHandler.h"
+#include "src/network/hw_mac.h"
+#include "src/network/MacEq.h"
+#include "config/master_pubkey_pin_wrapper.h"
 #include "project_config.h"
 #include <esp_wifi.h>
 #include <memory>
@@ -145,9 +148,19 @@ extern "C" void housekeeping_task_fn(void*) {
 
     // Display state machine: show node identity on 7-segment display
     if (lattice::config::ENABLE_SEVSEG_DISPLAY) {
-      bool enrolled = mesh.isEnrolled() || mesh.getIsMaster();
+      const bool isMaster = mesh.getIsMaster();
+      bool enrolled = mesh.isEnrolled() || isMaster;
       uint8_t nodeId = lattice::eeprom::loadNodeId();
-      lattice::app::DisplayManager::tick(sevenSeg, enrolled, mesh.getIsMaster(), nodeId);
+      // Primary vs. secondary master is a purely local comparison (#118):
+      // every board in a deployment is flashed with the primary's pin file,
+      // so a master whose own MAC is pin::MASTER_MAC is the primary and any
+      // other master is the DUAL_MASTER_MODE secondary. readOwnMac() is a
+      // 6-byte memcpy from the boot-time cache (hw_mac.h) — cheap at 100 Hz.
+      uint8_t ownMac[6];
+      lattice::hw::readOwnMac(ownMac);
+      const bool isPrimaryMaster =
+          isMaster && lattice::mac::eq(ownMac, lattice::mesh::pin::MASTER_MAC);
+      lattice::app::DisplayManager::tick(sevenSeg, enrolled, isMaster, isPrimaryMaster, nodeId);
     }
 
     // Enrollment state machine: non-master nodes that are not yet enrolled
