@@ -10,6 +10,8 @@
 #include "EEPROM.h"
 #include "lib/lattice-protocol/c/opcodes.h"
 #include "config/master_pubkey_pin_wrapper.h"
+static_assert(lattice::mesh::pin::MASTER_MAC[5] == 0x01,
+              "host tests must use tests/mocks/master_pubkey_pin.h");
 // The (priv, pub) Curve25519 pair whose public half IS the host-test pin
 // (tests/mocks/master_pubkey_pin.h) — i.e. a master provisioned the way
 // tools/gen_master_pubkey_pin.py now requires (#126). Shared with the e2e sim.
